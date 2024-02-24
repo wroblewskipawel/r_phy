@@ -1,9 +1,12 @@
 mod debug;
+mod device;
 mod surface;
+mod swapchain;
 
 use super::Renderer;
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
+use device::VulkanDevice;
 use std::{
     error::Error,
     ffi::{c_char, CStr},
@@ -12,6 +15,7 @@ use std::{
 use surface::VulkanSurface;
 use winit::window::Window;
 pub(super) struct VulkanRenderer {
+    device: VulkanDevice,
     surface: VulkanSurface,
     debug_utils: Option<VulkanDebugUtils>,
     instance: Instance,
@@ -91,7 +95,9 @@ impl VulkanRenderer {
         let instance = unsafe { entry.create_instance(&create_info, None)? };
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
         let surface = VulkanSurface::create(&entry, &instance, window)?;
+        let device = VulkanDevice::create(&instance, &surface)?;
         Ok(Self {
+            device,
             surface,
             debug_utils: Some(debug_utils),
             instance,
@@ -103,6 +109,7 @@ impl VulkanRenderer {
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
+            self.device.destory();
             self.surface.destroy();
             drop(self.debug_utils.take());
             self.instance.destroy_instance(None);

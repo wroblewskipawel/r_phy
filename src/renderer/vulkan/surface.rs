@@ -2,6 +2,7 @@
 use ash::extensions::khr::Win32Surface;
 use ash::{extensions::khr::Surface, vk, Entry, Instance};
 use std::{
+    collections::HashSet,
     error::Error,
     ffi::{c_void, CStr},
     ptr::null,
@@ -79,5 +80,107 @@ impl VulkanSurface {
 
     pub fn destroy(&mut self) {
         unsafe { self.loader.destroy_surface(self.handle, None) };
+    }
+
+    pub fn check_device_quque_family_support(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        queue_family_index: u32,
+    ) -> bool {
+        unsafe {
+            self.loader
+                .get_physical_device_surface_support(
+                    physical_device,
+                    queue_family_index,
+                    self.handle,
+                )
+                .unwrap_or(false)
+        }
+    }
+
+    pub fn get_device_supported_present_modes(
+        &self,
+        physical_device: vk::PhysicalDevice,
+    ) -> Result<Vec<vk::PresentModeKHR>, Box<dyn Error>> {
+        let present_modes = unsafe {
+            self.loader
+                .get_physical_device_surface_present_modes(physical_device, self.handle)?
+        };
+        Ok(present_modes)
+    }
+
+    pub fn get_device_supported_surface_formats(
+        &self,
+        physical_device: vk::PhysicalDevice,
+    ) -> Result<Vec<vk::SurfaceFormatKHR>, Box<dyn Error>> {
+        let surface_formats = unsafe {
+            self.loader
+                .get_physical_device_surface_formats(physical_device, self.handle)?
+        };
+        Ok(surface_formats)
+    }
+}
+
+pub(super) struct PhysicalDeviceSurfaceProperties {
+    pub present_mode: vk::PresentModeKHR,
+    pub surface_format: vk::SurfaceFormatKHR,
+    pub supported_queue_families: HashSet<u32>,
+}
+
+impl PhysicalDeviceSurfaceProperties {
+    const PREFERRED_SURFACE_FORMATS: &'static [vk::Format] =
+        &[vk::Format::R8G8B8A8_SRGB, vk::Format::B8G8R8A8_SRGB];
+
+    pub fn get(
+        surface: &VulkanSurface,
+        physical_device: vk::PhysicalDevice,
+        quque_families: &[(vk::QueueFamilyProperties, u32)],
+    ) -> Result<Self, Box<dyn Error>> {
+        let surface_formats = unsafe {
+            surface
+                .loader
+                .get_physical_device_surface_formats(physical_device, surface.handle)?
+        };
+        let surface_format = *Self::PREFERRED_SURFACE_FORMATS
+            .iter()
+            .find_map(|&pref| {
+                surface_formats.iter().find(|supported| {
+                    supported.format == pref
+                        && supported.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                })
+            })
+            .or(surface_formats.first())
+            .ok_or("Failed to pick surface format for physical device!")?;
+        let present_mode = unsafe {
+            surface
+                .loader
+                .get_physical_device_surface_present_modes(physical_device, surface.handle)?
+        }
+        .into_iter()
+        .find(|&present_mode| present_mode == vk::PresentModeKHR::MAILBOX)
+        .unwrap_or(vk::PresentModeKHR::FIFO);
+        let supported_queue_families = HashSet::<u32>::from_iter(
+            quque_families
+                .iter()
+                .filter(|&&(properties, queue_family_index)| {
+                    properties.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                        && unsafe {
+                            surface
+                                .loader
+                                .get_physical_device_surface_support(
+                                    physical_device,
+                                    queue_family_index,
+                                    surface.handle,
+                                )
+                                .unwrap_or(false)
+                        }
+                })
+                .map(|&(_, queue_family_index)| queue_family_index),
+        );
+        Ok(Self {
+            present_mode,
+            surface_format,
+            supported_queue_families,
+        })
     }
 }
