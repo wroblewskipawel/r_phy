@@ -1,4 +1,5 @@
 mod debug;
+mod surface;
 
 use super::Renderer;
 use ash::{vk, Entry, Instance};
@@ -8,8 +9,10 @@ use std::{
     ffi::{c_char, CStr},
     result::Result,
 };
+use surface::VulkanSurface;
 use winit::window::Window;
 pub(super) struct VulkanRenderer {
+    surface: VulkanSurface,
     debug_utils: Option<VulkanDebugUtils>,
     instance: Instance,
     _entry: Entry,
@@ -72,6 +75,7 @@ impl VulkanRenderer {
             &entry,
             VulkanDebugUtils::required_extensions()
                 .into_iter()
+                .chain(VulkanSurface::required_extensions())
                 .map(|&req| req),
         )?;
         let application_info = vk::ApplicationInfo {
@@ -86,7 +90,9 @@ impl VulkanRenderer {
             .push_next(&mut debug_messenger_info);
         let instance = unsafe { entry.create_instance(&create_info, None)? };
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
+        let surface = VulkanSurface::create(&entry, &instance, window)?;
         Ok(Self {
+            surface,
             debug_utils: Some(debug_utils),
             instance,
             _entry: entry,
@@ -97,6 +103,7 @@ impl VulkanRenderer {
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
+            self.surface.destroy();
             drop(self.debug_utils.take());
             self.instance.destroy_instance(None);
         }
