@@ -6,15 +6,20 @@ pub struct VulkanRenderPass {
     handle: vk::RenderPass,
 }
 
-impl VulkanDevice {
-    fn get_attachment_descriptions(&self) -> Vec<vk::AttachmentDescription> {
+impl Into<vk::RenderPass> for &VulkanRenderPass {
+    fn into(self) -> vk::RenderPass {
+        self.handle
+    }
+}
+
+impl VulkanRenderPass {
+    fn get_attachment_descriptions(
+        color_attachment_format: vk::Format,
+        depth_stencil_attachment_format: vk::Format,
+    ) -> Vec<vk::AttachmentDescription> {
         vec![
             vk::AttachmentDescription {
-                format: self
-                    .physical_device
-                    .surface_properties
-                    .surface_format
-                    .format,
+                format: color_attachment_format,
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
                 store_op: vk::AttachmentStoreOp::STORE,
@@ -23,7 +28,7 @@ impl VulkanDevice {
                 ..Default::default()
             },
             vk::AttachmentDescription {
-                format: self.physical_device.attachment_formats.depth_stencil,
+                format: depth_stencil_attachment_format,
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
                 store_op: vk::AttachmentStoreOp::DONT_CARE,
@@ -86,10 +91,25 @@ impl VulkanDevice {
         ]
     }
 
+    pub fn get_attachments(
+        color_attachment: vk::ImageView,
+        depth_stencil_attachment: vk::ImageView,
+    ) -> [vk::ImageView; 2] {
+        [color_attachment, depth_stencil_attachment]
+    }
+}
+
+impl VulkanDevice {
     pub fn create_render_pass(&self) -> Result<VulkanRenderPass, Box<dyn Error>> {
-        let attachment_descriptions = self.get_attachment_descriptions();
-        let (subpasses, _attachment_references) = Self::get_subpass_descriptions();
-        let subpass_dependencies = Self::get_subpass_dependencies();
+        let attachment_descriptions = VulkanRenderPass::get_attachment_descriptions(
+            self.physical_device
+                .surface_properties
+                .surface_format
+                .format,
+            self.physical_device.attachment_formats.depth_stencil,
+        );
+        let (subpasses, _attachment_references) = VulkanRenderPass::get_subpass_descriptions();
+        let subpass_dependencies = VulkanRenderPass::get_subpass_dependencies();
         let create_info = vk::RenderPassCreateInfo::builder()
             .attachments(&attachment_descriptions)
             .subpasses(&subpasses)

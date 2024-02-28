@@ -1,7 +1,8 @@
+pub(super) mod image;
 pub(super) mod render_pass;
+pub(super) mod swapchain;
 
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
-use super::swapchain::VulkanSwapchain;
 use ash::{vk, Device, Instance};
 use colored::Colorize;
 use std::ffi::c_char;
@@ -10,6 +11,7 @@ use std::{
     error::Error,
     ffi::CStr,
 };
+use swapchain::VulkanSwapchain;
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -332,5 +334,27 @@ impl VulkanDevice {
         unsafe {
             self.device.destroy_device(None);
         }
+    }
+
+    pub fn get_memory_type_index(
+        &self,
+        memory_type_bits: u32,
+        memory_properties: vk::MemoryPropertyFlags,
+    ) -> Option<u32> {
+        self.physical_device
+            .properties
+            .memory
+            .memory_types
+            .iter()
+            .zip(0u32..)
+            .find_map(|(memory, type_index)| {
+                if (1 << type_index & memory_type_bits == 1 << type_index)
+                    && memory.property_flags.contains(memory_properties)
+                {
+                    Some(type_index)
+                } else {
+                    None
+                }
+            })
     }
 }

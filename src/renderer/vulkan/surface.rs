@@ -81,43 +81,11 @@ impl VulkanSurface {
     pub fn destroy(&mut self) {
         unsafe { self.loader.destroy_surface(self.handle, None) };
     }
+}
 
-    pub fn check_device_quque_family_support(
-        &self,
-        physical_device: vk::PhysicalDevice,
-        queue_family_index: u32,
-    ) -> bool {
-        unsafe {
-            self.loader
-                .get_physical_device_surface_support(
-                    physical_device,
-                    queue_family_index,
-                    self.handle,
-                )
-                .unwrap_or(false)
-        }
-    }
-
-    pub fn get_device_supported_present_modes(
-        &self,
-        physical_device: vk::PhysicalDevice,
-    ) -> Result<Vec<vk::PresentModeKHR>, Box<dyn Error>> {
-        let present_modes = unsafe {
-            self.loader
-                .get_physical_device_surface_present_modes(physical_device, self.handle)?
-        };
-        Ok(present_modes)
-    }
-
-    pub fn get_device_supported_surface_formats(
-        &self,
-        physical_device: vk::PhysicalDevice,
-    ) -> Result<Vec<vk::SurfaceFormatKHR>, Box<dyn Error>> {
-        let surface_formats = unsafe {
-            self.loader
-                .get_physical_device_surface_formats(physical_device, self.handle)?
-        };
-        Ok(surface_formats)
+impl Into<vk::SurfaceKHR> for &VulkanSurface {
+    fn into(self) -> vk::SurfaceKHR {
+        self.handle
     }
 }
 
@@ -125,6 +93,7 @@ pub(super) struct PhysicalDeviceSurfaceProperties {
     pub present_mode: vk::PresentModeKHR,
     pub surface_format: vk::SurfaceFormatKHR,
     pub supported_queue_families: HashSet<u32>,
+    pub capabilities: vk::SurfaceCapabilitiesKHR,
 }
 
 impl PhysicalDeviceSurfaceProperties {
@@ -177,10 +146,16 @@ impl PhysicalDeviceSurfaceProperties {
                 })
                 .map(|&(_, queue_family_index)| queue_family_index),
         );
+        let capabilities = unsafe {
+            surface
+                .loader
+                .get_physical_device_surface_capabilities(physical_device, surface.handle)?
+        };
         Ok(Self {
             present_mode,
             surface_format,
             supported_queue_families,
+            capabilities,
         })
     }
 }
