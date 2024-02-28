@@ -1,3 +1,5 @@
+pub(super) mod render_pass;
+
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 use super::swapchain::VulkanSwapchain;
 use ash::{vk, Device, Instance};
