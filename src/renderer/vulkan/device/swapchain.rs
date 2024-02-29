@@ -12,6 +12,7 @@ struct SwapchainSync {
 }
 
 pub struct VulkanSwapchain {
+    pub image_extent: vk::Extent2D,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     _images: Vec<vk::Image>,
@@ -125,6 +126,7 @@ impl VulkanDevice {
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
         Ok(VulkanSwapchain {
+            image_extent,
             sync,
             depth_buffer,
             _images: images,

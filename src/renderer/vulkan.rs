@@ -2,6 +2,8 @@ mod debug;
 mod device;
 mod surface;
 
+use self::device::pipeline::GraphicsPipeline;
+
 use super::Renderer;
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
@@ -9,11 +11,13 @@ use device::{render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, VulkanDe
 use std::{
     error::Error,
     ffi::{c_char, CStr},
+    path::Path,
     result::Result,
 };
 use surface::VulkanSurface;
 use winit::window::Window;
 pub(super) struct VulkanRenderer {
+    pipeline: GraphicsPipeline,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,
@@ -99,7 +103,16 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
+        let pipeline = device.create_graphics_pipeline(
+            &render_pass,
+            &swapchain,
+            &[
+                Path::new("shaders/spv/unlit/vert.spv"),
+                Path::new("shaders/spv/unlit/frag.spv"),
+            ],
+        )?;
         Ok(Self {
+            pipeline,
             swapchain,
             render_pass,
             device,
@@ -114,6 +127,7 @@ impl VulkanRenderer {
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
+            self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destory_render_pass(&mut self.render_pass);
             self.device.destory();

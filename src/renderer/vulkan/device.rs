@@ -1,4 +1,5 @@
 pub(super) mod image;
+pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod swapchain;
 
