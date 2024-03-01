@@ -4,7 +4,8 @@ use std::error::Error;
 use vulkan::VulkanRenderer;
 use winit::window::Window;
 pub trait Renderer {
-    fn begin_frame(&self);
+    fn begin_frame(&mut self) -> Result<(), Box<dyn Error>>;
+    fn end_frame(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
 pub enum RendererBackend {

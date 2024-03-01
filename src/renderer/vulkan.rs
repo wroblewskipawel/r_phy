@@ -7,7 +7,11 @@ use self::device::pipeline::GraphicsPipeline;
 use super::Renderer;
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
-use device::{render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, VulkanDevice};
+use device::{
+    render_pass::VulkanRenderPass,
+    swapchain::{Frame, VulkanSwapchain},
+    VulkanDevice,
+};
 use std::{
     error::Error,
     ffi::{c_char, CStr},
@@ -17,6 +21,7 @@ use std::{
 use surface::VulkanSurface;
 use winit::window::Window;
 pub(super) struct VulkanRenderer {
+    current_frame: Option<Frame>,
     pipeline: GraphicsPipeline,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
@@ -112,6 +117,7 @@ impl VulkanRenderer {
             ],
         )?;
         Ok(Self {
+            current_frame: None,
             pipeline,
             swapchain,
             render_pass,
@@ -126,6 +132,7 @@ impl VulkanRenderer {
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
+        let _ = self.device.wait_idle();
         unsafe {
             self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
@@ -139,5 +146,18 @@ impl Drop for VulkanRenderer {
 }
 
 impl Renderer for VulkanRenderer {
-    fn begin_frame(&self) {}
+    fn begin_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        self.current_frame
+            .replace(self.device.begin_frame(&mut self.swapchain)?);
+        let frame = self.current_frame.as_ref().unwrap();
+        self.device.begin_render_pass(frame, &self.render_pass);
+        Ok(())
+    }
+
+    fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        let frame = self.current_frame.take().ok_or("current_frame is None!")?;
+        self.device.end_render_pass(&frame);
+        self.device.end_frame(&mut self.swapchain, frame)?;
+        Ok(())
+    }
 }

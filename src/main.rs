@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_title("r_phy")
         .with_transparent(false)
         .build(&event_loop)?;
-    let renderer = RendererBackend::Vulkan.create(&window)?;
+    let mut renderer = RendererBackend::Vulkan.create(&window)?;
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent {
@@ -30,7 +30,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             elwt.exit();
         }
         Event::AboutToWait => {
-            renderer.begin_frame();
+            let _ = renderer.begin_frame();
+            let _ = renderer.end_frame();
         }
         _ => (),
     })?;

@@ -1,3 +1,4 @@
+pub(super) mod command;
 pub(super) mod image;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
@@ -357,5 +358,12 @@ impl VulkanDevice {
                     None
                 }
             })
+    }
+
+    pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
+        unsafe {
+            self.device.device_wait_idle()?;
+        }
+        Ok(())
     }
 }

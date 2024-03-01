@@ -1,4 +1,4 @@
-use super::VulkanDevice;
+use super::{swapchain::Frame, VulkanDevice};
 use ash::vk;
 use std::error::Error;
 
@@ -112,6 +112,23 @@ impl VulkanRenderPass {
             }];
         ATTACHMENTS
     }
+
+    pub fn get_attachment_clear_values() -> &'static [vk::ClearValue] {
+        const CLEAR_VALUES: &[vk::ClearValue] = &[
+            vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+        ];
+        CLEAR_VALUES
+    }
 }
 
 impl VulkanDevice {
@@ -138,6 +155,30 @@ impl VulkanDevice {
     pub fn destory_render_pass(&self, render_pass: &mut VulkanRenderPass) {
         unsafe {
             self.device.destroy_render_pass(render_pass.handle, None);
+        }
+    }
+
+    pub fn begin_render_pass(&self, frame: &Frame, render_pass: &mut VulkanRenderPass) {
+        let clear_values = VulkanRenderPass::get_attachment_clear_values();
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                frame.command_buffer,
+                &vk::RenderPassBeginInfo {
+                    render_pass: render_pass.handle,
+                    framebuffer: frame.framebuffer,
+                    render_area: frame.render_area,
+                    clear_value_count: clear_values.len() as u32,
+                    p_clear_values: clear_values.as_ptr(),
+                    ..Default::default()
+                },
+                vk::SubpassContents::INLINE,
+            )
+        }
+    }
+
+    pub fn end_render_pass(&self, frame: &Frame) {
+        unsafe {
+            self.device.cmd_end_render_pass(frame.command_buffer);
         }
     }
 }

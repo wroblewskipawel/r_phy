@@ -3,23 +3,51 @@ use std::{error::Error, ffi::CStr};
 
 use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 
-use super::{image::VulkanImage2D, render_pass::VulkanRenderPass, VulkanDevice};
+use super::{
+    command::CommandPool, image::VulkanImage2D, render_pass::VulkanRenderPass, VulkanDevice,
+};
+
+pub struct FrameSync {
+    frame_available: vk::Fence,
+    draw_ready: vk::Semaphore,
+    draw_finished: vk::Semaphore,
+}
+
+pub struct Frame {
+    pub command_buffer: vk::CommandBuffer,
+    pub framebuffer: vk::Framebuffer,
+    pub render_area: vk::Rect2D,
+    image_index: usize,
+    sync: FrameSync,
+}
 
 struct SwapchainSync {
     draw_ready: Vec<vk::Semaphore>,
     draw_finished: Vec<vk::Semaphore>,
-    image_available: Vec<vk::Fence>,
+    frame_available: Vec<vk::Fence>,
+}
+
+impl SwapchainSync {
+    fn get_frame(&self, index: usize) -> FrameSync {
+        FrameSync {
+            draw_ready: self.draw_ready[index],
+            draw_finished: self.draw_finished[index],
+            frame_available: self.frame_available[index],
+        }
+    }
 }
 
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
+    command_pool: CommandPool,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
-    _images: Vec<vk::Image>,
+    images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
+    next_frame_index: usize,
 }
 
 impl VulkanSwapchain {
@@ -125,15 +153,22 @@ impl VulkanDevice {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
+        let command_pool = self.create_command_pool(
+            self.physical_device.queue_families.graphics,
+            vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+            images.len(),
+        )?;
         Ok(VulkanSwapchain {
             image_extent,
+            command_pool,
             sync,
             depth_buffer,
-            _images: images,
+            images,
             image_views,
             framebuffers,
             loader,
             handle,
+            next_frame_index: 0,
         })
     }
 
@@ -150,6 +185,7 @@ impl VulkanDevice {
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
             self.destory_image(&mut swapchain.depth_buffer);
             self.destory_swapchain_sync(&mut swapchain.sync);
+            self.destory_command_pool(&mut swapchain.command_pool);
         }
     }
 
@@ -174,10 +210,11 @@ impl VulkanDevice {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let image_available = (0..num_images)
+        let frame_available = (0..num_images)
             .map(|_| unsafe {
                 self.device.create_fence(
                     &vk::FenceCreateInfo {
+                        flags: vk::FenceCreateFlags::SIGNALED,
                         ..Default::default()
                     },
                     None,
@@ -187,7 +224,7 @@ impl VulkanDevice {
         Ok(SwapchainSync {
             draw_ready,
             draw_finished,
-            image_available,
+            frame_available,
         })
     }
 
@@ -199,9 +236,108 @@ impl VulkanDevice {
             sync.draw_finished
                 .iter()
                 .for_each(|&semaphore| self.device.destroy_semaphore(semaphore, None));
-            sync.image_available
+            sync.frame_available
                 .iter()
                 .for_each(|&fence| self.device.destroy_fence(fence, None));
         }
+    }
+
+    fn get_next_frame_data(
+        &self,
+        swapchain: &mut VulkanSwapchain,
+    ) -> (vk::CommandBuffer, FrameSync) {
+        let frame_index = swapchain.next_frame_index;
+        swapchain.next_frame_index += 1;
+        swapchain.next_frame_index %= swapchain.images.len();
+        (
+            swapchain.command_pool.buffers[frame_index],
+            swapchain.sync.get_frame(frame_index),
+        )
+    }
+
+    pub fn begin_frame<'a>(
+        &self,
+        swapchain: &'a mut VulkanSwapchain,
+    ) -> Result<Frame, Box<dyn Error>> {
+        let (command_buffer, sync) = self.get_next_frame_data(swapchain);
+        let image_index = unsafe {
+            self.device
+                .wait_for_fences(&[sync.frame_available], true, u64::MAX)?;
+            self.device.reset_fences(&[sync.frame_available])?;
+            let image_index = swapchain
+                .loader
+                .acquire_next_image(
+                    swapchain.handle,
+                    u64::MAX,
+                    sync.draw_ready,
+                    vk::Fence::null(),
+                )
+                .map(|(image_index, _)| image_index as usize)?;
+            image_index
+        };
+        let framebuffer = swapchain.framebuffers[image_index];
+        unsafe {
+            self.device.begin_command_buffer(
+                command_buffer,
+                &vk::CommandBufferBeginInfo {
+                    flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    ..Default::default()
+                },
+            )?;
+        }
+        let render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: swapchain.image_extent,
+        };
+        Ok(Frame {
+            command_buffer,
+            framebuffer,
+            render_area,
+            image_index,
+            sync,
+        })
+    }
+
+    pub fn end_frame(
+        &self,
+        swapchain: &mut VulkanSwapchain,
+        frame: Frame,
+    ) -> Result<(), Box<dyn Error>> {
+        let Frame {
+            command_buffer,
+            image_index,
+            sync,
+            ..
+        } = frame;
+        unsafe {
+            self.device.end_command_buffer(command_buffer)?;
+            self.device.queue_submit(
+                self.device_queues.graphics,
+                &[vk::SubmitInfo {
+                    wait_semaphore_count: 1,
+                    p_wait_semaphores: [sync.draw_ready].as_ptr(),
+                    p_wait_dst_stage_mask: [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
+                        .as_ptr(),
+                    command_buffer_count: 1,
+                    p_command_buffers: [command_buffer].as_ptr(),
+                    signal_semaphore_count: 1,
+                    p_signal_semaphores: [sync.draw_finished].as_ptr(),
+                    ..Default::default()
+                }],
+                sync.frame_available,
+            )?;
+            swapchain.loader.queue_present(
+                self.device_queues.graphics,
+                &vk::PresentInfoKHR {
+                    wait_semaphore_count: 1,
+                    p_wait_semaphores: [sync.draw_finished].as_ptr(),
+                    swapchain_count: 1,
+                    p_swapchains: [swapchain.handle].as_ptr(),
+                    p_image_indices: [image_index as u32].as_ptr(),
+                    ..Default::default()
+                },
+            )?;
+        }
+        Ok(())
     }
 }
