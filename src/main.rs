@@ -6,7 +6,7 @@ use winit::{
     window::{WindowBuilder, WindowButtons},
 };
 
-use r_phy::renderer::RendererBackend;
+use r_phy::renderer::{mesh::Mesh, RendererBackend};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new()?;
@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_transparent(false)
         .build(&event_loop)?;
     let mut renderer = RendererBackend::Vulkan.create(&window)?;
+    let mesh = renderer.load_mesh(&Mesh::triangle())?;
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent {
@@ -31,6 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Event::AboutToWait => {
             let _ = renderer.begin_frame();
+            let _ = renderer.draw(mesh);
             let _ = renderer.end_frame();
         }
         _ => (),

@@ -2,9 +2,12 @@ mod debug;
 mod device;
 mod surface;
 
-use self::device::pipeline::GraphicsPipeline;
+use self::device::{mesh::VulkanMesh, pipeline::GraphicsPipeline};
 
-use super::Renderer;
+use super::{
+    mesh::{Mesh, MeshHandle},
+    Renderer,
+};
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
 use device::{
@@ -21,6 +24,7 @@ use std::{
 use surface::VulkanSurface;
 use winit::window::Window;
 pub(super) struct VulkanRenderer {
+    meshes: Vec<VulkanMesh>,
     current_frame: Option<Frame>,
     pipeline: GraphicsPipeline,
     swapchain: VulkanSwapchain,
@@ -117,6 +121,7 @@ impl VulkanRenderer {
             ],
         )?;
         Ok(Self {
+            meshes: vec![],
             current_frame: None,
             pipeline,
             swapchain,
@@ -134,6 +139,9 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
         unsafe {
+            self.meshes
+                .iter_mut()
+                .for_each(|mesh| self.device.destory_mesh(mesh));
             self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destory_render_pass(&mut self.render_pass);
@@ -151,6 +159,7 @@ impl Renderer for VulkanRenderer {
             .replace(self.device.begin_frame(&mut self.swapchain)?);
         let frame = self.current_frame.as_ref().unwrap();
         self.device.begin_render_pass(frame, &self.render_pass);
+        self.device.bind_pipeline(frame, &self.pipeline);
         Ok(())
     }
 
@@ -158,6 +167,21 @@ impl Renderer for VulkanRenderer {
         let frame = self.current_frame.take().ok_or("current_frame is None!")?;
         self.device.end_render_pass(&frame);
         self.device.end_frame(&mut self.swapchain, frame)?;
+        Ok(())
+    }
+
+    fn load_mesh(&mut self, mesh: &Mesh) -> Result<MeshHandle, Box<dyn Error>> {
+        self.meshes.push(self.device.load_mesh(mesh)?);
+        Ok(MeshHandle(self.meshes.len() - 1))
+    }
+    fn draw(&mut self, mesh: MeshHandle) -> Result<(), Box<dyn Error>> {
+        let frame = self
+            .current_frame
+            .as_ref()
+            .take()
+            .ok_or("current_frame is None!")?;
+        let mesh = &self.meshes[mesh.0];
+        self.device.draw(frame, mesh);
         Ok(())
     }
 }

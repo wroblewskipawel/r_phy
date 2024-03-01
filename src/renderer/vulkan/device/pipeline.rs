@@ -1,4 +1,8 @@
-use super::{render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, VulkanDevice};
+use super::{
+    render_pass::VulkanRenderPass,
+    swapchain::{Frame, VulkanSwapchain},
+    VulkanDevice,
+};
 use ash::vk;
 use std::{error::Error, ffi::CStr, mem::size_of, path::Path};
 
@@ -85,9 +89,9 @@ impl GraphicsPipeline {
     ) {
         let viewports = vec![vk::Viewport {
             x: 0.0,
-            y: 0.0,
+            y: image_extent.height as f32,
             width: image_extent.width as f32,
-            height: image_extent.height as f32,
+            height: -(image_extent.height as f32),
             min_depth: 0.0,
             max_depth: 1.0,
         }];
@@ -213,5 +217,15 @@ impl VulkanDevice {
         let create_info = vk::PipelineLayoutCreateInfo::default();
         let layout = unsafe { self.device.create_pipeline_layout(&create_info, None)? };
         Ok(layout)
+    }
+
+    pub fn bind_pipeline(&self, frame: &Frame, pipeline: &GraphicsPipeline) {
+        unsafe {
+            self.device.cmd_bind_pipeline(
+                frame.command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline.handle,
+            );
+        }
     }
 }

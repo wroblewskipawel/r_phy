@@ -158,7 +158,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn begin_render_pass(&self, frame: &Frame, render_pass: &mut VulkanRenderPass) {
+    pub fn begin_render_pass(&self, frame: &Frame, render_pass: &VulkanRenderPass) {
         let clear_values = VulkanRenderPass::get_attachment_clear_values();
         unsafe {
             self.device.cmd_begin_render_pass(

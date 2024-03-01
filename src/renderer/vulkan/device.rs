@@ -1,5 +1,7 @@
+pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod image;
+pub(super) mod mesh;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod swapchain;
@@ -14,6 +16,13 @@ use std::{
     ffi::CStr,
 };
 use swapchain::VulkanSwapchain;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Operation {
+    Graphics,
+    Compute,
+    Transfer,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -365,5 +374,15 @@ impl VulkanDevice {
             self.device.device_wait_idle()?;
         }
         Ok(())
+    }
+
+    pub fn get_queue_families(&self, operations: &[Operation]) -> Vec<u32> {
+        Vec::from_iter(HashSet::<u32>::from_iter(operations.iter().map(
+            |&operation| match operation {
+                Operation::Graphics => self.physical_device.queue_families.graphics,
+                Operation::Compute => self.physical_device.queue_families.compute,
+                Operation::Transfer => self.physical_device.queue_families.transfer,
+            },
+        )))
     }
 }
