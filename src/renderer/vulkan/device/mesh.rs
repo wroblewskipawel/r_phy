@@ -5,6 +5,7 @@ use crate::renderer::{
     mesh::{Mesh, Vertex},
     vulkan::device::Operation,
 };
+use bytemuck::cast_slice;
 use std::error::Error;
 
 pub struct VulkanMesh {
@@ -16,24 +17,18 @@ pub struct VulkanMesh {
 impl VulkanDevice {
     pub fn load_mesh(&self, mesh: &Mesh) -> Result<VulkanMesh, Box<dyn Error>> {
         let queue_families = self.get_queue_families(&[Operation::Graphics]);
-        let vertex_buffer_size = mesh.vertices.len() * std::mem::size_of::<Vertex>();
-        let vertex_buffer_bytes = unsafe {
-            std::slice::from_raw_parts(mesh.vertices.as_ptr() as *const u8, vertex_buffer_size)
-        };
+        let vertex_buffer_bytes = cast_slice(&mesh.vertices);
         let mut vertex_buffer = self.create_buffer(
-            vertex_buffer_size,
+            vertex_buffer_bytes.len(),
             vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::SharingMode::EXCLUSIVE,
             &queue_families,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         self.transfer_buffer_data(&mut vertex_buffer, vertex_buffer_bytes)?;
-        let index_buffer_size = mesh.indices.len() * std::mem::size_of::<u32>();
-        let index_buffer_bytes = unsafe {
-            std::slice::from_raw_parts(mesh.indices.as_ptr() as *const u8, index_buffer_size)
-        };
+        let index_buffer_bytes = cast_slice(&mesh.indices);
         let mut index_buffer = self.create_buffer(
-            index_buffer_size,
+            index_buffer_bytes.len(),
             vk::BufferUsageFlags::INDEX_BUFFER,
             vk::SharingMode::EXCLUSIVE,
             &queue_families,

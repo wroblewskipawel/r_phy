@@ -1,11 +1,15 @@
+use bytemuck::{Pod, Zeroable};
+
+use crate::math::types::Vector3;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MeshHandle(pub usize);
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]
 pub struct Vertex {
-    pub(crate) pos: (f32, f32, f32),
-    pub(crate) color: (f32, f32, f32),
+    pub(crate) pos: Vector3,
+    pub(crate) color: Vector3,
 }
 
 pub struct Mesh {
@@ -18,16 +22,16 @@ impl Mesh {
         Mesh {
             vertices: vec![
                 Vertex {
-                    pos: (0.0, 0.5, 0.5),
-                    color: (1.0, 0.0, 0.0),
+                    pos: Vector3::new(0.0, 0.5, 0.5),
+                    color: Vector3::new(1.0, 0.0, 0.0),
                 },
                 Vertex {
-                    pos: (0.5, -0.5, 0.5),
-                    color: (0.0, 1.0, 0.0),
+                    pos: Vector3::new(0.5, -0.5, 0.5),
+                    color: Vector3::new(0.0, 1.0, 0.0),
                 },
                 Vertex {
-                    pos: (-0.5, -0.5, 0.5),
-                    color: (0.0, 0.0, 1.0),
+                    pos: Vector3::new(-0.5, -0.5, 0.5),
+                    color: Vector3::new(0.0, 0.0, 1.0),
                 },
             ],
             indices: vec![0, 2, 1],

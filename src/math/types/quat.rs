@@ -1,0 +1,154 @@
+use bytemuck::{Pod, Zeroable};
+use std::ops::Mul;
+
+use super::{Matrix3, Vector3};
+
+#[cfg(test)]
+mod test_quat {
+    use super::{Matrix3, Quat, Vector3};
+
+    fn get_quat() -> Quat {
+        Quat::axis_angle(Vector3::z(), std::f32::consts::FRAC_PI_2)
+    }
+
+    #[test]
+    fn mul() {
+        let quat = get_quat();
+        assert!((quat * Vector3::x()).approx_equal(Vector3::y()));
+    }
+
+    #[test]
+    fn inv() {
+        let quat_inv = get_quat().inv();
+        assert!((quat_inv * Vector3::y()).approx_equal(Vector3::x()));
+    }
+
+    #[test]
+    fn to_matrix() {
+        let m: Matrix3 = get_quat().into();
+        let m_inv: Matrix3 = get_quat().inv().into();
+        assert!((m * Vector3::x()).approx_equal(Vector3::y()));
+        assert!((m_inv * Vector3::y()).approx_equal(Vector3::x()));
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]
+pub struct Quat {
+    pub r: f32,
+    pub i: f32,
+    pub j: f32,
+    pub k: f32,
+}
+
+impl Mul<Quat> for f32 {
+    type Output = Quat;
+    #[inline]
+    fn mul(self, rhs: Quat) -> Self::Output {
+        Quat {
+            r: self * rhs.r,
+            i: self * rhs.i,
+            j: self * rhs.j,
+            k: self * rhs.k,
+        }
+    }
+}
+
+impl Mul<Quat> for Quat {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: Quat) -> Self::Output {
+        Self {
+            r: self.r * rhs.r - self.i * rhs.i - self.j * rhs.j - self.k * rhs.k,
+            i: self.i * rhs.r + self.r * rhs.i + self.j * rhs.k - self.k * rhs.j,
+            j: self.j * rhs.r + self.r * rhs.j + self.k * rhs.i - self.i * rhs.k,
+            k: self.k * rhs.r + self.r * rhs.k + self.i * rhs.j - self.j * rhs.i,
+        }
+    }
+}
+
+impl Mul<Vector3> for Quat {
+    type Output = Vector3;
+    #[inline]
+    fn mul(self, rhs: Vector3) -> Self::Output {
+        let q =
+            self * Quat {
+                r: 0.0,
+                i: rhs.x,
+                j: rhs.y,
+                k: rhs.z,
+            } * self.inv();
+        Vector3::new(q.i, q.j, q.k)
+    }
+}
+
+impl From<Quat> for Matrix3 {
+    #[inline]
+    fn from(value: Quat) -> Self {
+        Matrix3::new(
+            value * Vector3::x(),
+            value * Vector3::y(),
+            value * Vector3::z(),
+        )
+    }
+}
+
+impl Quat {
+    #[inline]
+    pub fn new(r: f32, i: f32, j: f32, k: f32) -> Self {
+        Self { r, i, j, k }
+    }
+
+    #[inline]
+    pub fn axis_angle(axis: Vector3, rad: f32) -> Self {
+        let rad = 0.5 * rad;
+        let axis = rad.sin() * axis.norm();
+        Self {
+            r: rad.cos(),
+            i: axis.x,
+            j: axis.y,
+            k: axis.z,
+        }
+    }
+
+    #[inline]
+    pub fn identity() -> Self {
+        Self {
+            r: 1.0,
+            i: 0.0,
+            j: 0.0,
+            k: 0.0,
+        }
+    }
+
+    #[inline]
+    pub fn inv(self) -> Self {
+        let q = self.mag_squared().recip() * self;
+        Self {
+            r: q.r,
+            i: -q.i,
+            j: -q.j,
+            k: -q.k,
+        }
+    }
+
+    #[inline]
+    pub fn mag_squared(self) -> f32 {
+        self.r * self.r + self.i * self.i + self.j * self.j + self.k * self.k
+    }
+
+    #[inline]
+    pub fn mag(self) -> f32 {
+        self.mag_squared().sqrt()
+    }
+
+    #[inline]
+    pub fn norm(self) -> Self {
+        self.mag().recip() * self
+    }
+
+    #[inline]
+    pub fn is_valid(self) -> bool {
+        self.r.is_finite() && self.i.is_finite() && self.j.is_finite() && self.k.is_finite()
+    }
+}

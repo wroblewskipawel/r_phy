@@ -1,3 +1,5 @@
+use crate::{math::types::Vector3, renderer::mesh::Vertex};
+
 use super::{
     render_pass::VulkanRenderPass,
     swapchain::{Frame, VulkanSwapchain},
@@ -48,7 +50,7 @@ impl GraphicsPipeline {
         const VERTEX_BINDINGS: &[vk::VertexInputBindingDescription] =
             &[vk::VertexInputBindingDescription {
                 binding: 0,
-                stride: (size_of::<(f32, f32, f32)>() * 2) as u32,
+                stride: size_of::<Vertex>() as u32,
                 input_rate: vk::VertexInputRate::VERTEX,
             }];
         const VERTEX_ATTRIBUTES: &[vk::VertexInputAttributeDescription] = &[
@@ -62,7 +64,7 @@ impl GraphicsPipeline {
                 location: 1,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: size_of::<(f32, f32, f32)>() as u32,
+                offset: size_of::<Vector3>() as u32,
             },
         ];
         vk::PipelineVertexInputStateCreateInfo {
