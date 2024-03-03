@@ -217,6 +217,8 @@ impl Matrix2 {
 
 #[cfg(test)]
 mod test_matrix_3 {
+    use crate::math::types::EPS;
+
     use super::{Matrix3, Vector3};
 
     fn get_matrix_3() -> Matrix3 {
@@ -261,6 +263,20 @@ mod test_matrix_3 {
         let m_inv = m.inv();
         assert!(Matrix3::identity().approx_equal(m * m_inv));
         assert!(Matrix3::identity().approx_equal(m_inv * m));
+    }
+
+    #[test]
+    fn orthonormal() {
+        let i = Vector3::new(1.2, 0.42, 0.3);
+        let j = Vector3::new(0.2, -0.21, 1.42);
+        let k = Vector3::new(-0.2, -2.13, 4.2);
+        let m_orth = Matrix3::orthonormal(i, j, k);
+        assert!((m_orth.i.length() - 1.0).abs() < EPS);
+        assert!((m_orth.j.length() - 1.0).abs() < EPS);
+        assert!((m_orth.k.length() - 1.0).abs() < EPS);
+        assert!((m_orth.i * m_orth.j).abs() < EPS);
+        assert!((m_orth.i * m_orth.k).abs() < EPS);
+        assert!((m_orth.k * m_orth.j).abs() < EPS);
     }
 }
 
@@ -380,6 +396,14 @@ impl Matrix3 {
             j: Vector3::y(),
             k: Vector3::z(),
         }
+    }
+
+    #[inline]
+    pub fn orthonormal(i: Vector3, j: Vector3, k: Vector3) -> Matrix3 {
+        let i_norm = i.norm();
+        let j_norm = (j - (j * i_norm) * i_norm).norm();
+        let k_norm = (k - (k * i_norm) * i_norm - (k * j_norm) * j_norm).norm();
+        Matrix3::new(i_norm, j_norm, k_norm)
     }
 
     #[inline]

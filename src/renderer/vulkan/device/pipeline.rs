@@ -1,4 +1,7 @@
-use crate::{math::types::Vector3, renderer::mesh::Vertex};
+use crate::{
+    math::types::{Matrix4, Vector3},
+    renderer::mesh::Vertex,
+};
 
 use super::{
     render_pass::VulkanRenderPass,
@@ -91,9 +94,9 @@ impl GraphicsPipeline {
     ) {
         let viewports = vec![vk::Viewport {
             x: 0.0,
-            y: image_extent.height as f32,
+            y: 0.0,
             width: image_extent.width as f32,
-            height: -(image_extent.height as f32),
+            height: image_extent.height as f32,
             min_depth: 0.0,
             max_depth: 1.0,
         }];
@@ -216,7 +219,16 @@ impl VulkanDevice {
     }
 
     fn create_graphics_pipeline_layout(&self) -> Result<vk::PipelineLayout, Box<dyn Error>> {
-        let create_info = vk::PipelineLayoutCreateInfo::default();
+        const PUSH_CONSTANT_RANGES: &[vk::PushConstantRange] = &[vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            offset: 0,
+            size: (size_of::<Matrix4>() * 3) as u32,
+        }];
+        let create_info = vk::PipelineLayoutCreateInfo {
+            push_constant_range_count: PUSH_CONSTANT_RANGES.len() as u32,
+            p_push_constant_ranges: PUSH_CONSTANT_RANGES.as_ptr(),
+            ..Default::default()
+        };
         let layout = unsafe { self.device.create_pipeline_layout(&create_info, None)? };
         Ok(layout)
     }
@@ -227,6 +239,25 @@ impl VulkanDevice {
                 frame.command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 pipeline.handle,
+            );
+        }
+    }
+
+    pub fn push_constants(
+        &self,
+        frame: &Frame,
+        pipeline: &GraphicsPipeline,
+        stage_flags: vk::ShaderStageFlags,
+        offset: usize,
+        constants: &[u8],
+    ) {
+        unsafe {
+            self.device.cmd_push_constants(
+                frame.command_buffer,
+                pipeline.layout,
+                stage_flags,
+                offset as u32,
+                constants,
             );
         }
     }

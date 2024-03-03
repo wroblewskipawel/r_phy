@@ -1,4 +1,4 @@
-use std::{error::Error, result::Result};
+use std::{error::Error, result::Result, time::Instant};
 use winit::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
@@ -6,7 +6,13 @@ use winit::{
     window::{WindowBuilder, WindowButtons},
 };
 
-use r_phy::renderer::{mesh::Mesh, RendererBackend};
+use r_phy::{
+    math::{
+        transform::Transform,
+        types::{Matrix4, Vector3},
+    },
+    renderer::{mesh::Mesh, RendererBackend},
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new()?;
@@ -21,21 +27,60 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_transparent(false)
         .build(&event_loop)?;
     let mut renderer = RendererBackend::Vulkan.create(&window)?;
-    let mesh = renderer.load_mesh(&Mesh::triangle())?;
+    let mesh = renderer.load_mesh(&Mesh::cube())?;
+    let view = Matrix4::look_at(
+        Vector3::new(0.0, -10.0, 10.0),
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::z(),
+    );
+    let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-4, 1e4);
+    let mut previous_frame_time = Instant::now();
+    let mut model_rotation = 0.0;
     event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop.run(move |event, elwt| match event {
-        Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } => {
-            elwt.exit();
+    event_loop.run(move |event, elwt| {
+        let current_frame_time = Instant::now();
+        let elapsed_time = (current_frame_time - previous_frame_time).as_secs_f32();
+        previous_frame_time = current_frame_time;
+        model_rotation += elapsed_time * (2.0 * std::f32::consts::PI);
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                elwt.exit();
+            }
+            Event::AboutToWait => {
+                let _ = renderer.begin_frame(&view, &proj);
+                let _ = renderer.draw(
+                    mesh,
+                    &(Transform::identity()
+                        .rotate(Vector3::z(), model_rotation)
+                        .translate(Vector3::new(0.0, 3.0, 0.0))
+                        .rotate(Vector3::z(), model_rotation / 10.0)
+                        .translate(Vector3::new(0.0, 0.0, 1.0 + (model_rotation / 5.0).sin())))
+                    .rotate(
+                        Vector3::new(0.0, 1.0, 2.0).norm(),
+                        std::f32::consts::FRAC_PI_2,
+                    )
+                    .into(),
+                );
+                let _ = renderer.draw(
+                    mesh,
+                    &(Transform::identity()
+                        .rotate(Vector3::z(), -model_rotation)
+                        .translate(Vector3::new(0.0, 2.0, 0.0))
+                        .rotate(Vector3::z(), -model_rotation / 6.0)
+                        .translate(Vector3::new(0.0, 0.0, 1.0 + (model_rotation / 2.0).cos())))
+                    .rotate(
+                        Vector3::new(1.0, -1.0, 0.0).norm(),
+                        std::f32::consts::FRAC_PI_2,
+                    )
+                    .into(),
+                );
+                let _ = renderer.end_frame();
+            }
+            _ => (),
         }
-        Event::AboutToWait => {
-            let _ = renderer.begin_frame();
-            let _ = renderer.draw(mesh);
-            let _ = renderer.end_frame();
-        }
-        _ => (),
     })?;
     Ok(())
 }

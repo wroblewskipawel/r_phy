@@ -2,6 +2,8 @@ mod debug;
 mod device;
 mod surface;
 
+use crate::math::types::Matrix4;
+
 use self::device::{mesh::VulkanMesh, pipeline::GraphicsPipeline};
 
 use super::{
@@ -9,6 +11,7 @@ use super::{
     Renderer,
 };
 use ash::{vk, Entry, Instance};
+use bytemuck::bytes_of;
 use debug::VulkanDebugUtils;
 use device::{
     render_pass::VulkanRenderPass,
@@ -18,6 +21,7 @@ use device::{
 use std::{
     error::Error,
     ffi::{c_char, CStr},
+    mem::size_of,
     path::Path,
     result::Result,
 };
@@ -154,12 +158,26 @@ impl Drop for VulkanRenderer {
 }
 
 impl Renderer for VulkanRenderer {
-    fn begin_frame(&mut self) -> Result<(), Box<dyn Error>> {
+    fn begin_frame(&mut self, view: &Matrix4, proj: &Matrix4) -> Result<(), Box<dyn Error>> {
         self.current_frame
             .replace(self.device.begin_frame(&mut self.swapchain)?);
         let frame = self.current_frame.as_ref().unwrap();
         self.device.begin_render_pass(frame, &self.render_pass);
         self.device.bind_pipeline(frame, &self.pipeline);
+        self.device.push_constants(
+            frame,
+            &self.pipeline,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            bytes_of(proj),
+        );
+        self.device.push_constants(
+            frame,
+            &self.pipeline,
+            vk::ShaderStageFlags::VERTEX,
+            size_of::<Matrix4>() * 1,
+            bytes_of(view),
+        );
         Ok(())
     }
 
@@ -174,13 +192,20 @@ impl Renderer for VulkanRenderer {
         self.meshes.push(self.device.load_mesh(mesh)?);
         Ok(MeshHandle(self.meshes.len() - 1))
     }
-    fn draw(&mut self, mesh: MeshHandle) -> Result<(), Box<dyn Error>> {
+    fn draw(&mut self, mesh: MeshHandle, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
         let frame = self
             .current_frame
             .as_ref()
             .take()
             .ok_or("current_frame is None!")?;
         let mesh = &self.meshes[mesh.0];
+        self.device.push_constants(
+            frame,
+            &self.pipeline,
+            vk::ShaderStageFlags::VERTEX,
+            size_of::<Matrix4>() * 2,
+            bytes_of(transform),
+        );
         self.device.draw(frame, mesh);
         Ok(())
     }

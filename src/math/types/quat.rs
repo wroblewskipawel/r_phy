@@ -5,16 +5,34 @@ use super::{Matrix3, Vector3};
 
 #[cfg(test)]
 mod test_quat {
-    use super::{Matrix3, Quat, Vector3};
+
+    use crate::math::types::{Matrix3, Matrix4, Quat, Vector3, Vector4};
 
     fn get_quat() -> Quat {
         Quat::axis_angle(Vector3::z(), std::f32::consts::FRAC_PI_2)
+    }
+
+    fn get_matrix() -> Matrix3 {
+        let m = Matrix4::rotate_z(std::f32::consts::FRAC_PI_2);
+        Matrix3 {
+            i: Vector3::new(m.i.x, m.i.y, m.i.z),
+            j: Vector3::new(m.j.x, m.j.y, m.j.z),
+            k: Vector3::new(m.k.x, m.k.y, m.k.z),
+        }
     }
 
     #[test]
     fn mul() {
         let quat = get_quat();
         assert!((quat * Vector3::x()).approx_equal(Vector3::y()));
+    }
+
+    #[test]
+    fn mul_matrix() {
+        let quat = get_quat();
+        let m = get_matrix();
+        let m_q = quat * Matrix3::identity();
+        assert!((m_q).approx_equal(m));
     }
 
     #[test]
@@ -29,6 +47,15 @@ mod test_quat {
         let m_inv: Matrix3 = get_quat().inv().into();
         assert!((m * Vector3::x()).approx_equal(Vector3::y()));
         assert!((m_inv * Vector3::y()).approx_equal(Vector3::x()));
+    }
+
+    #[test]
+    fn from_matrix() {
+        let m = get_matrix();
+        let q: Quat = m.into();
+        let p_m = m * Vector3::x();
+        let p_q = q * Vector3::x();
+        assert!((p_q).approx_equal(p_m));
     }
 }
 
@@ -82,6 +109,13 @@ impl Mul<Vector3> for Quat {
     }
 }
 
+impl Mul<Matrix3> for Quat {
+    type Output = Matrix3;
+    fn mul(self, rhs: Matrix3) -> Self::Output {
+        Matrix3::new(self * rhs.i, self * rhs.j, self * rhs.k)
+    }
+}
+
 impl From<Quat> for Matrix3 {
     #[inline]
     fn from(value: Quat) -> Self {
@@ -90,6 +124,52 @@ impl From<Quat> for Matrix3 {
             value * Vector3::y(),
             value * Vector3::z(),
         )
+    }
+}
+
+impl From<Matrix3> for Quat {
+    #[inline]
+    fn from(value: Matrix3) -> Self {
+        let t;
+        let q;
+        if value.k.z < 0.0 {
+            if value.i.x > value.j.y {
+                t = 1.0 + value.i.x - value.j.y - value.k.z;
+                q = Quat::new(
+                    value.j.z - value.k.y,
+                    t,
+                    value.i.y + value.j.x,
+                    value.k.x + value.i.z,
+                );
+            } else {
+                t = 1.0 - value.i.x + value.j.y - value.k.z;
+                q = Quat::new(
+                    value.k.x - value.i.z,
+                    value.i.y + value.j.x,
+                    t,
+                    value.j.z + value.k.y,
+                );
+            }
+        } else {
+            if value.i.x < -value.j.y {
+                t = 1.0 - value.i.x - value.j.y + value.k.z;
+                q = Quat::new(
+                    value.i.y - value.j.x,
+                    value.k.x + value.i.z,
+                    value.j.z + value.k.y,
+                    t,
+                );
+            } else {
+                t = 1.0 + value.i.x + value.j.y + value.k.z;
+                q = Quat::new(
+                    t,
+                    value.j.z - value.k.y,
+                    value.k.x - value.i.z,
+                    value.i.y - value.j.x,
+                );
+            }
+        }
+        (0.5 / t.sqrt()) * q
     }
 }
 
