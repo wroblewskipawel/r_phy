@@ -3,11 +3,7 @@ use crate::{
     renderer::mesh::Vertex,
 };
 
-use super::{
-    render_pass::VulkanRenderPass,
-    swapchain::{Frame, VulkanSwapchain},
-    VulkanDevice,
-};
+use super::{render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, VulkanDevice};
 use ash::vk;
 use std::{error::Error, ffi::CStr, mem::size_of, path::Path};
 
@@ -233,10 +229,10 @@ impl VulkanDevice {
         Ok(layout)
     }
 
-    pub fn bind_pipeline(&self, frame: &Frame, pipeline: &GraphicsPipeline) {
+    pub fn bind_pipeline(&self, command_buffer: vk::CommandBuffer, pipeline: &GraphicsPipeline) {
         unsafe {
             self.device.cmd_bind_pipeline(
-                frame.command_buffer,
+                command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 pipeline.handle,
             );
@@ -245,7 +241,7 @@ impl VulkanDevice {
 
     pub fn push_constants(
         &self,
-        frame: &Frame,
+        command_buffer: vk::CommandBuffer,
         pipeline: &GraphicsPipeline,
         stage_flags: vk::ShaderStageFlags,
         offset: usize,
@@ -253,7 +249,7 @@ impl VulkanDevice {
     ) {
         unsafe {
             self.device.cmd_push_constants(
-                frame.command_buffer,
+                command_buffer,
                 pipeline.layout,
                 stage_flags,
                 offset as u32,

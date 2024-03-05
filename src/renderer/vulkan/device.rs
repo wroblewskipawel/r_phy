@@ -1,9 +1,9 @@
 pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod image;
-pub(super) mod mesh;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
+pub(super) mod resources;
 pub(super) mod swapchain;
 
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};

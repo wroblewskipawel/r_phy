@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 use crate::math::types::Vector3;
 
 #[derive(Debug, Clone, Copy)]
-pub struct MeshHandle(pub usize);
+pub struct MeshHandle(pub u64);
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]

@@ -1,4 +1,4 @@
-use super::{swapchain::Frame, VulkanDevice};
+use super::{swapchain::SwapchainFrame, VulkanDevice};
 use ash::vk;
 use std::error::Error;
 
@@ -158,7 +158,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn begin_render_pass(&self, frame: &Frame, render_pass: &VulkanRenderPass) {
+    pub fn begin_render_pass(&self, frame: &SwapchainFrame, render_pass: &VulkanRenderPass) {
         let clear_values = VulkanRenderPass::get_attachment_clear_values();
         unsafe {
             self.device.cmd_begin_render_pass(
@@ -176,7 +176,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn end_render_pass(&self, frame: &Frame) {
+    pub fn end_render_pass(&self, frame: &SwapchainFrame) {
         unsafe {
             self.device.cmd_end_render_pass(frame.command_buffer);
         }

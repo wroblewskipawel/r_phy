@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_transparent(false)
         .build(&event_loop)?;
     let mut renderer = RendererBackend::Vulkan.create(&window)?;
-    let mesh = renderer.load_mesh(&Mesh::cube())?;
+    let meshes = renderer.load_meshes(&[Mesh::cube(), Mesh::triangle()])?;
     let view = Matrix4::look_at(
         Vector3::new(0.0, -10.0, 10.0),
         Vector3::new(0.0, 0.0, 0.0),
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Event::AboutToWait => {
                 let _ = renderer.begin_frame(&view, &proj);
                 let _ = renderer.draw(
-                    mesh,
+                    meshes[0],
                     &(Transform::identity()
                         .rotate(Vector3::z(), model_rotation)
                         .translate(Vector3::new(0.0, 3.0, 0.0))
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .into(),
                 );
                 let _ = renderer.draw(
-                    mesh,
+                    meshes[0],
                     &(Transform::identity()
                         .rotate(Vector3::z(), -model_rotation)
                         .translate(Vector3::new(0.0, 2.0, 0.0))
@@ -76,6 +76,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                         std::f32::consts::FRAC_PI_2,
                     )
                     .into(),
+                );
+                let _ = renderer.draw(
+                    meshes[1],
+                    &(<Transform as Into<Matrix4>>::into(
+                        Transform::identity().rotate(Vector3::z(), model_rotation / 3.0),
+                    ) * Matrix4::scale(3.0)),
                 );
                 let _ = renderer.end_frame();
             }

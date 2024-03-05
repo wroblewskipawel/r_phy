@@ -1,7 +1,40 @@
-use ash::vk;
-use std::error::Error;
+use ash::{vk, Device};
+use std::{error::Error, ffi::c_void, ptr::copy_nonoverlapping};
 
 use super::VulkanDevice;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Range {
+    pub size: vk::DeviceSize,
+    pub offset: vk::DeviceSize,
+}
+
+pub struct MappedBufferRange<'a, 'b> {
+    ptr: *mut c_void,
+    device: &'a Device,
+    buffer: &'b mut Buffer,
+}
+
+impl<'a, 'b> MappedBufferRange<'a, 'b> {
+    pub fn copy_data(&mut self, offset: usize, data: &[u8]) {
+        unsafe {
+            copy_nonoverlapping(
+                data.as_ptr(),
+                (self.ptr as *mut u8).offset(offset as isize),
+                data.len(),
+            )
+        }
+    }
+}
+
+impl<'a, 'b> Drop for MappedBufferRange<'a, 'b> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.unmap_memory(self.buffer.device_memory);
+        }
+    }
+}
 
 pub struct Buffer {
     pub buffer: vk::Buffer,
@@ -46,22 +79,24 @@ impl VulkanDevice {
         })
     }
 
-    pub fn transfer_buffer_data(
-        &self,
-        buffer: &mut Buffer,
-        data: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
-        unsafe {
-            let p_buffer_mem = self.device.map_memory(
+    pub fn map_buffer_range<'a, 'b>(
+        &'a self,
+        buffer: &'b mut Buffer,
+        range: Range,
+    ) -> Result<MappedBufferRange<'a, 'b>, Box<dyn Error>> {
+        let ptr = unsafe {
+            self.device.map_memory(
                 buffer.device_memory,
-                0,
-                data.len() as vk::DeviceSize,
+                range.offset,
+                range.size,
                 vk::MemoryMapFlags::empty(),
-            )?;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), p_buffer_mem as *mut _, data.len());
-            self.device.unmap_memory(buffer.device_memory);
+            )?
         };
-        Ok(())
+        Ok(MappedBufferRange {
+            ptr,
+            buffer: buffer,
+            device: &self.device,
+        })
     }
 
     pub fn destroy_buffer(&self, buffer: &mut Buffer) {

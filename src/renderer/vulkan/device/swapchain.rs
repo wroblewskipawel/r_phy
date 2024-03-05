@@ -13,7 +13,7 @@ pub struct FrameSync {
     draw_finished: vk::Semaphore,
 }
 
-pub struct Frame {
+pub struct SwapchainFrame {
     pub command_buffer: vk::CommandBuffer,
     pub framebuffer: vk::Framebuffer,
     pub render_area: vk::Rect2D,
@@ -258,7 +258,7 @@ impl VulkanDevice {
     pub fn begin_frame<'a>(
         &self,
         swapchain: &'a mut VulkanSwapchain,
-    ) -> Result<Frame, Box<dyn Error>> {
+    ) -> Result<SwapchainFrame, Box<dyn Error>> {
         let (command_buffer, sync) = self.get_next_frame_data(swapchain);
         let image_index = unsafe {
             self.device
@@ -289,7 +289,7 @@ impl VulkanDevice {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain.image_extent,
         };
-        Ok(Frame {
+        Ok(SwapchainFrame {
             command_buffer,
             framebuffer,
             render_area,
@@ -301,9 +301,9 @@ impl VulkanDevice {
     pub fn end_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
-        frame: Frame,
+        frame: SwapchainFrame,
     ) -> Result<(), Box<dyn Error>> {
-        let Frame {
+        let SwapchainFrame {
             command_buffer,
             image_index,
             sync,
