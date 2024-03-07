@@ -4,11 +4,13 @@ use ash::vk;
 use bytemuck::{cast_slice, Pod};
 use strum::EnumCount;
 
-use crate::renderer::{mesh::Mesh, vulkan::device::Operation};
+use crate::renderer::{
+    mesh::{Mesh, Vertex},
+    vulkan::device::Operation,
+};
 
 use super::{
     buffer::{Buffer, Range},
-
     VulkanDevice,
 };
 
@@ -74,25 +76,36 @@ impl VulkanDevice {
         let buffer_ranges = Self::get_buffer_ranges(meshes);
         let mut buffer = self.create_buffer(
             buffer_ranges.get_rquired_buffer_size(),
-            vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::BufferUsageFlags::VERTEX_BUFFER
+                | vk::BufferUsageFlags::INDEX_BUFFER
+                | vk::BufferUsageFlags::TRANSFER_DST,
             vk::SharingMode::EXCLUSIVE,
             &self.get_queue_families(&[Operation::Graphics]),
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
-        let vertex_data_ranges = self.load_buffer_data_from_slices(
-            buffer_ranges[BufferType::Vertex],
-            &mut buffer,
-            meshes.iter().map(|mesh| mesh.vertices.as_slice()),
-        )?;
-        let index_data_ranges = self.load_buffer_data_from_slices(
-            buffer_ranges[BufferType::Index],
-            &mut buffer,
+        let mut staging_buffer = self.create_stagging_buffer()?;
+        let (_, vertex_ranges) = staging_buffer
+            .load_buffer_data_from_slices(0, meshes.iter().map(|mesh| mesh.vertices.as_slice()))?;
+        let index_buffer_offset = buffer_ranges[BufferType::Index].offset;
+        let (_, index_ranges) = staging_buffer.load_buffer_data_from_slices(
+            index_buffer_offset as usize,
             meshes.iter().map(|mesh| mesh.indices.as_slice()),
         )?;
-        let meshes = vertex_data_ranges
+        staging_buffer.transfer_data(&mut buffer, 0)?;
+
+        let meshes = vertex_ranges
             .into_iter()
-            .zip(index_data_ranges.into_iter())
-            .map(|(vertices, indices)| MeshRange { vertices, indices })
+            .zip(index_ranges.into_iter())
+            .map(|(vertices, indices)| MeshRange {
+                vertices: Elements {
+                    first: (vertices.offset / size_of::<Vertex>() as u64) as u32,
+                    count: (vertices.size / size_of::<Vertex>() as u64) as u32,
+                },
+                indices: Elements {
+                    first: ((indices.offset - index_buffer_offset) / size_of::<u32>() as u64) as u32,
+                    count: (indices.size / size_of::<u32>() as u64) as u32,
+                },
+            })
             .collect();
         Ok(ResourcePack {
             buffer,

@@ -6,23 +6,18 @@ pub(super) mod render_pass;
 pub(super) mod resources;
 pub(super) mod swapchain;
 
+use self::command::{CommandPools, Operation};
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 use ash::{vk, Device, Instance};
 use colored::Colorize;
 use std::ffi::c_char;
+use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
     ffi::CStr,
 };
 use swapchain::VulkanSwapchain;
-
-#[derive(Debug, Clone, Copy)]
-pub enum Operation {
-    Graphics,
-    Compute,
-    Transfer,
-}
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -257,8 +252,16 @@ struct DeviceQueues {
 
 pub(super) struct VulkanDevice {
     physical_device: VulkanPhysicalDevice,
+    coomand_pools: CommandPools,
     device_queues: DeviceQueues,
     device: Device,
+}
+
+impl Deref for VulkanDevice {
+    type Target = Device;
+    fn deref(&self) -> &Self::Target {
+        &self.device
+    }
 }
 
 fn check_physical_device_suitable(
@@ -334,8 +337,10 @@ impl VulkanDevice {
             )?
         };
         let device_queues = queue_builder.get_device_queues(&device);
+        let coomand_pools = CommandPools::create(&device, physical_device.queue_families)?;
         Ok(Self {
             physical_device,
+            coomand_pools,
             device_queues,
             device,
         })
@@ -343,6 +348,7 @@ impl VulkanDevice {
 
     pub fn destory(&mut self) {
         unsafe {
+            self.coomand_pools.destory(&self.device);
             self.device.destroy_device(None);
         }
     }
