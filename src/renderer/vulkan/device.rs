@@ -6,12 +6,12 @@ pub(super) mod render_pass;
 pub(super) mod resources;
 pub(super) mod swapchain;
 
-use self::command::{CommandPools, Operation};
+use self::command::{Operation, TransientCommandPools};
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 use ash::{vk, Device, Instance};
 use colored::Colorize;
 use std::ffi::c_char;
-use std::ops::Deref;
+use std::ops::{Deref, Index};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -24,6 +24,17 @@ struct QueueFamilies {
     graphics: u32,
     compute: u32,
     transfer: u32,
+}
+
+impl Index<Operation> for QueueFamilies {
+    type Output = u32;
+    fn index(&self, index: Operation) -> &Self::Output {
+        match index {
+            Operation::Graphics => &self.graphics,
+            Operation::Compute => &self.compute,
+            Operation::Transfer => &self.transfer,
+        }
+    }
 }
 
 impl QueueFamilies {
@@ -250,9 +261,20 @@ struct DeviceQueues {
     transfer: vk::Queue,
 }
 
+impl Index<Operation> for DeviceQueues {
+    type Output = vk::Queue;
+    fn index(&self, index: Operation) -> &Self::Output {
+        match index {
+            Operation::Graphics => &self.graphics,
+            Operation::Compute => &self.compute,
+            Operation::Transfer => &self.transfer,
+        }
+    }
+}
+
 pub(super) struct VulkanDevice {
     physical_device: VulkanPhysicalDevice,
-    coomand_pools: CommandPools,
+    command_pools: TransientCommandPools,
     device_queues: DeviceQueues,
     device: Device,
 }
@@ -337,10 +359,10 @@ impl VulkanDevice {
             )?
         };
         let device_queues = queue_builder.get_device_queues(&device);
-        let coomand_pools = CommandPools::create(&device, physical_device.queue_families)?;
+        let command_pools = TransientCommandPools::create(&device, physical_device.queue_families)?;
         Ok(Self {
             physical_device,
-            coomand_pools,
+            command_pools,
             device_queues,
             device,
         })
@@ -348,7 +370,7 @@ impl VulkanDevice {
 
     pub fn destory(&mut self) {
         unsafe {
-            self.coomand_pools.destory(&self.device);
+            self.command_pools.destory(&self.device);
             self.device.destroy_device(None);
         }
     }
@@ -382,13 +404,19 @@ impl VulkanDevice {
         Ok(())
     }
 
+    pub fn get_queue_family(&self, operation: Operation) -> u32 {
+        match operation {
+            Operation::Graphics => self.physical_device.queue_families.graphics,
+            Operation::Compute => self.physical_device.queue_families.compute,
+            Operation::Transfer => self.physical_device.queue_families.transfer,
+        }
+    }
+
     pub fn get_queue_families(&self, operations: &[Operation]) -> Vec<u32> {
-        Vec::from_iter(HashSet::<u32>::from_iter(operations.iter().map(
-            |&operation| match operation {
-                Operation::Graphics => self.physical_device.queue_families.graphics,
-                Operation::Compute => self.physical_device.queue_families.compute,
-                Operation::Transfer => self.physical_device.queue_families.transfer,
-            },
-        )))
+        Vec::from_iter(HashSet::<u32>::from_iter(
+            operations
+                .iter()
+                .map(|&operation| self.get_queue_family(operation)),
+        ))
     }
 }

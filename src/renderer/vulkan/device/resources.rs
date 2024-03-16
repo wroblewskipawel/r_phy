@@ -1,7 +1,7 @@
 use std::{error::Error, mem::size_of, ops::Index};
 
 use ash::vk;
-use bytemuck::{cast_slice, Pod};
+use bytemuck::Pod;
 use strum::EnumCount;
 
 use crate::renderer::{
@@ -10,7 +10,7 @@ use crate::renderer::{
 };
 
 use super::{
-    buffer::{Buffer, Range},
+    buffer::{DeviceLocalBuffer, Range},
     VulkanDevice,
 };
 
@@ -66,7 +66,7 @@ pub struct MeshRange {
 }
 
 pub struct ResourcePack {
-    buffer: Buffer,
+    buffer: DeviceLocalBuffer,
     buffer_ranges: BufferRanges,
     pub meshes: Vec<MeshRange>,
 }
@@ -74,25 +74,35 @@ pub struct ResourcePack {
 impl VulkanDevice {
     pub fn load_resource_pack(&mut self, meshes: &[Mesh]) -> Result<ResourcePack, Box<dyn Error>> {
         let buffer_ranges = Self::get_buffer_ranges(meshes);
-        let mut buffer = self.create_buffer(
+        let buffer = self.create_device_local_buffer(
             buffer_ranges.get_rquired_buffer_size(),
             vk::BufferUsageFlags::VERTEX_BUFFER
                 | vk::BufferUsageFlags::INDEX_BUFFER
                 | vk::BufferUsageFlags::TRANSFER_DST,
             vk::SharingMode::EXCLUSIVE,
             &self.get_queue_families(&[Operation::Graphics]),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
-        let mut staging_buffer = self.create_stagging_buffer()?;
-        let (_, vertex_ranges) = staging_buffer
-            .load_buffer_data_from_slices(0, meshes.iter().map(|mesh| mesh.vertices.as_slice()))?;
-        let index_buffer_offset = buffer_ranges[BufferType::Index].offset;
-        let (_, index_ranges) = staging_buffer.load_buffer_data_from_slices(
-            index_buffer_offset as usize,
-            meshes.iter().map(|mesh| mesh.indices.as_slice()),
-        )?;
-        staging_buffer.transfer_data(&mut buffer, 0)?;
+        let (vertex_ranges, index_ranges) = {
+            let mut staging_buffer = self.create_stagging_buffer(buffer.buffer.size)?;
+            let (_, vertex_ranges) = staging_buffer.load_buffer_data_from_slices(
+                &meshes
+                    .iter()
+                    .map(|mesh| mesh.vertices.as_slice())
+                    .collect::<Vec<_>>(),
+                size_of::<f32>(),
+            )?;
+            let (_, index_ranges) = staging_buffer.load_buffer_data_from_slices(
+                &meshes
+                    .iter()
+                    .map(|mesh| mesh.indices.as_slice())
+                    .collect::<Vec<_>>(),
+                size_of::<u32>(),
+            )?;
+            staging_buffer.transfer_data(&buffer, 0)?;
+            (vertex_ranges, index_ranges)
+        };
 
+        let index_buffer_offset = buffer_ranges[BufferType::Index].offset;
         let meshes = vertex_ranges
             .into_iter()
             .zip(index_ranges.into_iter())
@@ -102,7 +112,8 @@ impl VulkanDevice {
                     count: (vertices.size / size_of::<Vertex>() as u64) as u32,
                 },
                 indices: Elements {
-                    first: ((indices.offset - index_buffer_offset) / size_of::<u32>() as u64) as u32,
+                    first: ((indices.offset - index_buffer_offset) / size_of::<u32>() as u64)
+                        as u32,
                     count: (indices.size / size_of::<u32>() as u64) as u32,
                 },
             })
@@ -118,14 +129,14 @@ impl VulkanDevice {
         unsafe {
             self.device.cmd_bind_index_buffer(
                 command_buffer,
-                resources.buffer.buffer,
+                resources.buffer.buffer.buffer,
                 resources.buffer_ranges[BufferType::Index].offset,
                 vk::IndexType::UINT32,
             );
             self.device.cmd_bind_vertex_buffers(
                 command_buffer,
                 0,
-                &[resources.buffer.buffer],
+                &[resources.buffer.buffer.buffer],
                 &[resources.buffer_ranges[BufferType::Vertex].offset],
             );
         }
@@ -151,7 +162,7 @@ impl VulkanDevice {
     }
 
     pub fn destory_resource_pack(&self, resources: &mut ResourcePack) {
-        self.destroy_buffer(&mut resources.buffer);
+        self.destroy_buffer((&mut resources.buffer).into());
     }
 
     fn get_buffer_ranges(meshes: &[Mesh]) -> BufferRanges {
@@ -184,29 +195,5 @@ impl VulkanDevice {
 
     fn get_required_buffer_size<'a, T: Pod>(slices: impl Iterator<Item = &'a [T]>) -> usize {
         slices.map(|slice| slice.len() * size_of::<T>()).sum()
-    }
-
-    fn load_buffer_data_from_slices<'a, T: Pod>(
-        &self,
-        dst_range: Range,
-        dst_buffer: &mut Buffer,
-        src_slices: impl Iterator<Item = &'a [T]>,
-    ) -> Result<Vec<Elements>, Box<dyn Error>> {
-        let mut buffer = self.map_buffer_range(dst_buffer, dst_range)?;
-        let mut buffer_offset = 0;
-        let mut element_offset = 0;
-        let mut slice_ranges = vec![];
-        for slice in src_slices {
-            let bytes: &[u8] = cast_slice(slice);
-            let num_elements = slice.len() as u32;
-            buffer.copy_data(buffer_offset, bytes);
-            slice_ranges.push(Elements {
-                first: element_offset,
-                count: num_elements,
-            });
-            element_offset += num_elements;
-            buffer_offset += bytes.len();
-        }
-        Ok(slice_ranges)
     }
 }

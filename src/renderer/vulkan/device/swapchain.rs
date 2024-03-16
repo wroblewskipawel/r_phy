@@ -4,7 +4,10 @@ use std::{error::Error, ffi::CStr};
 use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 
 use super::{
-    command::CommandPool, image::VulkanImage2D, render_pass::VulkanRenderPass, VulkanDevice,
+    command::{Operation, PersistentCommandPool},
+    image::VulkanImage2D,
+    render_pass::VulkanRenderPass,
+    VulkanDevice,
 };
 
 pub struct FrameSync {
@@ -39,7 +42,7 @@ impl SwapchainSync {
 
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
-    command_pool: CommandPool,
+    command_pool: PersistentCommandPool,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     images: Vec<vk::Image>,
@@ -153,11 +156,8 @@ impl VulkanDevice {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
-        let command_pool = self.create_command_pool(
-            self.physical_device.queue_families.graphics,
-            vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-            images.len(),
-        )?;
+        let command_pool =
+            self.create_persistent_command_pool(Operation::Graphics, images.len())?;
         Ok(VulkanSwapchain {
             image_extent,
             command_pool,
@@ -185,7 +185,7 @@ impl VulkanDevice {
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
             self.destory_image(&mut swapchain.depth_buffer);
             self.destory_swapchain_sync(&mut swapchain.sync);
-            self.destory_command_pool(&mut swapchain.command_pool);
+            self.destory_persistent_command_pool(&mut swapchain.command_pool);
         }
     }
 

@@ -2,7 +2,7 @@ use ash::{vk, Device};
 use bytemuck::{cast_slice, Pod};
 use std::{error::Error, ffi::c_void, ptr::copy_nonoverlapping};
 
-use crate::renderer::vulkan::device::Operation;
+use crate::renderer::vulkan::device::command::Operation;
 
 use super::VulkanDevice;
 
@@ -13,33 +13,8 @@ pub struct Range {
     pub offset: vk::DeviceSize,
 }
 
-pub struct MappedBufferRange<'a, 'b> {
-    ptr: *mut c_void,
-    device: &'a Device,
-    buffer: &'b mut Buffer,
-}
-
-impl<'a, 'b> MappedBufferRange<'a, 'b> {
-    pub fn copy_data(&mut self, offset: usize, data: &[u8]) {
-        unsafe {
-            copy_nonoverlapping(
-                data.as_ptr(),
-                (self.ptr as *mut u8).offset(offset as isize),
-                data.len(),
-            )
-        }
-    }
-}
-
-impl<'a, 'b> Drop for MappedBufferRange<'a, 'b> {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.unmap_memory(self.buffer.device_memory);
-        }
-    }
-}
-
 pub struct Buffer {
+    pub size: usize,
     pub buffer: vk::Buffer,
     device_memory: vk::DeviceMemory,
 }
@@ -77,28 +52,9 @@ impl VulkanDevice {
             (buffer, device_memory)
         };
         Ok(Buffer {
+            size,
             buffer,
             device_memory,
-        })
-    }
-
-    pub fn map_buffer_range<'a, 'b>(
-        &'a self,
-        buffer: &'b mut Buffer,
-        range: Range,
-    ) -> Result<MappedBufferRange<'a, 'b>, Box<dyn Error>> {
-        let ptr = unsafe {
-            self.device.map_memory(
-                buffer.device_memory,
-                range.offset,
-                range.size,
-                vk::MemoryMapFlags::empty(),
-            )?
-        };
-        Ok(MappedBufferRange {
-            ptr,
-            buffer: buffer,
-            device: &self.device,
         })
     }
 
@@ -110,113 +66,231 @@ impl VulkanDevice {
     }
 }
 
-pub struct StagingBuffer<'a> {
-    src_size: vk::DeviceSize,
-    fence: vk::Fence,
+pub struct HostVisibleBuffer {
     buffer: Buffer,
+}
+
+impl<'a> From<&'a HostVisibleBuffer> for &'a Buffer {
+    fn from(value: &'a HostVisibleBuffer) -> Self {
+        &value.buffer
+    }
+}
+
+impl<'a> From<&'a mut HostVisibleBuffer> for &'a mut Buffer {
+    fn from(value: &'a mut HostVisibleBuffer) -> Self {
+        &mut value.buffer
+    }
+}
+
+impl HostVisibleBuffer {
+    fn map(&mut self, device: &Device, range: Range) -> Result<HostMappedMemory, Box<dyn Error>> {
+        let ptr = unsafe {
+            device.map_memory(
+                self.buffer.device_memory,
+                range.offset,
+                range.size,
+                vk::MemoryMapFlags::empty(),
+            )?
+        };
+        Ok(HostMappedMemory {
+            device_memory: self.buffer.device_memory,
+            ptr: Some(ptr),
+        })
+    }
+}
+
+pub struct HostMappedMemory {
+    device_memory: vk::DeviceMemory,
+    ptr: Option<*mut c_void>,
+}
+
+impl HostMappedMemory {
+    fn transfer_data<T: Pod>(
+        &mut self,
+        dst_offset: vk::DeviceSize,
+        src: &[T],
+    ) -> Result<&mut Self, Box<dyn Error>> {
+        let ptr = self
+            .ptr
+            .ok_or("Host Visible buffer isn't currently mapped!")?;
+        let src_bytes: &[u8] = cast_slice(src);
+        unsafe {
+            copy_nonoverlapping(
+                src_bytes.as_ptr(),
+                (ptr as *mut u8).offset(dst_offset as isize),
+                src_bytes.len(),
+            )
+        };
+        Ok(self)
+    }
+
+    fn unmap(&mut self, device: &Device) {
+        if let Some(_) = self.ptr.take() {
+            unsafe { device.unmap_memory(self.device_memory) };
+        }
+    }
+}
+
+impl Drop for HostMappedMemory {
+    fn drop(&mut self) {
+        if let Some(_) = self.ptr.take() {
+            panic!("HostMappedMemory wasn't unmapped before drop!");
+        }
+    }
+}
+
+impl VulkanDevice {
+    pub fn create_host_visible_buffer(
+        &self,
+        size: usize,
+        usage: vk::BufferUsageFlags,
+        sharing_mode: vk::SharingMode,
+        queue_families: &[u32],
+    ) -> Result<HostVisibleBuffer, Box<dyn Error>> {
+        let buffer = self.create_buffer(
+            size,
+            usage,
+            sharing_mode,
+            queue_families,
+            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )?;
+        Ok(HostVisibleBuffer { buffer })
+    }
+}
+
+pub struct DeviceLocalBuffer {
+    pub buffer: Buffer,
+}
+
+impl<'a> From<&'a DeviceLocalBuffer> for &'a Buffer {
+    fn from(value: &'a DeviceLocalBuffer) -> Self {
+        &value.buffer
+    }
+}
+
+impl<'a> From<&'a mut DeviceLocalBuffer> for &'a mut Buffer {
+    fn from(value: &'a mut DeviceLocalBuffer) -> Self {
+        &mut value.buffer
+    }
+}
+
+impl VulkanDevice {
+    pub fn create_device_local_buffer(
+        &self,
+        size: usize,
+        usage: vk::BufferUsageFlags,
+        sharing_mode: vk::SharingMode,
+        queue_families: &[u32],
+    ) -> Result<DeviceLocalBuffer, Box<dyn Error>> {
+        let buffer = self.create_buffer(
+            size,
+            usage,
+            sharing_mode,
+            queue_families,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        Ok(DeviceLocalBuffer { buffer })
+    }
+}
+
+pub struct StagingBuffer<'a> {
+    buffer: HostVisibleBuffer,
+    offset: vk::DeviceSize,
     device: &'a VulkanDevice,
+}
+
+impl<'a> From<&'a StagingBuffer<'a>> for &'a Buffer {
+    fn from(value: &'a StagingBuffer) -> Self {
+        (&value.buffer).into()
+    }
+}
+
+impl<'a> From<&'a mut StagingBuffer<'a>> for &'a mut Buffer {
+    fn from(value: &'a mut StagingBuffer) -> Self {
+        (&mut value.buffer).into()
+    }
 }
 
 impl<'a> Drop for StagingBuffer<'a> {
     fn drop(&mut self) {
-        unsafe { self.device.destroy_fence(self.fence, None) };
-        self.device.destroy_buffer(&mut self.buffer);
+        self.device.destroy_buffer((&mut self.buffer).into())
     }
 }
 
 impl<'a> StagingBuffer<'a> {
-    pub fn transfer_data(
-        &mut self,
-        dst: &mut Buffer,
+    pub fn transfer_data<'b>(
+        &self,
+        dst: impl Into<&'b Buffer>,
         dst_offset: vk::DeviceSize,
     ) -> Result<(), Box<dyn Error>> {
         let command = self
             .device
-            .coomand_pools
-            .allocate_command(self.device, Operation::Transfer)?;
-        let device: &Device = self.device;
-        let command_buffer: vk::CommandBuffer = (&command).into();
-        unsafe {
-            device.begin_command_buffer(
-                command_buffer,
-                &vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )?;
-            device.cmd_copy_buffer(
-                command_buffer,
-                self.buffer.buffer,
-                dst.buffer,
+            .allocate_transient_command(Operation::Transfer)?;
+        let command = self
+            .device
+            .begin_command(command)?
+            .copy_buffer(
+                &self.buffer,
+                dst,
                 &[vk::BufferCopy {
                     src_offset: 0,
                     dst_offset: dst_offset,
-                    size: self.src_size,
+                    size: self.offset,
                 }],
-            );
-            device.end_command_buffer(command_buffer)?;
-            device.queue_submit(
-                self.device.device_queues.transfer,
-                &[vk::SubmitInfo {
-                    command_buffer_count: 1,
-                    p_command_buffers: [command_buffer].as_ptr(),
-                    ..Default::default()
-                }],
-                self.fence,
-            )?;
-            self.device.wait_for_fences(&[self.fence], true, u64::MAX)?;
-            self.device.reset_fences(&[self.fence])?;
-        }
-        self.device
-            .coomand_pools
-            .free_command(&self.device, command);
+            )
+            .finish()?
+            .submit()?
+            .wait()?;
+        self.device.free_command(&command);
         Ok(())
     }
 
     pub fn load_buffer_data_from_slices<T: Pod>(
         &mut self,
-        offset: usize,
-        src_slices: impl Iterator<Item = &'a [T]>,
+        src_slices: &[&[T]],
+        alignment: usize,
     ) -> Result<(usize, Vec<Range>), Box<dyn Error>> {
-        let mut buffer = self.device.map_buffer_range(
-            &mut self.buffer,
+        let mut p_buffer = self.buffer.map(
+            &self.device,
             Range {
                 offset: 0,
-                size: 1024 * 1024,
+                size: self.buffer.buffer.size as u64,
             },
         )?;
-        let mut buffer_offset = offset;
+        let mut buffer_offset = Self::align_offset(self.offset, alignment as vk::DeviceSize);
         let mut slice_ranges = vec![];
         for slice in src_slices {
             let bytes: &[u8] = cast_slice(slice);
-            buffer.copy_data(buffer_offset, bytes);
+            p_buffer.transfer_data(buffer_offset, bytes)?;
             slice_ranges.push(Range {
                 offset: buffer_offset as vk::DeviceSize,
                 size: bytes.len() as vk::DeviceSize,
             });
-            buffer_offset += bytes.len();
+            buffer_offset += bytes.len() as u64;
         }
-        self.src_size = buffer_offset as vk::DeviceSize;
-        Ok((buffer_offset, slice_ranges))
+        self.offset = buffer_offset as vk::DeviceSize;
+        p_buffer.unmap(self.device);
+        Ok((buffer_offset as usize, slice_ranges))
+    }
+
+    fn align_offset(offset: vk::DeviceSize, alignment: vk::DeviceSize) -> vk::DeviceSize {
+        debug_assert_ne!(alignment, 0, "Invalid alignment value!");
+        ((offset + (alignment - 1)) / alignment) * alignment
     }
 }
 
 impl VulkanDevice {
-    pub fn create_stagging_buffer(&self) -> Result<StagingBuffer, Box<dyn Error>> {
-        let buffer = self.create_buffer(
-            1024 * 1024,
+    pub fn create_stagging_buffer(&self, size: usize) -> Result<StagingBuffer, Box<dyn Error>> {
+        let buffer = self.create_host_visible_buffer(
+            size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::SharingMode::EXCLUSIVE,
             &self.get_queue_families(&[Operation::Transfer]),
-            vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
         )?;
-        let fence = unsafe {
-            self.device
-                .create_fence(&vk::FenceCreateInfo::default(), None)?
-        };
         Ok(StagingBuffer {
-            src_size: 0,
-            fence,
+            offset: 0,
             buffer,
-            device: &self,
+            device: self,
         })
     }
 }
