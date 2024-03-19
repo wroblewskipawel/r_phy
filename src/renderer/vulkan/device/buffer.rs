@@ -4,7 +4,7 @@ use std::{error::Error, ffi::c_void, ptr::copy_nonoverlapping};
 
 use crate::renderer::vulkan::device::command::Operation;
 
-use super::VulkanDevice;
+use super::{command::SubmitSemaphoreState, VulkanDevice};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -226,10 +226,9 @@ impl<'a> StagingBuffer<'a> {
         let command = self
             .device
             .allocate_transient_command(Operation::Transfer)?;
-        let command = self
-            .device
-            .begin_command(command)?
-            .copy_buffer(
+        let command = self.device.begin_command(command)?;
+        let command = self.device.record_command(command, |command| {
+            command.copy_buffer(
                 &self.buffer,
                 dst,
                 &[vk::BufferCopy {
@@ -238,8 +237,17 @@ impl<'a> StagingBuffer<'a> {
                     size: self.offset,
                 }],
             )
-            .finish()?
-            .submit()?
+        });
+        let command = self
+            .device
+            .finish_command(command)?
+            .submit(
+                SubmitSemaphoreState {
+                    semaphores: &[],
+                    masks: &[],
+                },
+                &[],
+            )?
             .wait()?;
         self.device.free_command(&command);
         Ok(())

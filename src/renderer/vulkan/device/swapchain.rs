@@ -4,20 +4,21 @@ use std::{error::Error, ffi::CStr};
 use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 
 use super::{
-    command::{Operation, PersistentCommandPool},
+    command::{
+        BeginCommand, NewCommand, Operation, Persistent, PersistentCommandPool,
+        SubmitSemaphoreState,
+    },
     image::VulkanImage2D,
     render_pass::VulkanRenderPass,
     VulkanDevice,
 };
 
 pub struct FrameSync {
-    frame_available: vk::Fence,
     draw_ready: vk::Semaphore,
     draw_finished: vk::Semaphore,
 }
 
 pub struct SwapchainFrame {
-    pub command_buffer: vk::CommandBuffer,
     pub framebuffer: vk::Framebuffer,
     pub render_area: vk::Rect2D,
     image_index: usize,
@@ -27,7 +28,6 @@ pub struct SwapchainFrame {
 struct SwapchainSync {
     draw_ready: Vec<vk::Semaphore>,
     draw_finished: Vec<vk::Semaphore>,
-    frame_available: Vec<vk::Fence>,
 }
 
 impl SwapchainSync {
@@ -35,7 +35,6 @@ impl SwapchainSync {
         FrameSync {
             draw_ready: self.draw_ready[index],
             draw_finished: self.draw_finished[index],
-            frame_available: self.frame_available[index],
         }
     }
 }
@@ -210,21 +209,9 @@ impl VulkanDevice {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let frame_available = (0..num_images)
-            .map(|_| unsafe {
-                self.device.create_fence(
-                    &vk::FenceCreateInfo {
-                        flags: vk::FenceCreateFlags::SIGNALED,
-                        ..Default::default()
-                    },
-                    None,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(SwapchainSync {
             draw_ready,
             draw_finished,
-            frame_available,
         })
     }
 
@@ -236,34 +223,24 @@ impl VulkanDevice {
             sync.draw_finished
                 .iter()
                 .for_each(|&semaphore| self.device.destroy_semaphore(semaphore, None));
-            sync.frame_available
-                .iter()
-                .for_each(|&fence| self.device.destroy_fence(fence, None));
         }
     }
 
     fn get_next_frame_data(
         &self,
         swapchain: &mut VulkanSwapchain,
-    ) -> (vk::CommandBuffer, FrameSync) {
-        let frame_index = swapchain.next_frame_index;
-        swapchain.next_frame_index += 1;
-        swapchain.next_frame_index %= swapchain.images.len();
-        (
-            swapchain.command_pool.buffers[frame_index],
-            swapchain.sync.get_frame(frame_index),
-        )
+    ) -> (NewCommand<Persistent>, FrameSync) {
+        let (frame_index, command) = swapchain.command_pool.next();
+        (command, swapchain.sync.get_frame(frame_index))
     }
 
-    pub fn begin_frame<'a>(
+    pub fn begin_frame(
         &self,
-        swapchain: &'a mut VulkanSwapchain,
-    ) -> Result<SwapchainFrame, Box<dyn Error>> {
-        let (command_buffer, sync) = self.get_next_frame_data(swapchain);
+        swapchain: &mut VulkanSwapchain,
+    ) -> Result<(BeginCommand<Persistent>, SwapchainFrame), Box<dyn Error>> {
+        let (command, sync) = self.get_next_frame_data(swapchain);
+        let command = self.begin_persistent_command(command)?;
         let image_index = unsafe {
-            self.device
-                .wait_for_fences(&[sync.frame_available], true, u64::MAX)?;
-            self.device.reset_fences(&[sync.frame_available])?;
             let image_index = swapchain
                 .loader
                 .acquire_next_image(
@@ -276,55 +253,38 @@ impl VulkanDevice {
             image_index
         };
         let framebuffer = swapchain.framebuffers[image_index];
-        unsafe {
-            self.device.begin_command_buffer(
-                command_buffer,
-                &vk::CommandBufferBeginInfo {
-                    flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-                    ..Default::default()
-                },
-            )?;
-        }
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain.image_extent,
         };
-        Ok(SwapchainFrame {
-            command_buffer,
-            framebuffer,
-            render_area,
-            image_index,
-            sync,
-        })
+
+        Ok((
+            command,
+            SwapchainFrame {
+                framebuffer,
+                render_area,
+                image_index,
+                sync,
+            },
+        ))
     }
 
     pub fn end_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
+        command: BeginCommand<Persistent>,
         frame: SwapchainFrame,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {
-            command_buffer,
-            image_index,
-            sync,
-            ..
+            image_index, sync, ..
         } = frame;
         unsafe {
-            self.device.end_command_buffer(command_buffer)?;
-            self.device.queue_submit(
-                self.device_queues.graphics,
-                &[vk::SubmitInfo {
-                    wait_semaphore_count: 1,
-                    p_wait_semaphores: [sync.draw_ready].as_ptr(),
-                    p_wait_dst_stage_mask: [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
-                        .as_ptr(),
-                    command_buffer_count: 1,
-                    p_command_buffers: [command_buffer].as_ptr(),
-                    signal_semaphore_count: 1,
-                    p_signal_semaphores: [sync.draw_finished].as_ptr(),
-                    ..Default::default()
-                }],
-                sync.frame_available,
+            self.finish_command(command)?.submit(
+                SubmitSemaphoreState {
+                    semaphores: &[sync.draw_ready],
+                    masks: &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+                },
+                &[sync.draw_finished],
             )?;
             swapchain.loader.queue_present(
                 self.device_queues.graphics,

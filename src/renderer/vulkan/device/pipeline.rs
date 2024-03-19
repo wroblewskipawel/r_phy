@@ -40,8 +40,8 @@ impl ShaderModule {
 }
 
 pub struct GraphicsPipeline {
-    handle: vk::Pipeline,
-    layout: vk::PipelineLayout,
+    pub handle: vk::Pipeline,
+    pub layout: vk::PipelineLayout,
 }
 
 impl GraphicsPipeline {

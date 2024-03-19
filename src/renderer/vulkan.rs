@@ -4,14 +4,17 @@ mod surface;
 
 use crate::math::types::Matrix4;
 
-use self::device::{pipeline::GraphicsPipeline, resources::ResourcePack};
+use self::device::{
+    command::{BeginCommand, Persistent},
+    pipeline::GraphicsPipeline,
+    resources::ResourcePack,
+};
 
 use super::{
     mesh::{Mesh, MeshHandle},
     Renderer,
 };
 use ash::{vk, Entry, Instance};
-use bytemuck::bytes_of;
 use debug::VulkanDebugUtils;
 use device::{
     render_pass::VulkanRenderPass,
@@ -29,6 +32,7 @@ use surface::VulkanSurface;
 use winit::window::Window;
 
 struct FrameState {
+    command: BeginCommand<Persistent>,
     swapchain_frame: SwapchainFrame,
     resource_pack_index: Option<u32>,
 }
@@ -185,40 +189,41 @@ impl From<VulkanMeshHandle> for MeshHandle {
 
 impl Renderer for VulkanRenderer {
     fn begin_frame(&mut self, view: &Matrix4, proj: &Matrix4) -> Result<(), Box<dyn Error>> {
+        let (command, swapchain_frame) = self.device.begin_frame(&mut self.swapchain)?;
+        let command = self.device.record_command(command, |command| {
+            command
+                .begin_render_pass(&swapchain_frame, &self.render_pass)
+                .bind_pipeline(&self.pipeline)
+                .push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0, proj)
+                .push_constants(
+                    &self.pipeline,
+                    vk::ShaderStageFlags::VERTEX,
+                    size_of::<Matrix4>() * 1,
+                    view,
+                )
+        });
         self.current_frame_state.replace(FrameState {
-            swapchain_frame: self.device.begin_frame(&mut self.swapchain)?,
+            command,
+            swapchain_frame,
             resource_pack_index: None,
         });
-        let frame_state = self.current_frame_state.as_ref().unwrap();
-        let command_buffer = frame_state.swapchain_frame.command_buffer;
-        self.device
-            .begin_render_pass(&frame_state.swapchain_frame, &self.render_pass);
-        self.device.bind_pipeline(command_buffer, &self.pipeline);
-        self.device.push_constants(
-            command_buffer,
-            &self.pipeline,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            bytes_of(proj),
-        );
-        self.device.push_constants(
-            command_buffer,
-            &self.pipeline,
-            vk::ShaderStageFlags::VERTEX,
-            size_of::<Matrix4>() * 1,
-            bytes_of(view),
-        );
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let frame_state = self
+        let FrameState {
+            command,
+            swapchain_frame,
+            ..
+        } = self
             .current_frame_state
             .take()
             .ok_or("current_frame is None!")?;
-        self.device.end_render_pass(&frame_state.swapchain_frame);
+        let command = self
+            .device
+            .record_command(command, |command| command.end_render_pass());
         self.device
-            .end_frame(&mut self.swapchain, frame_state.swapchain_frame)?;
+            .end_frame(&mut self.swapchain, command, swapchain_frame)?;
         Ok(())
     }
 
@@ -239,36 +244,47 @@ impl Renderer for VulkanRenderer {
 
     fn draw(&mut self, mesh: MeshHandle, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
         let VulkanMeshHandle {
-            resource_pack_index,
+            resource_pack_index: mesh_resource_pack_index,
             mesh_index,
         } = mesh.into();
-        let frame_state = self
+        let FrameState {
+            command,
+            swapchain_frame,
+            resource_pack_index,
+        } = self
             .current_frame_state
-            .as_mut()
             .take()
             .ok_or("current_frame is None!")?;
-        if frame_state.resource_pack_index.is_none()
-            || frame_state
-                .resource_pack_index
-                .is_some_and(|current_resources| current_resources != resource_pack_index)
+        let (command, resource_pack_index) = if resource_pack_index.is_none()
+            || resource_pack_index
+                .is_some_and(|current_resources| current_resources != mesh_resource_pack_index)
         {
-            self.device.use_resource_pack(
-                frame_state.swapchain_frame.command_buffer,
-                &self.resources[resource_pack_index as usize],
-            );
-            frame_state.resource_pack_index = Some(resource_pack_index);
-        }
-        let resources = &self.resources[resource_pack_index as usize];
-        let command_buffer = frame_state.swapchain_frame.command_buffer;
-        self.device.push_constants(
-            command_buffer,
-            &self.pipeline,
-            vk::ShaderStageFlags::VERTEX,
-            size_of::<Matrix4>() * 2,
-            bytes_of(transform),
-        );
-        self.device
-            .draw(command_buffer, resources, mesh_index as usize);
+            (
+                self.device.record_command(command, |command| {
+                    command.bind_resource_pack(&self.resources[mesh_resource_pack_index as usize])
+                }),
+                Some(mesh_resource_pack_index),
+            )
+        } else {
+            (command, resource_pack_index)
+        };
+        let resources = &self.resources[mesh_resource_pack_index as usize];
+        let mesh_ranges = resources.meshes[mesh_index as usize];
+        let command = self.device.record_command(command, |command| {
+            command
+                .push_constants(
+                    &self.pipeline,
+                    vk::ShaderStageFlags::VERTEX,
+                    size_of::<Matrix4>() * 2,
+                    transform,
+                )
+                .draw_mesh(mesh_ranges)
+        });
+        self.current_frame_state.replace(FrameState {
+            command,
+            swapchain_frame,
+            resource_pack_index,
+        });
         Ok(())
     }
 }

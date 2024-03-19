@@ -15,13 +15,13 @@ use super::{
 };
 
 #[derive(strum::EnumCount)]
-enum BufferType {
+pub enum BufferType {
     Vertex,
     Index,
 }
 
 #[repr(C)]
-struct BufferRanges {
+pub struct BufferRanges {
     ranges: [Option<Range>; BufferType::COUNT],
 }
 
@@ -55,19 +55,21 @@ impl BufferRanges {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Elements {
-    first: u32,
-    count: u32,
+    pub first: u32,
+    pub count: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct MeshRange {
-    vertices: Elements,
-    indices: Elements,
+    pub vertices: Elements,
+    pub indices: Elements,
 }
 
 pub struct ResourcePack {
-    buffer: DeviceLocalBuffer,
-    buffer_ranges: BufferRanges,
+    pub buffer: DeviceLocalBuffer,
+    pub buffer_ranges: BufferRanges,
     pub meshes: Vec<MeshRange>,
 }
 
