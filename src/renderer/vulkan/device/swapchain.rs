@@ -5,7 +5,7 @@ use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSu
 
 use super::{
     command::{
-        BeginCommand, NewCommand, Operation, Persistent, PersistentCommandPool,
+        operation::Graphics, BeginCommand, NewCommand, Persistent, PersistentCommandPool,
         SubmitSemaphoreState,
     },
     image::VulkanImage2D,
@@ -41,7 +41,7 @@ impl SwapchainSync {
 
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
-    command_pool: PersistentCommandPool,
+    command_pool: PersistentCommandPool<Graphics>,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     images: Vec<vk::Image>,
@@ -155,8 +155,7 @@ impl VulkanDevice {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
-        let command_pool =
-            self.create_persistent_command_pool(Operation::Graphics, images.len())?;
+        let command_pool = self.create_persistent_command_pool(images.len())?;
         Ok(VulkanSwapchain {
             image_extent,
             command_pool,
@@ -229,7 +228,7 @@ impl VulkanDevice {
     fn get_next_frame_data(
         &self,
         swapchain: &mut VulkanSwapchain,
-    ) -> (NewCommand<Persistent>, FrameSync) {
+    ) -> (NewCommand<Persistent, Graphics>, FrameSync) {
         let (frame_index, command) = swapchain.command_pool.next();
         (command, swapchain.sync.get_frame(frame_index))
     }
@@ -237,7 +236,7 @@ impl VulkanDevice {
     pub fn begin_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
-    ) -> Result<(BeginCommand<Persistent>, SwapchainFrame), Box<dyn Error>> {
+    ) -> Result<(BeginCommand<Persistent, Graphics>, SwapchainFrame), Box<dyn Error>> {
         let (command, sync) = self.get_next_frame_data(swapchain);
         let command = self.begin_persistent_command(command)?;
         let image_index = unsafe {
@@ -272,7 +271,7 @@ impl VulkanDevice {
     pub fn end_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
-        command: BeginCommand<Persistent>,
+        command: BeginCommand<Persistent, Graphics>,
         frame: SwapchainFrame,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {

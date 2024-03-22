@@ -2,9 +2,13 @@ use ash::{vk, Device};
 use bytemuck::{cast_slice, Pod};
 use std::{error::Error, ffi::c_void, ptr::copy_nonoverlapping};
 
-use crate::renderer::vulkan::device::command::Operation;
-
-use super::{command::SubmitSemaphoreState, VulkanDevice};
+use super::{
+    command::{
+        operation::{self, Operation},
+        SubmitSemaphoreState,
+    },
+    VulkanDevice,
+};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -225,7 +229,7 @@ impl<'a> StagingBuffer<'a> {
     ) -> Result<(), Box<dyn Error>> {
         let command = self
             .device
-            .allocate_transient_command(Operation::Transfer)?;
+            .allocate_transient_command::<operation::Transfer>()?;
         let command = self.device.begin_command(command)?;
         let command = self.device.record_command(command, |command| {
             command.copy_buffer(
@@ -293,7 +297,9 @@ impl VulkanDevice {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::SharingMode::EXCLUSIVE,
-            &self.get_queue_families(&[Operation::Transfer]),
+            &[operation::Transfer::get_queue_family_index(
+                &self.physical_device.queue_families,
+            )],
         )?;
         Ok(StagingBuffer {
             offset: 0,

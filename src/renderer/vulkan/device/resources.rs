@@ -4,13 +4,11 @@ use ash::vk;
 use bytemuck::Pod;
 use strum::EnumCount;
 
-use crate::renderer::{
-    mesh::{Mesh, Vertex},
-    vulkan::device::Operation,
-};
+use crate::renderer::mesh::{Mesh, Vertex};
 
 use super::{
     buffer::{DeviceLocalBuffer, Range},
+    command::operation::{self, Operation},
     VulkanDevice,
 };
 
@@ -82,7 +80,9 @@ impl VulkanDevice {
                 | vk::BufferUsageFlags::INDEX_BUFFER
                 | vk::BufferUsageFlags::TRANSFER_DST,
             vk::SharingMode::EXCLUSIVE,
-            &self.get_queue_families(&[Operation::Graphics]),
+            &[operation::Graphics::get_queue_family_index(
+                &self.physical_device.queue_families,
+            )],
         )?;
         let (vertex_ranges, index_ranges) = {
             let mut staging_buffer = self.create_stagging_buffer(buffer.buffer.size)?;

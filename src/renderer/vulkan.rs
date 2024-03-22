@@ -5,7 +5,7 @@ mod surface;
 use crate::math::types::Matrix4;
 
 use self::device::{
-    command::{BeginCommand, Persistent},
+    command::{operation::Graphics, BeginCommand, Persistent},
     pipeline::GraphicsPipeline,
     resources::ResourcePack,
 };
@@ -32,7 +32,7 @@ use surface::VulkanSurface;
 use winit::window::Window;
 
 struct FrameState {
-    command: BeginCommand<Persistent>,
+    command: BeginCommand<Persistent, Graphics>,
     swapchain_frame: SwapchainFrame,
     resource_pack_index: Option<u32>,
 }
