@@ -119,7 +119,7 @@ impl DeviceQueueBuilder {
 }
 
 struct PhysicalDeviceProperties {
-    features: vk::PhysicalDeviceFeatures,
+    enabled_features: vk::PhysicalDeviceFeatures,
     generic: vk::PhysicalDeviceProperties,
     memory: vk::PhysicalDeviceMemoryProperties,
     enabled_extension_names: Vec<*const c_char>,
@@ -127,6 +127,15 @@ struct PhysicalDeviceProperties {
 }
 
 impl PhysicalDeviceProperties {
+    pub fn get_enabled_features(
+        features: &vk::PhysicalDeviceFeatures,
+    ) -> vk::PhysicalDeviceFeatures {
+        vk::PhysicalDeviceFeatures {
+            sample_rate_shading: features.sample_rate_shading,
+            ..Default::default()
+        }
+    }
+
     pub fn get(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
@@ -139,11 +148,12 @@ impl PhysicalDeviceProperties {
         {
             Err("Physical Device is not one of Discrete or Integrated GPU type!")?;
         }
+        let enabled_features = Self::get_enabled_features(&features);
         let enabled_extension_names =
             Self::check_required_device_extension_support(instance, physical_device)?;
         let queue_families = Self::get_device_queue_families_properties(instance, physical_device);
         Ok(Self {
-            features,
+            enabled_features,
             memory,
             generic,
             enabled_extension_names,
@@ -364,7 +374,8 @@ impl VulkanDevice {
                 physical_device.handle,
                 &vk::DeviceCreateInfo::builder()
                     .queue_create_infos(&queue_builder.get_device_queue_create_infos())
-                    .enabled_extension_names(&physical_device.properties.enabled_extension_names),
+                    .enabled_extension_names(&physical_device.properties.enabled_extension_names)
+                    .enabled_features(&physical_device.properties.enabled_features),
                 None,
             )?
         };

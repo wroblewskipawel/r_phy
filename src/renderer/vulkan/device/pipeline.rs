@@ -150,10 +150,13 @@ impl GraphicsPipeline {
     }
 
     fn get_multisample_state(
+        enabled_features: &vk::PhysicalDeviceFeatures,
         properties: &AttachmentProperties,
     ) -> vk::PipelineMultisampleStateCreateInfo {
         vk::PipelineMultisampleStateCreateInfo {
             rasterization_samples: properties.msaa_samples,
+            sample_shading_enable: enabled_features.sample_rate_shading,
+            min_sample_shading: 0.2f32,
             ..Default::default()
         }
     }
@@ -186,8 +189,10 @@ impl VulkanDevice {
         let rasterization_state = GraphicsPipeline::get_rasterization_state();
         let depth_stencil_state = GraphicsPipeline::get_depth_stencil_state();
         let color_blend_state = GraphicsPipeline::get_color_blend_state();
-        let multisample_state =
-            GraphicsPipeline::get_multisample_state(&self.physical_device.attachment_properties);
+        let multisample_state = GraphicsPipeline::get_multisample_state(
+            &self.physical_device.properties.enabled_features,
+            &self.physical_device.attachment_properties,
+        );
         let modules = modules
             .iter()
             .map(|module_path| self.load_shader_module(module_path))
