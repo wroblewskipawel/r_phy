@@ -98,17 +98,22 @@ impl IndexMut<usize> for Vector2 {
 
 impl Vector2 {
     #[inline]
-    pub fn new(x: f32, y: f32) -> Self {
+    pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
     #[inline]
-    pub fn x() -> Self {
+    pub const fn zero() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+
+    #[inline]
+    pub const fn x() -> Self {
         Self { x: 1.0, y: 0.0 }
     }
 
     #[inline]
-    pub fn y() -> Self {
+    pub const fn y() -> Self {
         Self { x: 0.0, y: 1.0 }
     }
 
@@ -260,12 +265,21 @@ impl From<Vector2> for Vector3 {
 
 impl Vector3 {
     #[inline]
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
 
     #[inline]
-    pub fn x() -> Self {
+    pub const fn zero() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
+    #[inline]
+    pub const fn x() -> Self {
         Self {
             x: 1.0,
             y: 0.0,
@@ -274,7 +288,7 @@ impl Vector3 {
     }
 
     #[inline]
-    pub fn y() -> Self {
+    pub const fn y() -> Self {
         Self {
             x: 0.0,
             y: 1.0,
@@ -283,7 +297,7 @@ impl Vector3 {
     }
 
     #[inline]
-    pub fn z() -> Self {
+    pub const fn z() -> Self {
         Self {
             x: 0.0,
             y: 0.0,
@@ -444,12 +458,12 @@ impl From<Vector3> for Vector4 {
 
 impl Vector4 {
     #[inline]
-    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
+    pub const fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self { x, y, z, w }
     }
 
     #[inline]
-    pub fn point(p: Vector3) -> Self {
+    pub const fn point(p: Vector3) -> Self {
         Self {
             x: p.x,
             y: p.y,
@@ -459,7 +473,7 @@ impl Vector4 {
     }
 
     #[inline]
-    pub fn vector(v: Vector3) -> Self {
+    pub const fn vector(v: Vector3) -> Self {
         Self {
             x: v.x,
             y: v.y,
@@ -469,7 +483,17 @@ impl Vector4 {
     }
 
     #[inline]
-    pub fn x() -> Self {
+    pub const fn zero() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        }
+    }
+
+    #[inline]
+    pub const fn x() -> Self {
         Self {
             x: 1.0,
             y: 0.0,
@@ -479,7 +503,7 @@ impl Vector4 {
     }
 
     #[inline]
-    pub fn y() -> Self {
+    pub const fn y() -> Self {
         Self {
             x: 0.0,
             y: 1.0,
@@ -489,7 +513,7 @@ impl Vector4 {
     }
 
     #[inline]
-    pub fn z() -> Self {
+    pub const fn z() -> Self {
         Self {
             x: 0.0,
             y: 0.0,
@@ -499,7 +523,7 @@ impl Vector4 {
     }
 
     #[inline]
-    pub fn w() -> Self {
+    pub const fn w() -> Self {
         Self {
             x: 0.0,
             y: 0.0,

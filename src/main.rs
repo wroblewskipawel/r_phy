@@ -11,7 +11,8 @@ use r_phy::{
         transform::Transform,
         types::{Matrix4, Vector3},
     },
-    renderer::{mesh::Mesh, RendererBackend},
+    physics::shape,
+    renderer::RendererBackend,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -27,7 +28,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_transparent(false)
         .build(&event_loop)?;
     let mut renderer = RendererBackend::Vulkan.create(&window)?;
-    let meshes = renderer.load_meshes(&[Mesh::cube(), Mesh::triangle()])?;
+    let meshes = renderer.load_meshes(&[
+        shape::Sphere::new(0.75).into(),
+        shape::Cube::new(1.0).into(),
+        shape::Box::new(3.0, 1.0, 1.0).into(),
+    ])?;
     let view = Matrix4::look_at(
         Vector3::new(0.0, -10.0, 10.0),
         Vector3::new(0.0, 0.0, 0.0),
@@ -65,10 +70,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .into(),
                 );
                 let _ = renderer.draw(
-                    meshes[0],
+                    meshes[2],
                     &(Transform::identity()
-                        .rotate(Vector3::z(), -model_rotation)
-                        .translate(Vector3::new(0.0, 2.0, 0.0))
+                        .rotate(Vector3::y(), -model_rotation / 2.0)
+                        .rotate(Vector3::z(), -model_rotation / 3.0)
+                        .translate(Vector3::new(0.0, 4.0, 0.0))
                         .rotate(Vector3::z(), -model_rotation / 6.0)
                         .translate(Vector3::new(0.0, 0.0, 1.0 + (model_rotation / 2.0).cos())))
                     .rotate(
@@ -81,7 +87,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     meshes[1],
                     &(<Transform as Into<Matrix4>>::into(
                         Transform::identity().rotate(Vector3::z(), model_rotation / 3.0),
-                    ) * Matrix4::scale(3.0)),
+                    ) * Matrix4::scale(2.0)),
                 );
                 let _ = renderer.end_frame();
             }

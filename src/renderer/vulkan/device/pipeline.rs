@@ -57,13 +57,25 @@ impl GraphicsPipeline {
                 location: 0,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: 0,
+                offset: (size_of::<Vector3>() * 0) as u32,
             },
             vk::VertexInputAttributeDescription {
                 location: 1,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: size_of::<Vector3>() as u32,
+                offset: (size_of::<Vector3>() * 1) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 2,
+                binding: 0,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: (size_of::<Vector3>() * 2) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 3,
+                binding: 0,
+                format: vk::Format::R32G32_SFLOAT,
+                offset: (size_of::<Vector3>() * 3) as u32,
             },
         ];
         vk::PipelineVertexInputStateCreateInfo {
