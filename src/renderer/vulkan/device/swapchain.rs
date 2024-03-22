@@ -44,6 +44,7 @@ pub struct VulkanSwapchain {
     command_pool: PersistentCommandPool<Graphics>,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
+    color_buffer: VulkanImage2D,
     images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
@@ -111,9 +112,21 @@ impl VulkanDevice {
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let depth_buffer = self.create_image(
             image_extent,
-            self.physical_device.attachment_formats.depth_stencil,
+            self.physical_device
+                .attachment_properties
+                .formats
+                .depth_stencil,
+            self.physical_device.attachment_properties.msaa_samples,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             vk::ImageAspectFlags::DEPTH,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        let color_buffer = self.create_image(
+            image_extent,
+            self.physical_device.attachment_properties.formats.color,
+            self.physical_device.attachment_properties.msaa_samples,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+            vk::ImageAspectFlags::COLOR,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         )?;
         let images = unsafe { loader.get_swapchain_images(handle)? };
@@ -146,6 +159,7 @@ impl VulkanDevice {
                         .attachments(&VulkanRenderPass::get_attachments(
                             image_view,
                             (&depth_buffer).into(),
+                            (&color_buffer).into(),
                         ))
                         .width(image_extent.width)
                         .height(image_extent.height)
@@ -161,6 +175,7 @@ impl VulkanDevice {
             command_pool,
             sync,
             depth_buffer,
+            color_buffer,
             images,
             image_views,
             framebuffers,
@@ -182,6 +197,7 @@ impl VulkanDevice {
                 .for_each(|&image_view| self.device.destroy_image_view(image_view, None));
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
             self.destory_image(&mut swapchain.depth_buffer);
+            self.destory_image(&mut swapchain.color_buffer);
             self.destory_swapchain_sync(&mut swapchain.sync);
             self.destory_persistent_command_pool(&mut swapchain.command_pool);
         }

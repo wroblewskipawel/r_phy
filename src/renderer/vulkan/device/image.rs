@@ -19,6 +19,7 @@ impl VulkanDevice {
         &self,
         extent: vk::Extent2D,
         format: vk::Format,
+        samples: vk::SampleCountFlags,
         usage: vk::ImageUsageFlags,
         aspect_mask: vk::ImageAspectFlags,
         memory_properties: vk::MemoryPropertyFlags,
@@ -35,7 +36,7 @@ impl VulkanDevice {
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .mip_levels(1)
             .array_layers(1)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(samples)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .queue_family_indices(&queue_family_indices)
             .tiling(vk::ImageTiling::OPTIMAL)

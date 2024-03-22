@@ -1,4 +1,4 @@
-use super::VulkanDevice;
+use super::{AttachmentProperties, VulkanDevice};
 use ash::vk;
 use std::error::Error;
 
@@ -14,28 +14,36 @@ impl Into<vk::RenderPass> for &VulkanRenderPass {
 
 impl VulkanRenderPass {
     fn get_attachment_descriptions(
-        color_attachment_format: vk::Format,
-        depth_stencil_attachment_format: vk::Format,
+        properties: &AttachmentProperties,
     ) -> Vec<vk::AttachmentDescription> {
         vec![
             vk::AttachmentDescription {
-                format: color_attachment_format,
-                samples: vk::SampleCountFlags::TYPE_1,
+                format: properties.formats.color,
+                samples: properties.msaa_samples,
                 load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::STORE,
+                store_op: vk::AttachmentStoreOp::DONT_CARE,
                 initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 ..Default::default()
             },
             vk::AttachmentDescription {
-                format: depth_stencil_attachment_format,
-                samples: vk::SampleCountFlags::TYPE_1,
+                format: properties.formats.depth_stencil,
+                samples: properties.msaa_samples,
                 load_op: vk::AttachmentLoadOp::CLEAR,
                 store_op: vk::AttachmentStoreOp::DONT_CARE,
                 stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
                 initial_layout: vk::ImageLayout::UNDEFINED,
                 final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                ..Default::default()
+            },
+            vk::AttachmentDescription {
+                format: properties.formats.color,
+                samples: vk::SampleCountFlags::TYPE_1,
+                load_op: vk::AttachmentLoadOp::DONT_CARE,
+                store_op: vk::AttachmentStoreOp::STORE,
+                initial_layout: vk::ImageLayout::UNDEFINED,
+                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                 ..Default::default()
             },
         ]
@@ -51,10 +59,15 @@ impl VulkanRenderPass {
                 attachment: 1,
                 layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             },
+            vk::AttachmentReference {
+                attachment: 2,
+                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            },
         ];
         let subpasses = vec![vk::SubpassDescription {
             pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
             color_attachment_count: 1,
+            p_resolve_attachments: &attachment_references[2],
             p_color_attachments: &attachment_references[0],
             p_depth_stencil_attachment: &attachment_references[1],
             ..Default::default()
@@ -92,10 +105,15 @@ impl VulkanRenderPass {
     }
 
     pub fn get_attachments(
-        color_attachment: vk::ImageView,
+        resolve_attachment: vk::ImageView,
         depth_stencil_attachment: vk::ImageView,
-    ) -> [vk::ImageView; 2] {
-        [color_attachment, depth_stencil_attachment]
+        color_attachment: vk::ImageView,
+    ) -> [vk::ImageView; 3] {
+        [
+            color_attachment,
+            depth_stencil_attachment,
+            resolve_attachment,
+        ]
     }
 
     pub fn get_color_attachments_blend_state() -> &'static [vk::PipelineColorBlendAttachmentState] {
@@ -134,11 +152,7 @@ impl VulkanRenderPass {
 impl VulkanDevice {
     pub fn create_render_pass(&self) -> Result<VulkanRenderPass, Box<dyn Error>> {
         let attachment_descriptions = VulkanRenderPass::get_attachment_descriptions(
-            self.physical_device
-                .surface_properties
-                .surface_format
-                .format,
-            self.physical_device.attachment_formats.depth_stencil,
+            &self.physical_device.attachment_properties,
         );
         let (subpasses, _attachment_references) = VulkanRenderPass::get_subpass_descriptions();
         let subpass_dependencies = VulkanRenderPass::get_subpass_dependencies();

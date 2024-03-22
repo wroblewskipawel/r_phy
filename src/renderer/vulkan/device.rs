@@ -207,10 +207,16 @@ impl PhysicalDeviceProperties {
 }
 
 struct AttachmentFormats {
+    color: vk::Format,
     depth_stencil: vk::Format,
 }
 
-impl AttachmentFormats {
+struct AttachmentProperties {
+    formats: AttachmentFormats,
+    msaa_samples: vk::SampleCountFlags,
+}
+
+impl AttachmentProperties {
     const PREFERRED_DEPTH_FORMATS: &'static [vk::Format] = &[
         vk::Format::D32_SFLOAT_S8_UINT,
         vk::Format::D24_UNORM_S8_UINT,
@@ -220,7 +226,10 @@ impl AttachmentFormats {
     pub fn get(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
+        properties: &PhysicalDeviceProperties,
+        surface_properties: &PhysicalDeviceSurfaceProperties,
     ) -> Result<Self, Box<dyn Error>> {
+        let color = surface_properties.surface_format.format;
         let depth_stencil = *Self::PREFERRED_DEPTH_FORMATS
             .iter()
             .find(|&&pref| {
@@ -232,14 +241,36 @@ impl AttachmentFormats {
                     .contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
             })
             .ok_or("No preffered format supported for Depth Stencil Attachment!")?;
-        Ok(Self { depth_stencil })
+        let msaa_samples = [
+            vk::SampleCountFlags::TYPE_64,
+            vk::SampleCountFlags::TYPE_32,
+            vk::SampleCountFlags::TYPE_16,
+            vk::SampleCountFlags::TYPE_8,
+            vk::SampleCountFlags::TYPE_4,
+            vk::SampleCountFlags::TYPE_2,
+        ]
+        .into_iter()
+        .find(|&sample_count| {
+            (properties.generic.limits.framebuffer_color_sample_counts
+                & properties.generic.limits.framebuffer_depth_sample_counts)
+                .contains(sample_count)
+        })
+        .unwrap_or(vk::SampleCountFlags::TYPE_1);
+
+        Ok(Self {
+            formats: AttachmentFormats {
+                color,
+                depth_stencil,
+            },
+            msaa_samples,
+        })
     }
 }
 
 struct VulkanPhysicalDevice {
     properties: PhysicalDeviceProperties,
     surface_properties: PhysicalDeviceSurfaceProperties,
-    attachment_formats: AttachmentFormats,
+    attachment_properties: AttachmentProperties,
     queue_families: QueueFamilies,
     handle: vk::PhysicalDevice,
 }
@@ -272,12 +303,13 @@ fn check_physical_device_suitable(
     let properties = PhysicalDeviceProperties::get(instance, physical_device)?;
     let surface_properties =
         PhysicalDeviceSurfaceProperties::get(surface, physical_device, &properties.queue_families)?;
-    let attachment_formats = AttachmentFormats::get(instance, physical_device)?;
+    let attachment_properties =
+        AttachmentProperties::get(instance, physical_device, &properties, &surface_properties)?;
     let queue_families = QueueFamilies::get(&properties, &surface_properties)?;
     Ok(VulkanPhysicalDevice {
         properties,
         surface_properties,
-        attachment_formats,
+        attachment_properties,
         queue_families,
         handle: physical_device,
     })

@@ -3,7 +3,9 @@ use crate::{
     renderer::mesh::Vertex,
 };
 
-use super::{render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, VulkanDevice};
+use super::{
+    render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
+};
 use ash::vk;
 use std::{error::Error, ffi::CStr, mem::size_of, path::Path};
 
@@ -147,9 +149,11 @@ impl GraphicsPipeline {
         }
     }
 
-    fn get_multisample_state() -> vk::PipelineMultisampleStateCreateInfo {
+    fn get_multisample_state(
+        properties: &AttachmentProperties,
+    ) -> vk::PipelineMultisampleStateCreateInfo {
         vk::PipelineMultisampleStateCreateInfo {
-            rasterization_samples: vk::SampleCountFlags::TYPE_1,
+            rasterization_samples: properties.msaa_samples,
             ..Default::default()
         }
     }
@@ -182,7 +186,8 @@ impl VulkanDevice {
         let rasterization_state = GraphicsPipeline::get_rasterization_state();
         let depth_stencil_state = GraphicsPipeline::get_depth_stencil_state();
         let color_blend_state = GraphicsPipeline::get_color_blend_state();
-        let multisample_state = GraphicsPipeline::get_multisample_state();
+        let multisample_state =
+            GraphicsPipeline::get_multisample_state(&self.physical_device.attachment_properties);
         let modules = modules
             .iter()
             .map(|module_path| self.load_shader_module(module_path))
