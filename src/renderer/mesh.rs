@@ -109,7 +109,7 @@ impl Mesh {
     }
 
     fn unit_cube_subdivided(num_subdiv: usize) -> Mesh {
-        const FACES_BASES: &'static [(Vector3, Vector3, Vector3, Vector3)] = &[
+        const FACES_BASES: &[(Vector3, Vector3, Vector3, Vector3)] = &[
             (
                 Vector3::new(-0.5, -0.5, -0.5),
                 Vector3::new(1.0, 0.0, 0.0),

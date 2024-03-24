@@ -25,7 +25,6 @@ use device::{
 use std::{
     error::Error,
     ffi::{c_char, CStr},
-    mem::size_of,
     path::Path,
     result::Result,
 };
@@ -59,8 +58,7 @@ fn check_required_extension_support(
     let supported = extension_names.try_fold(Vec::new(), |mut supported, req| {
         supported_extensions
             .iter()
-            .find(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == req)
-            .is_some()
+            .any(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == req)
             .then(|| {
                 supported.push(req.as_ptr());
                 supported
@@ -81,8 +79,7 @@ fn check_required_layer_support(
     let supported = layer_names.try_fold(Vec::new(), |mut supported, req| {
         supported_layers
             .iter()
-            .find(|sup| unsafe { CStr::from_ptr(&sup.layer_name as *const _) } == req)
-            .is_some()
+            .any(|sup| unsafe { CStr::from_ptr(&sup.layer_name as *const _) } == req)
             .then(|| {
                 supported.push(req.as_ptr());
                 supported
@@ -100,16 +97,14 @@ impl VulkanRenderer {
         let entry = unsafe { Entry::load()? };
         let enabled_layer_names = check_required_layer_support(
             &entry,
-            VulkanDebugUtils::required_layers()
-                .into_iter()
-                .map(|&req| req),
+            VulkanDebugUtils::required_layers().iter().copied(),
         )?;
         let enabled_extension_names = check_required_extension_support(
             &entry,
             VulkanDebugUtils::required_extensions()
-                .into_iter()
+                .iter()
                 .chain(VulkanSurface::required_extensions())
-                .map(|&req| req),
+                .copied(),
         )?;
         let application_info = vk::ApplicationInfo {
             api_version: vk::API_VERSION_1_1,
@@ -273,12 +268,7 @@ impl Renderer for VulkanRenderer {
         let mesh_ranges = resources.meshes[mesh_index as usize];
         let command = self.device.record_command(command, |command| {
             command
-                .push_constants(
-                    &self.pipeline,
-                    vk::ShaderStageFlags::VERTEX,
-                    size_of::<Matrix4>() * 0,
-                    transform,
-                )
+                .push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0, transform)
                 .draw_mesh(mesh_ranges)
         });
         self.current_frame_state.replace(FrameState {

@@ -69,9 +69,7 @@ where
         device: &ash::Device,
         mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,
     ) -> Result<(), Box<dyn Error>> {
-        // Why Rust warns that entry dont have to be marted as mut,
-        // when removing mut prefix casues the code to fail to compile?
-        if let Some(mut entry) = iter.next() {
+        if let Some(entry) = iter.next() {
             *entry = Self::Item::get_descriptor_set_layout(device)?;
         }
         if let Some(next) = self.next() {
@@ -219,13 +217,13 @@ impl<T> GraphicsPipeline<T> {
                 location: 0,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: (size_of::<Vector3>() * 0) as u32,
+                offset: 0,
             },
             vk::VertexInputAttributeDescription {
                 location: 1,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: (size_of::<Vector3>() * 1) as u32,
+                offset: size_of::<Vector3>() as u32,
             },
             vk::VertexInputAttributeDescription {
                 location: 2,
@@ -394,39 +392,6 @@ impl VulkanDevice {
             self.device.destroy_pipeline(pipeline.handle, None);
             self.device
                 .destroy_pipeline_layout((&pipeline.layout).into(), None);
-        }
-    }
-
-    pub fn bind_pipeline<T>(
-        &self,
-        command_buffer: vk::CommandBuffer,
-        pipeline: &GraphicsPipeline<T>,
-    ) {
-        unsafe {
-            self.device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.handle,
-            );
-        }
-    }
-
-    pub fn push_constants<T>(
-        &self,
-        command_buffer: vk::CommandBuffer,
-        pipeline: &GraphicsPipeline<T>,
-        stage_flags: vk::ShaderStageFlags,
-        offset: usize,
-        constants: &[u8],
-    ) {
-        unsafe {
-            self.device.cmd_push_constants(
-                command_buffer,
-                (&pipeline.layout).into(),
-                stage_flags,
-                offset as u32,
-                constants,
-            );
         }
     }
 }

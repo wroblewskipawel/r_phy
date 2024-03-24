@@ -18,62 +18,63 @@ pub struct Persistent;
 pub mod operation {
     use ash::vk;
 
-    use crate::renderer::vulkan::device::{DeviceQueues, QueueFamilies};
+    use crate::renderer::vulkan::device::VulkanDevice;
 
-    use super::TransientCommandPools;
+    pub(in crate::renderer::vulkan) struct Graphics;
+    pub(in crate::renderer::vulkan) struct Transfer;
+    pub(in crate::renderer::vulkan) struct Compute;
 
-    pub struct Graphics;
-    pub struct Transfer;
-    pub struct Compute;
-
-    pub trait Operation {
-        fn get_queue(queues: &DeviceQueues) -> vk::Queue;
-        fn get_queue_family_index(families: &QueueFamilies) -> u32;
-        fn get_transient_command_pool(pools: &TransientCommandPools) -> vk::CommandPool;
+    // Lots of pub(in path) syntax in this module
+    // some of it contents could be moved to separate module
+    // placed higher in the source tree
+    pub(in crate::renderer::vulkan) trait Operation {
+        fn get_queue(device: &VulkanDevice) -> vk::Queue;
+        fn get_queue_family_index(device: &VulkanDevice) -> u32;
+        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool;
     }
 
     impl Operation for Graphics {
-        fn get_queue(queues: &DeviceQueues) -> vk::Queue {
-            queues.graphics
+        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+            device.device_queues.graphics
         }
-        fn get_queue_family_index(families: &QueueFamilies) -> u32 {
-            families.graphics
+        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+            device.physical_device.queue_families.graphics
         }
-        fn get_transient_command_pool(pools: &TransientCommandPools) -> vk::CommandPool {
+        fn get_transient_command_pool(_device: &VulkanDevice) -> vk::CommandPool {
             unimplemented!()
         }
     }
     impl Operation for Compute {
-        fn get_queue(queues: &DeviceQueues) -> vk::Queue {
-            queues.compute
+        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+            device.device_queues.compute
         }
-        fn get_queue_family_index(families: &QueueFamilies) -> u32 {
-            families.compute
+        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+            device.physical_device.queue_families.compute
         }
-        fn get_transient_command_pool(pools: &TransientCommandPools) -> vk::CommandPool {
+        fn get_transient_command_pool(_device: &VulkanDevice) -> vk::CommandPool {
             unimplemented!()
         }
     }
     impl Operation for Transfer {
-        fn get_queue(queues: &DeviceQueues) -> vk::Queue {
-            queues.transfer
+        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+            device.device_queues.transfer
         }
-        fn get_queue_family_index(families: &QueueFamilies) -> u32 {
-            families.compute
+        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+            device.physical_device.queue_families.transfer
         }
-        fn get_transient_command_pool(pools: &TransientCommandPools) -> vk::CommandPool {
-            pools.transfer
+        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool {
+            device.command_pools.transfer
         }
     }
 }
 
-pub struct Command<T, O: Operation> {
+pub(super) struct Command<T, O: Operation> {
     buffer: vk::CommandBuffer,
     pub fence: vk::Fence,
     _phantom: PhantomData<(T, O)>,
 }
 
-pub struct PersistentCommandPool<O: Operation> {
+pub(super) struct PersistentCommandPool<O: Operation> {
     head: usize, // Create dedicated ring buffer (wrapper? generic where T: Index) class
     command_pool: vk::CommandPool,
     buffers: Vec<vk::CommandBuffer>,
@@ -102,9 +103,7 @@ impl VulkanDevice {
         let command_pool = unsafe {
             self.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(O::get_queue_family_index(
-                        &self.physical_device.queue_families,
-                    ))
+                    .queue_family_index(O::get_queue_family_index(self))
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
                 None,
             )?
@@ -118,7 +117,6 @@ impl VulkanDevice {
         let (buffers, fences) = unsafe {
             let buffers = self.device.allocate_command_buffers(&allocate_info)?;
             let fences = (0..buffers.len())
-                .into_iter()
                 .map(|_| {
                     self.device.create_fence(
                         &vk::FenceCreateInfo {
@@ -140,7 +138,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_persistent_command_pool<O: Operation>(
+    pub(super) fn destory_persistent_command_pool<O: Operation>(
         &self,
         command_pool: &mut PersistentCommandPool<O>,
     ) {
@@ -155,7 +153,7 @@ impl VulkanDevice {
     }
 }
 
-pub struct NewCommand<T, O: Operation>(Command<T, O>);
+pub(in crate::renderer::vulkan) struct NewCommand<T, O: Operation>(Command<T, O>);
 
 impl<'a, T, O: Operation> From<&'a NewCommand<T, O>> for &'a Command<T, O> {
     fn from(value: &'a NewCommand<T, O>) -> Self {
@@ -164,7 +162,7 @@ impl<'a, T, O: Operation> From<&'a NewCommand<T, O>> for &'a Command<T, O> {
 }
 
 impl VulkanDevice {
-    pub fn begin_command<T, O: Operation>(
+    pub(super) fn begin_command<T, O: Operation>(
         &self,
         command: NewCommand<T, O>,
     ) -> Result<BeginCommand<T, O>, Box<dyn Error>> {
@@ -179,7 +177,7 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub fn begin_persistent_command<O: Operation>(
+    pub(super) fn begin_persistent_command<O: Operation>(
         &self,
         command: NewCommand<Persistent, O>,
     ) -> Result<BeginCommand<Persistent, O>, Box<dyn Error>> {
@@ -197,7 +195,7 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub fn record_command<
+    pub(in crate::renderer::vulkan) fn record_command<
         T,
         O: Operation,
         F: FnOnce(RecordingCommand<T, O>) -> RecordingCommand<T, O>,
@@ -223,7 +221,10 @@ impl VulkanDevice {
     }
 }
 
-pub struct RecordingCommand<'a, T, O: Operation>(Command<T, O>, &'a VulkanDevice);
+pub(in crate::renderer::vulkan) struct RecordingCommand<'a, T, O: Operation>(
+    Command<T, O>,
+    &'a VulkanDevice,
+);
 
 impl<'a, T, O: Operation> From<&'a RecordingCommand<'a, T, O>> for &'a Command<T, O> {
     fn from(value: &'a RecordingCommand<T, O>) -> Self {
@@ -231,7 +232,7 @@ impl<'a, T, O: Operation> From<&'a RecordingCommand<'a, T, O>> for &'a Command<T
     }
 }
 
-pub struct BeginCommand<T, O: Operation>(Command<T, O>);
+pub(in crate::renderer::vulkan) struct BeginCommand<T, O: Operation>(Command<T, O>);
 
 impl<'a, T, O: Operation> From<&'a BeginCommand<T, O>> for &'a Command<T, O> {
     fn from(value: &'a BeginCommand<T, O>) -> Self {
@@ -360,9 +361,9 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         unsafe {
             device.cmd_draw_indexed(
                 command.buffer,
-                mesh_ranges.indices.count as u32,
+                mesh_ranges.indices.count,
                 1,
-                mesh_ranges.indices.first as u32,
+                mesh_ranges.indices.first,
                 mesh_ranges.vertices.first as i32,
                 0,
             )
@@ -376,7 +377,10 @@ pub struct SubmitSemaphoreState<'a> {
     pub masks: &'a [vk::PipelineStageFlags],
 }
 
-pub struct FinishedCommand<'a, T, O: Operation>(Command<T, O>, &'a VulkanDevice);
+pub(in crate::renderer::vulkan) struct FinishedCommand<'a, T, O: Operation>(
+    Command<T, O>,
+    &'a VulkanDevice,
+);
 
 impl<'a, T, O: Operation> From<&'a FinishedCommand<'a, T, O>> for &'a Command<T, O> {
     fn from(value: &'a FinishedCommand<T, O>) -> Self {
@@ -394,7 +398,7 @@ impl<'a, T, O: Operation> FinishedCommand<'a, T, O> {
         let FinishedCommand(command, device) = self;
         unsafe {
             device.queue_submit(
-                O::get_queue(&device.device_queues),
+                O::get_queue(device),
                 &[vk::SubmitInfo {
                     command_buffer_count: 1,
                     p_command_buffers: [command.buffer].as_ptr(),
@@ -411,7 +415,10 @@ impl<'a, T, O: Operation> FinishedCommand<'a, T, O> {
         Ok(SubmitedCommand(command, device))
     }
 }
-pub struct SubmitedCommand<'a, T, O: Operation>(Command<T, O>, &'a VulkanDevice);
+pub(in crate::renderer::vulkan) struct SubmitedCommand<'a, T, O: Operation>(
+    Command<T, O>,
+    &'a VulkanDevice,
+);
 
 impl<'a, T, O: Operation> From<&'a SubmitedCommand<'a, T, O>> for &'a Command<T, O> {
     fn from(value: &'a SubmitedCommand<T, O>) -> Self {
@@ -430,12 +437,12 @@ impl<'a, O: Operation> SubmitedCommand<'a, Transient, O> {
 }
 
 impl<'a, O: Operation> SubmitedCommand<'a, Persistent, O> {
-    pub fn reset(self) -> NewCommand<Persistent, O> {
+    pub fn _reset(self) -> NewCommand<Persistent, O> {
         let SubmitedCommand(command, _) = self;
         NewCommand(command)
     }
 
-    pub fn wait(self) -> Result<Self, Box<dyn Error>> {
+    pub fn _wait(self) -> Result<Self, Box<dyn Error>> {
         let SubmitedCommand(command, device) = self;
         unsafe {
             device.wait_for_fences(&[command.fence], true, u64::MAX)?;
@@ -471,7 +478,7 @@ impl TransientCommandPools {
 }
 
 impl VulkanDevice {
-    pub fn allocate_transient_command<O: Operation>(
+    pub(super) fn allocate_transient_command<O: Operation>(
         &self,
     ) -> Result<NewCommand<Transient, O>, Box<dyn Error>> {
         let &buffer = unsafe {
@@ -479,7 +486,7 @@ impl VulkanDevice {
                 .allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
                         .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_pool(O::get_transient_command_pool(&self.command_pools))
+                        .command_pool(O::get_transient_command_pool(self))
                         .command_buffer_count(1),
                 )?
                 .first()
@@ -495,16 +502,14 @@ impl VulkanDevice {
             _phantom: PhantomData,
         }))
     }
-    pub fn free_command<'a, T: 'static, O: 'static + Operation>(
+    pub(super) fn free_command<'a, T: 'static, O: 'static + Operation>(
         &self,
         command: impl Into<&'a Command<T, O>>,
     ) {
         let &Command { buffer, fence, .. } = command.into();
         unsafe {
-            self.device.free_command_buffers(
-                O::get_transient_command_pool(&self.command_pools),
-                &[buffer],
-            );
+            self.device
+                .free_command_buffers(O::get_transient_command_pool(self), &[buffer]);
             self.device.destroy_fence(fence, None);
         }
     }

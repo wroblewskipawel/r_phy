@@ -6,9 +6,9 @@ pub struct VulkanRenderPass {
     pub handle: vk::RenderPass,
 }
 
-impl Into<vk::RenderPass> for &VulkanRenderPass {
-    fn into(self) -> vk::RenderPass {
-        self.handle
+impl From<&VulkanRenderPass> for vk::RenderPass {
+    fn from(value: &VulkanRenderPass) -> Self {
+        value.handle
     }
 }
 

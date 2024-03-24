@@ -53,12 +53,11 @@ pub struct VulkanSwapchain {
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     color_buffer: VulkanImage2D,
-    images: Vec<vk::Image>,
+    _images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
-    next_frame_index: usize,
 }
 
 impl VulkanSwapchain {
@@ -116,7 +115,7 @@ impl VulkanDevice {
             .clipped(true)
             .image_array_layers(1)
             .surface(surface.into());
-        let loader = Swapchain::new(&instance, &self.device);
+        let loader = Swapchain::new(instance, &self.device);
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let depth_buffer = self.create_image(
             image_extent,
@@ -189,12 +188,11 @@ impl VulkanDevice {
             sync,
             depth_buffer,
             color_buffer,
-            images,
+            _images: images,
             image_views,
             framebuffers,
             loader,
             handle,
-            next_frame_index: 0,
         })
     }
 
@@ -272,7 +270,7 @@ impl VulkanDevice {
         let (command, sync) = self.get_next_frame_data(swapchain);
         let command = self.begin_persistent_command(command)?;
         let image_index = unsafe {
-            let image_index = swapchain
+            swapchain
                 .loader
                 .acquire_next_image(
                     swapchain.handle,
@@ -280,8 +278,7 @@ impl VulkanDevice {
                     sync.draw_ready,
                     vk::Fence::null(),
                 )
-                .map(|(image_index, _)| image_index as usize)?;
-            image_index
+                .map(|(image_index, _)| image_index as usize)?
         };
         let framebuffer = swapchain.framebuffers[image_index];
         let camera_descriptor = swapchain.camera_descriptors[image_index];

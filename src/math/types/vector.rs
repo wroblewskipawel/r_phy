@@ -76,7 +76,7 @@ impl Index<usize> for Vector2 {
         debug_assert!(index < 2, "Invalid index {} for Vector2!", index);
         unsafe {
             (&self.x as *const f32)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -89,7 +89,7 @@ impl IndexMut<usize> for Vector2 {
         debug_assert!(index < 2, "Invalid index {} for Vector2!", index);
         unsafe {
             (&mut self.x as *mut f32)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }
@@ -232,7 +232,7 @@ impl Index<usize> for Vector3 {
         debug_assert!(index < 3, "Invalid index {} for Vector3!", index);
         unsafe {
             (&self.x as *const f32)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -245,7 +245,7 @@ impl IndexMut<usize> for Vector3 {
         debug_assert!(index < 3, "Invalid index {} for Vector3!", index);
         unsafe {
             (&mut self.x as *mut f32)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }
@@ -424,7 +424,7 @@ impl Index<usize> for Vector4 {
         debug_assert!(index < 4, "Invalid index {} for Vector4!", index);
         unsafe {
             (&self.x as *const f32)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -437,7 +437,7 @@ impl IndexMut<usize> for Vector4 {
         debug_assert!(index < 4, "Invalid index {} for Vector4!", index);
         unsafe {
             (&mut self.x as *mut f32)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }

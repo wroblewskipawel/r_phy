@@ -175,8 +175,7 @@ impl PhysicalDeviceProperties {
                 .try_fold(Vec::new(), |mut supported, req| {
                     supported_extensions
                     .iter()
-                    .find(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == *req)
-                    .is_some()
+                    .any(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == *req)
                     .then(|| {
                         supported.push(req.as_ptr());
                         supported
@@ -196,7 +195,7 @@ impl PhysicalDeviceProperties {
         let mut quque_properties =
             unsafe { instance.get_physical_device_queue_family_properties(physical_device) }
                 .into_iter()
-                .zip(0 as u32..)
+                .zip(0_u32..)
                 .collect::<Vec<_>>();
         quque_properties.sort_by_key(|(properties, _)| {
             [
@@ -206,11 +205,11 @@ impl PhysicalDeviceProperties {
             ]
             .iter()
             .fold(0, |n, &flag| {
-                properties
-                    .queue_flags
-                    .contains(flag)
-                    .then_some(n + 1)
-                    .unwrap_or(n)
+                if properties.queue_flags.contains(flag) {
+                    n + 1
+                } else {
+                    n
+                }
             })
         });
         quque_properties

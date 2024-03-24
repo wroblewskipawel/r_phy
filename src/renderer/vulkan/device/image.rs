@@ -8,9 +8,9 @@ pub struct VulkanImage2D {
     device_memory: vk::DeviceMemory,
 }
 
-impl Into<vk::ImageView> for &VulkanImage2D {
-    fn into(self) -> vk::ImageView {
-        self.image_view
+impl From<&VulkanImage2D> for vk::ImageView {
+    fn from(value: &VulkanImage2D) -> Self {
+        value.image_view
     }
 }
 

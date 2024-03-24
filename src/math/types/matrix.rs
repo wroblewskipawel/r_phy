@@ -120,7 +120,7 @@ impl Index<usize> for Matrix2 {
         debug_assert!(index < 2, "Invalid index {} for Matrix2!", index);
         unsafe {
             (&self.i as *const Vector2)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -133,7 +133,7 @@ impl IndexMut<usize> for Matrix2 {
         debug_assert!(index < 2, "Invalid index {} for Matrix2!", index);
         unsafe {
             (&mut self.i as *mut Vector2)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }
@@ -363,7 +363,7 @@ impl Index<usize> for Matrix3 {
         debug_assert!(index < 3, "Invalid index {} for Matrix3!", index);
         unsafe {
             (&self.i as *const Vector3)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -376,7 +376,7 @@ impl IndexMut<usize> for Matrix3 {
         debug_assert!(index < 3, "Invalid index {} for Matrix3!", index);
         unsafe {
             (&mut self.i as *mut Vector3)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }
@@ -628,7 +628,7 @@ impl Index<usize> for Matrix4 {
         debug_assert!(index < 4, "Invalid index {} for Matrix4!", index);
         unsafe {
             (&self.i as *const Vector4)
-                .offset(index as _)
+                .add(index)
                 .as_ref()
                 .unwrap_unchecked()
         }
@@ -641,7 +641,7 @@ impl IndexMut<usize> for Matrix4 {
         debug_assert!(index < 4, "Invalid index {} for Matrix4!", index);
         unsafe {
             (&mut self.i as *mut Vector4)
-                .offset(index as _)
+                .add(index)
                 .as_mut()
                 .unwrap_unchecked()
         }

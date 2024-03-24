@@ -1,4 +1,8 @@
-use std::{error::Error, mem::size_of, ops::Index};
+use std::{
+    error::Error,
+    mem::{size_of, size_of_val},
+    ops::Index,
+};
 
 use ash::vk;
 use bytemuck::Pod;
@@ -80,9 +84,7 @@ impl VulkanDevice {
                 | vk::BufferUsageFlags::INDEX_BUFFER
                 | vk::BufferUsageFlags::TRANSFER_DST,
             vk::SharingMode::EXCLUSIVE,
-            &[operation::Graphics::get_queue_family_index(
-                &self.physical_device.queue_families,
-            )],
+            &[operation::Graphics::get_queue_family_index(self)],
         )?;
         let (vertex_ranges, index_ranges) = {
             let mut staging_buffer = self.create_stagging_buffer(buffer.buffer.size)?;
@@ -107,7 +109,7 @@ impl VulkanDevice {
         let index_buffer_offset = buffer_ranges[BufferType::Index].offset;
         let meshes = vertex_ranges
             .into_iter()
-            .zip(index_ranges.into_iter())
+            .zip(index_ranges)
             .map(|(vertices, indices)| MeshRange {
                 vertices: Elements {
                     first: (vertices.offset / size_of::<Vertex>() as u64) as u32,
@@ -125,42 +127,6 @@ impl VulkanDevice {
             buffer_ranges,
             meshes,
         })
-    }
-
-    pub fn use_resource_pack(&self, command_buffer: vk::CommandBuffer, resources: &ResourcePack) {
-        unsafe {
-            self.device.cmd_bind_index_buffer(
-                command_buffer,
-                resources.buffer.buffer.buffer,
-                resources.buffer_ranges[BufferType::Index].offset,
-                vk::IndexType::UINT32,
-            );
-            self.device.cmd_bind_vertex_buffers(
-                command_buffer,
-                0,
-                &[resources.buffer.buffer.buffer],
-                &[resources.buffer_ranges[BufferType::Vertex].offset],
-            );
-        }
-    }
-
-    pub fn draw(
-        &self,
-        command_buffer: vk::CommandBuffer,
-        resources: &ResourcePack,
-        mesh_index: usize,
-    ) {
-        let mesh_ranges = &resources.meshes[mesh_index];
-        unsafe {
-            self.device.cmd_draw_indexed(
-                command_buffer,
-                mesh_ranges.indices.count as u32,
-                1,
-                mesh_ranges.indices.first as u32,
-                mesh_ranges.vertices.first as i32,
-                0,
-            )
-        }
     }
 
     pub fn destory_resource_pack(&self, resources: &mut ResourcePack) {
@@ -196,6 +162,6 @@ impl VulkanDevice {
     }
 
     fn get_required_buffer_size<'a, T: Pod>(slices: impl Iterator<Item = &'a [T]>) -> usize {
-        slices.map(|slice| slice.len() * size_of::<T>()).sum()
+        slices.map(size_of_val).sum()
     }
 }

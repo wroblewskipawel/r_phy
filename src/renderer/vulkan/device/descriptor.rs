@@ -29,7 +29,7 @@ pub trait DescriptorLayout {
                     LAYOUT.replace(
                         device.create_descriptor_set_layout(
                             &vk::DescriptorSetLayoutCreateInfo::builder()
-                                .bindings(&Self::get_descriptor_set_bindings()),
+                                .bindings(Self::get_descriptor_set_bindings()),
                             None,
                         ),
                     );
@@ -117,7 +117,7 @@ impl VulkanDevice {
     // so that all writes can be contained by single Vector<Box<dyn DescriptorWrite>>
     // (or compile time equivalent) which would resolve to Vec<vk::WriteDescriptorSet>, correctly
     // handling writes for both buffers and images
-    pub fn write_descriptor_sets<T: DescriptorLayout, U: Pod, O: Operation>(
+    pub(super) fn write_descriptor_sets<T: DescriptorLayout, U: Pod, O: Operation>(
         &self,
         pool: &DescriptorPool<T>,
         buffer: &UniformBuffer<U, O>,
@@ -136,7 +136,6 @@ impl VulkanDevice {
             "UniformBuffer object to small for DescriptorPool write!"
         );
         let buffer_writes = (0..pool.sets.len())
-            .into_iter()
             .map(|index| vk::DescriptorBufferInfo {
                 buffer: buffer.as_raw(),
                 offset: (size_of::<U>() * index) as vk::DeviceSize,

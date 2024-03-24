@@ -83,9 +83,9 @@ impl VulkanSurface {
     }
 }
 
-impl Into<vk::SurfaceKHR> for &VulkanSurface {
-    fn into(self) -> vk::SurfaceKHR {
-        self.handle
+impl From<&VulkanSurface> for vk::SurfaceKHR {
+    fn from(value: &VulkanSurface) -> Self {
+        value.handle
     }
 }
 

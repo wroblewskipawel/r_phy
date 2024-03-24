@@ -6,7 +6,7 @@ use super::{Matrix3, Vector3};
 #[cfg(test)]
 mod test_quat {
 
-    use crate::math::types::{Matrix3, Matrix4, Quat, Vector3, Vector4};
+    use crate::math::types::{Matrix3, Matrix4, Quat, Vector3};
 
     fn get_quat() -> Quat {
         Quat::axis_angle(Vector3::z(), std::f32::consts::FRAC_PI_2)
@@ -150,25 +150,24 @@ impl From<Matrix3> for Quat {
                     value.j.z + value.k.y,
                 );
             }
+        } else if value.i.x < -value.j.y {
+            t = 1.0 - value.i.x - value.j.y + value.k.z;
+            q = Quat::new(
+                value.i.y - value.j.x,
+                value.k.x + value.i.z,
+                value.j.z + value.k.y,
+                t,
+            );
         } else {
-            if value.i.x < -value.j.y {
-                t = 1.0 - value.i.x - value.j.y + value.k.z;
-                q = Quat::new(
-                    value.i.y - value.j.x,
-                    value.k.x + value.i.z,
-                    value.j.z + value.k.y,
-                    t,
-                );
-            } else {
-                t = 1.0 + value.i.x + value.j.y + value.k.z;
-                q = Quat::new(
-                    t,
-                    value.j.z - value.k.y,
-                    value.k.x - value.i.z,
-                    value.i.y - value.j.x,
-                );
-            }
+            t = 1.0 + value.i.x + value.j.y + value.k.z;
+            q = Quat::new(
+                t,
+                value.j.z - value.k.y,
+                value.k.x - value.i.z,
+                value.i.y - value.j.x,
+            );
         }
+
         (0.5 / t.sqrt()) * q
     }
 }
