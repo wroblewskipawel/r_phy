@@ -12,15 +12,17 @@ layout(location = 0) out struct VS_OUT {
   vec2 uv;
 } vs_out;
 
-layout(push_constant) uniform transform {
-  mat4 proj;
-  mat4 view;
-  mat4 model;
-}
+layout(push_constant) uniform transform { mat4 model; }
 m;
 
+layout(set = 0, binding = 0) uniform camera {
+  mat4 view;
+  mat4 proj;
+}
+c;
+
 void main() {
-  gl_Position = m.proj * m.view * m.model * vec4(pos, 1.0);
+  gl_Position = c.proj * c.view * m.model * vec4(pos, 1.0);
   vs_out.color = color;
   vs_out.uv = uv;
 }

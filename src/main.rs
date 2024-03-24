@@ -12,7 +12,7 @@ use r_phy::{
         types::{Matrix4, Vector3},
     },
     physics::shape,
-    renderer::RendererBackend,
+    renderer::{camera::Camera, RendererBackend},
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -33,12 +33,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         shape::Cube::new(1.0).into(),
         shape::Box::new(3.0, 1.0, 1.0).into(),
     ])?;
-    let view = Matrix4::look_at(
-        Vector3::new(0.0, -10.0, 10.0),
-        Vector3::new(0.0, 0.0, 0.0),
-        Vector3::z(),
-    );
-    let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-4, 1e4);
+    let camera = Camera {
+        view: Matrix4::look_at(
+            Vector3::new(0.0, -10.0, 10.0),
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::z(),
+        ),
+        proj: Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-4, 1e4),
+    };
     let mut previous_frame_time = Instant::now();
     let mut model_rotation = 0.0;
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -55,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 elwt.exit();
             }
             Event::AboutToWait => {
-                let _ = renderer.begin_frame(&view, &proj);
+                let _ = renderer.begin_frame(&camera);
                 let _ = renderer.draw(
                     meshes[0],
                     &(Transform::identity()

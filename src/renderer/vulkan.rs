@@ -6,11 +6,12 @@ use crate::math::types::Matrix4;
 
 use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
-    pipeline::GraphicsPipeline,
+    pipeline::{DescriptorLayoutBuilder, GraphicsPipeline, GraphicsPipelineLayoutSimple},
     resources::ResourcePack,
 };
 
 use super::{
+    camera::Camera,
     mesh::{Mesh, MeshHandle},
     Renderer,
 };
@@ -40,7 +41,7 @@ struct FrameState {
 pub(super) struct VulkanRenderer {
     current_frame_state: Option<FrameState>,
     resources: Vec<ResourcePack>,
-    pipeline: GraphicsPipeline,
+    pipeline: GraphicsPipeline<GraphicsPipelineLayoutSimple>,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,
@@ -126,7 +127,10 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
+        let pipeline_layout = device
+            .create_graphics_pipeline_layout(DescriptorLayoutBuilder::new().push::<Camera>())?;
         let pipeline = device.create_graphics_pipeline(
+            pipeline_layout,
             &render_pass,
             &swapchain,
             &[
@@ -159,6 +163,7 @@ impl Drop for VulkanRenderer {
             self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destory_render_pass(&mut self.render_pass);
+            self.device.destory_descriptor_set_layout::<Camera>();
             self.device.destory();
             self.surface.destroy();
             drop(self.debug_utils.take());
@@ -188,19 +193,15 @@ impl From<VulkanMeshHandle> for MeshHandle {
 }
 
 impl Renderer for VulkanRenderer {
-    fn begin_frame(&mut self, view: &Matrix4, proj: &Matrix4) -> Result<(), Box<dyn Error>> {
-        let (command, swapchain_frame) = self.device.begin_frame(&mut self.swapchain)?;
+    fn begin_frame(&mut self, camera: &Camera) -> Result<(), Box<dyn Error>> {
+        let (command, swapchain_frame) = self.device.begin_frame(&mut self.swapchain, camera)?;
         let command = self.device.record_command(command, |command| {
             command
                 .begin_render_pass(&swapchain_frame, &self.render_pass)
                 .bind_pipeline(&self.pipeline)
-                .push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0, proj)
-                .push_constants(
-                    &self.pipeline,
-                    vk::ShaderStageFlags::VERTEX,
-                    size_of::<Matrix4>() * 1,
-                    view,
-                )
+                // Camera descriptor set shoould be bound in VulkanSwapchain::begin_frame,
+                // or VulkanSwapchain should not manage Camera uniform buffers
+                .bind_camera_uniform_buffer(&self.pipeline, &swapchain_frame)
         });
         self.current_frame_state.replace(FrameState {
             command,
@@ -275,7 +276,7 @@ impl Renderer for VulkanRenderer {
                 .push_constants(
                     &self.pipeline,
                     vk::ShaderStageFlags::VERTEX,
-                    size_of::<Matrix4>() * 2,
+                    size_of::<Matrix4>() * 0,
                     transform,
                 )
                 .draw_mesh(mesh_ranges)

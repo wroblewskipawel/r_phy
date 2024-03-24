@@ -11,7 +11,7 @@ use super::{
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
-use std::{error::Error, marker::PhantomData, ops::Index};
+use std::{error::Error, marker::PhantomData};
 
 pub struct Transient;
 pub struct Persistent;
@@ -276,7 +276,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline(self, pipeline: &GraphicsPipeline) -> Self {
+    pub fn bind_pipeline<L>(self, pipeline: &GraphicsPipeline<L>) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -307,9 +307,9 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn push_constants<C: Pod>(
+    pub fn push_constants<L, C: Pod>(
         self,
-        pipeline: &GraphicsPipeline,
+        pipeline: &GraphicsPipeline<L>,
         stages: vk::ShaderStageFlags,
         offset: usize,
         data: &C,
@@ -318,11 +318,32 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         unsafe {
             device.cmd_push_constants(
                 command.buffer,
-                pipeline.layout,
+                (&pipeline.layout).into(),
                 stages,
                 offset as u32,
                 bytes_of(data),
             );
+        }
+        RecordingCommand(command, device)
+    }
+
+    pub fn bind_camera_uniform_buffer<L>(
+        self,
+        pipeline: &GraphicsPipeline<L>,
+        frame: &SwapchainFrame,
+    ) -> Self {
+        let RecordingCommand(command, device) = self;
+        unsafe {
+            // This implicitly relies on knowledge that Camera uniform
+            // is only descriptor set used by the pipeline
+            device.cmd_bind_descriptor_sets(
+                command.buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                (&pipeline.layout).into(),
+                0u32,
+                &[frame.camera_descriptor],
+                &[],
+            )
         }
         RecordingCommand(command, device)
     }

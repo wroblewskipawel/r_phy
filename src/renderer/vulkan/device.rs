@@ -5,6 +5,7 @@ pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod resources;
 pub(super) mod swapchain;
+pub(super) mod descriptor;
 
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};

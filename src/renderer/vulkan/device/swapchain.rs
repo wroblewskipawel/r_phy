@@ -1,13 +1,15 @@
 use ash::{extensions::khr::Swapchain, vk, Instance};
 use std::{error::Error, ffi::CStr};
 
-use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
+use crate::renderer::{camera::Camera, vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface}};
 
 use super::{
+    buffer::UniformBuffer,
     command::{
         operation::Graphics, BeginCommand, NewCommand, Persistent, PersistentCommandPool,
         SubmitSemaphoreState,
     },
+    descriptor::DescriptorPool,
     image::VulkanImage2D,
     render_pass::VulkanRenderPass,
     VulkanDevice,
@@ -21,6 +23,7 @@ pub struct FrameSync {
 pub struct SwapchainFrame {
     pub framebuffer: vk::Framebuffer,
     pub render_area: vk::Rect2D,
+    pub camera_descriptor: vk::DescriptorSet,
     image_index: usize,
     sync: FrameSync,
 }
@@ -42,6 +45,8 @@ impl SwapchainSync {
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
     command_pool: PersistentCommandPool<Graphics>,
+    camera_uniform_buffer: UniformBuffer<Camera, Graphics>,
+    camera_descriptors: DescriptorPool<Camera>,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     color_buffer: VulkanImage2D,
@@ -170,9 +175,14 @@ impl VulkanDevice {
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
         let command_pool = self.create_persistent_command_pool(images.len())?;
+        let camera_uniform_buffer = self.create_uniform_buffer(images.len())?;
+        let camera_descriptors = self.create_descriptor_pool(images.len())?;
+        self.write_descriptor_sets(&camera_descriptors, &camera_uniform_buffer);
         Ok(VulkanSwapchain {
             image_extent,
             command_pool,
+            camera_descriptors,
+            camera_uniform_buffer,
             sync,
             depth_buffer,
             color_buffer,
@@ -200,6 +210,8 @@ impl VulkanDevice {
             self.destory_image(&mut swapchain.color_buffer);
             self.destory_swapchain_sync(&mut swapchain.sync);
             self.destory_persistent_command_pool(&mut swapchain.command_pool);
+            self.destroy_uniform_buffer(&mut swapchain.camera_uniform_buffer);
+            self.destory_descriptor_pool(&mut swapchain.camera_descriptors);
         }
     }
 
@@ -252,6 +264,7 @@ impl VulkanDevice {
     pub fn begin_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
+        camera: &Camera,
     ) -> Result<(BeginCommand<Persistent, Graphics>, SwapchainFrame), Box<dyn Error>> {
         let (command, sync) = self.get_next_frame_data(swapchain);
         let command = self.begin_persistent_command(command)?;
@@ -268,15 +281,17 @@ impl VulkanDevice {
             image_index
         };
         let framebuffer = swapchain.framebuffers[image_index];
+        let camera_descriptor = swapchain.camera_descriptors[image_index];
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain.image_extent,
         };
-
+        swapchain.camera_uniform_buffer[image_index] = *camera;
         Ok((
             command,
             SwapchainFrame {
                 framebuffer,
+                camera_descriptor,
                 render_area,
                 image_index,
                 sync,

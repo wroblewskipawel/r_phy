@@ -1,6 +1,14 @@
 use ash::{vk, Device};
 use bytemuck::{cast_slice, Pod};
-use std::{error::Error, ffi::c_void, ptr::copy_nonoverlapping};
+use std::{
+    error::Error,
+    ffi::c_void,
+    marker::PhantomData,
+    mem::size_of,
+    ops::{Index, IndexMut},
+    ptr::copy_nonoverlapping,
+    usize,
+};
 
 use super::{
     command::{
@@ -132,6 +140,11 @@ impl HostMappedMemory {
         if let Some(_) = self.ptr.take() {
             unsafe { device.unmap_memory(self.device_memory) };
         }
+    }
+
+    fn unwrap(&self) -> *mut c_void {
+        self.ptr
+            .expect("'unwrap' called on Host Visible buffer which isn't currently mapped!")
     }
 }
 
@@ -306,5 +319,116 @@ impl VulkanDevice {
             buffer,
             device: self,
         })
+    }
+}
+
+pub struct PersistentBuffer {
+    buffer: HostVisibleBuffer,
+    ptr: HostMappedMemory,
+}
+
+impl<'a> From<&'a PersistentBuffer> for &'a Buffer {
+    fn from(value: &'a PersistentBuffer) -> Self {
+        (&value.buffer).into()
+    }
+}
+
+impl<'a> From<&'a mut PersistentBuffer> for &'a mut Buffer {
+    fn from(value: &'a mut PersistentBuffer) -> Self {
+        (&mut value.buffer).into()
+    }
+}
+
+impl VulkanDevice {
+    pub fn create_persistent_buffer(
+        &self,
+        size: usize,
+        usage: vk::BufferUsageFlags,
+        sharing_mode: vk::SharingMode,
+        queue_families: &[u32],
+    ) -> Result<PersistentBuffer, Box<dyn Error>> {
+        let mut buffer =
+            self.create_host_visible_buffer(size, usage, sharing_mode, queue_families)?;
+        let ptr = buffer.map(
+            &self,
+            Range {
+                size: size as vk::DeviceSize,
+                offset: 0,
+            },
+        )?;
+        Ok(PersistentBuffer { buffer, ptr })
+    }
+
+    pub fn destroy_persistent_buffer(&self, buffer: &mut PersistentBuffer) {
+        buffer.ptr.unmap(&self);
+        self.destroy_buffer(buffer.into());
+    }
+}
+
+pub struct UniformBuffer<U: Pod, O: Operation> {
+    buffer: PersistentBuffer,
+    pub size: usize,
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<'a, U: Pod, O: Operation> From<&'a UniformBuffer<U, O>> for &'a PersistentBuffer {
+    fn from(value: &'a UniformBuffer<U, O>) -> Self {
+        &value.buffer
+    }
+}
+
+impl<'a, U: Pod, O: Operation> From<&'a mut UniformBuffer<U, O>> for &'a mut PersistentBuffer {
+    fn from(value: &'a mut UniformBuffer<U, O>) -> Self {
+        &mut value.buffer
+    }
+}
+
+impl<'a, U: Pod, O: Operation> Index<usize> for UniformBuffer<U, O> {
+    type Output = U;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.offset(index as isize).as_ref().unwrap() }
+    }
+}
+
+impl<'a, U: Pod, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.offset(index as isize).as_mut().unwrap() }
+    }
+}
+
+impl<U: Pod, O: Operation> UniformBuffer<U, O> {
+    pub fn as_raw(&self) -> vk::Buffer {
+        // Do it more elegant way later, maybe push as_raw up the encapsulation chain?
+        self.buffer.buffer.buffer.buffer
+    }
+}
+
+impl VulkanDevice {
+    pub fn create_uniform_buffer<U: Pod, O: Operation>(
+        &self,
+        size: usize,
+    ) -> Result<UniformBuffer<U, O>, Box<dyn Error>> {
+        let buffer = self.create_persistent_buffer(
+            size_of::<U>() * size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::SharingMode::EXCLUSIVE,
+            &[O::get_queue_family_index(
+                &self.physical_device.queue_families,
+            )],
+        )?;
+        Ok(UniformBuffer {
+            buffer,
+            size,
+            _phantom: PhantomData,
+        })
+    }
+
+    pub fn destroy_uniform_buffer<U: Pod, O: Operation>(&self, buffer: &mut UniformBuffer<U, O>) {
+        self.destroy_persistent_buffer(buffer.into());
     }
 }

@@ -1,13 +1,14 @@
 use crate::{
     math::types::{Matrix4, Vector3},
-    renderer::mesh::Vertex,
+    renderer::{camera::Camera, mesh::Vertex},
 };
 
 use super::{
-    render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
+    descriptor::DescriptorLayout, render_pass::VulkanRenderPass, swapchain::VulkanSwapchain,
+    AttachmentProperties, VulkanDevice,
 };
-use ash::vk;
-use std::{error::Error, ffi::CStr, mem::size_of, path::Path};
+use ash::{prelude::VkResult, vk};
+use std::{error::Error, ffi::CStr, marker::PhantomData, mem::size_of, path::Path};
 
 struct ShaderModule {
     module: vk::ShaderModule,
@@ -41,12 +42,171 @@ impl ShaderModule {
     }
 }
 
-pub struct GraphicsPipeline {
-    pub handle: vk::Pipeline,
-    pub layout: vk::PipelineLayout,
+// Rename if this trait ends up used only for DescriptorLayout
+pub trait TypeListNode
+where
+    Self: Sized,
+{
+    type Next: TypeListNode;
+    type Item: DescriptorLayout;
+
+    fn next(&self) -> Option<&Self::Next>;
+    fn push<T: DescriptorLayout>(self) -> Node<T, Self> {
+        Node {
+            next: self,
+            _phantom: PhantomData,
+        }
+    }
+    fn len(&self) -> usize {
+        if let Some(next) = self.next() {
+            1 + next.len()
+        } else {
+            0
+        }
+    }
+    fn get_descriptor_layout<'a>(
+        &self,
+        device: &ash::Device,
+        mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Why Rust warns that entry dont have to be marted as mut,
+        // when removing mut prefix casues the code to fail to compile?
+        if let Some(mut entry) = iter.next() {
+            *entry = Self::Item::get_descriptor_set_layout(device)?;
+        }
+        if let Some(next) = self.next() {
+            next.get_descriptor_layout(device, iter)
+        } else {
+            Ok(())
+        }
+    }
 }
 
-impl GraphicsPipeline {
+#[derive(Debug, Clone, Copy)]
+pub struct Nil;
+
+impl DescriptorLayout for Nil {
+    fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding] {
+        unreachable!()
+    }
+
+    fn get_descriptor_set_layout(_: &ash::Device) -> VkResult<vk::DescriptorSetLayout> {
+        unreachable!()
+    }
+
+    fn get_descriptor_write() -> vk::WriteDescriptorSet {
+        unreachable!()
+    }
+}
+
+impl TypeListNode for Nil {
+    type Next = Self;
+    type Item = Self;
+
+    fn next(&self) -> Option<&Self::Next> {
+        None
+    }
+}
+
+// Similar structure could be used to handle creation of DescriptorSetlayout
+// by composing types that would impl DescriptorBinding (not yet implemented)
+// Check if this code could be reused, for traits other than DescriptorLayout,
+// by using associated types trait bounds (which are unstable,
+// see: https://rust-lang.github.io/rfcs/2289-associated-type-bounds.html)
+// or converted to macro
+#[derive(Debug, Clone, Copy)]
+pub struct Node<L: DescriptorLayout, N: TypeListNode> {
+    next: N,
+    _phantom: PhantomData<L>,
+}
+
+impl<L: DescriptorLayout, N: TypeListNode> TypeListNode for Node<L, N> {
+    type Next = N;
+    type Item = L;
+
+    fn next(&self) -> Option<&Self::Next> {
+        Some(&self.next)
+    }
+}
+
+pub struct DescriptorLayoutBuilder<T: TypeListNode> {
+    head: T,
+}
+
+impl DescriptorLayoutBuilder<Nil> {
+    pub fn new() -> Self {
+        Self { head: Nil }
+    }
+}
+
+impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
+    pub fn push<L: DescriptorLayout>(self) -> DescriptorLayoutBuilder<Node<L, T>> {
+        DescriptorLayoutBuilder {
+            head: Node {
+                next: self.head,
+                _phantom: PhantomData::<L>,
+            },
+        }
+    }
+
+    fn build(self, device: &ash::Device) -> Result<Vec<vk::DescriptorSetLayout>, Box<dyn Error>> {
+        let mut layouts = vec![vk::DescriptorSetLayout::null(); self.head.len()];
+        self.head
+            .get_descriptor_layout(device, layouts.iter_mut())?;
+        Ok(layouts)
+    }
+}
+
+// GraphicsPipelineLayout could be defined in its own separate module
+// which could then expose library of predefined pipeline layouts
+pub type GraphicsPipelineLayoutSimple = Node<Camera, Nil>;
+
+// Type T should have some trait bounds imposed,
+// that would require for it to only be derivative of TypeListNode
+#[derive(Debug, Clone, Copy)]
+pub struct GraphicsPipelineLayout<T> {
+    pub layout: vk::PipelineLayout,
+    _phantom: PhantomData<T>,
+}
+
+impl VulkanDevice {
+    pub fn create_graphics_pipeline_layout<T: TypeListNode>(
+        &self,
+        layout: DescriptorLayoutBuilder<T>,
+    ) -> Result<GraphicsPipelineLayout<T>, Box<dyn Error>> {
+        const PUSH_CONSTANT_RANGES: &[vk::PushConstantRange] = &[vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            offset: 0,
+            size: (size_of::<Matrix4>() * 3) as u32,
+        }];
+        let set_layouts = layout.build(&self.device)?;
+        let create_info = vk::PipelineLayoutCreateInfo {
+            push_constant_range_count: PUSH_CONSTANT_RANGES.len() as u32,
+            p_push_constant_ranges: PUSH_CONSTANT_RANGES.as_ptr(),
+            set_layout_count: set_layouts.len() as u32,
+            p_set_layouts: set_layouts.as_ptr(),
+            ..Default::default()
+        };
+        let layout = unsafe { self.device.create_pipeline_layout(&create_info, None)? };
+        Ok(GraphicsPipelineLayout {
+            layout,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<T> From<&GraphicsPipelineLayout<T>> for vk::PipelineLayout {
+    fn from(value: &GraphicsPipelineLayout<T>) -> Self {
+        value.layout
+    }
+}
+
+pub struct GraphicsPipeline<T> {
+    pub handle: vk::Pipeline,
+    pub layout: GraphicsPipelineLayout<T>,
+}
+
+impl<T> GraphicsPipeline<T> {
     fn get_vertex_input_state() -> vk::PipelineVertexInputStateCreateInfo {
         const VERTEX_BINDINGS: &[vk::VertexInputBindingDescription] =
             &[vk::VertexInputBindingDescription {
@@ -175,21 +335,21 @@ impl VulkanDevice {
         Ok(ShaderModule { module, stage })
     }
 
-    pub fn create_graphics_pipeline(
+    pub fn create_graphics_pipeline<T>(
         &self,
+        layout: GraphicsPipelineLayout<T>,
         render_pass: &VulkanRenderPass,
         swapchain: &VulkanSwapchain,
         modules: &[&Path],
-    ) -> Result<GraphicsPipeline, Box<dyn Error>> {
-        let layout = self.create_graphics_pipeline_layout()?;
-        let vertex_input_state = GraphicsPipeline::get_vertex_input_state();
-        let input_assembly_state = GraphicsPipeline::get_input_assembly_state();
+    ) -> Result<GraphicsPipeline<T>, Box<dyn Error>> {
+        let vertex_input_state = GraphicsPipeline::<T>::get_vertex_input_state();
+        let input_assembly_state = GraphicsPipeline::<T>::get_input_assembly_state();
         let (viewport_state, _viewports, _scissors) =
-            GraphicsPipeline::get_viewport_state(swapchain.image_extent);
-        let rasterization_state = GraphicsPipeline::get_rasterization_state();
-        let depth_stencil_state = GraphicsPipeline::get_depth_stencil_state();
-        let color_blend_state = GraphicsPipeline::get_color_blend_state();
-        let multisample_state = GraphicsPipeline::get_multisample_state(
+            GraphicsPipeline::<T>::get_viewport_state(swapchain.image_extent);
+        let rasterization_state = GraphicsPipeline::<T>::get_rasterization_state();
+        let depth_stencil_state = GraphicsPipeline::<T>::get_depth_stencil_state();
+        let color_blend_state = GraphicsPipeline::<T>::get_color_blend_state();
+        let multisample_state = GraphicsPipeline::<T>::get_multisample_state(
             &self.physical_device.properties.enabled_features,
             &self.physical_device.attachment_properties,
         );
@@ -202,7 +362,7 @@ impl VulkanDevice {
             .map(|module| module.get_stage_create_info())
             .collect::<Vec<_>>();
         let create_infos = [vk::GraphicsPipelineCreateInfo {
-            layout,
+            layout: (&layout).into(),
             render_pass: render_pass.into(),
             subpass: 0,
             p_vertex_input_state: &vertex_input_state,
@@ -229,29 +389,19 @@ impl VulkanDevice {
         Ok(GraphicsPipeline { handle, layout })
     }
 
-    pub fn destory_graphics_pipeline(&self, pipeline: &mut GraphicsPipeline) {
+    pub fn destory_graphics_pipeline<T>(&self, pipeline: &mut GraphicsPipeline<T>) {
         unsafe {
             self.device.destroy_pipeline(pipeline.handle, None);
-            self.device.destroy_pipeline_layout(pipeline.layout, None);
+            self.device
+                .destroy_pipeline_layout((&pipeline.layout).into(), None);
         }
     }
 
-    fn create_graphics_pipeline_layout(&self) -> Result<vk::PipelineLayout, Box<dyn Error>> {
-        const PUSH_CONSTANT_RANGES: &[vk::PushConstantRange] = &[vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            offset: 0,
-            size: (size_of::<Matrix4>() * 3) as u32,
-        }];
-        let create_info = vk::PipelineLayoutCreateInfo {
-            push_constant_range_count: PUSH_CONSTANT_RANGES.len() as u32,
-            p_push_constant_ranges: PUSH_CONSTANT_RANGES.as_ptr(),
-            ..Default::default()
-        };
-        let layout = unsafe { self.device.create_pipeline_layout(&create_info, None)? };
-        Ok(layout)
-    }
-
-    pub fn bind_pipeline(&self, command_buffer: vk::CommandBuffer, pipeline: &GraphicsPipeline) {
+    pub fn bind_pipeline<T>(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        pipeline: &GraphicsPipeline<T>,
+    ) {
         unsafe {
             self.device.cmd_bind_pipeline(
                 command_buffer,
@@ -261,10 +411,10 @@ impl VulkanDevice {
         }
     }
 
-    pub fn push_constants(
+    pub fn push_constants<T>(
         &self,
         command_buffer: vk::CommandBuffer,
-        pipeline: &GraphicsPipeline,
+        pipeline: &GraphicsPipeline<T>,
         stage_flags: vk::ShaderStageFlags,
         offset: usize,
         constants: &[u8],
@@ -272,7 +422,7 @@ impl VulkanDevice {
         unsafe {
             self.device.cmd_push_constants(
                 command_buffer,
-                pipeline.layout,
+                (&pipeline.layout).into(),
                 stage_flags,
                 offset as u32,
                 constants,
