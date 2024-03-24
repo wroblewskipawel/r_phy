@@ -140,7 +140,10 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_persistent_command_pool<O: Operation>(&self, command_pool: &mut PersistentCommandPool<O>) {
+    pub fn destory_persistent_command_pool<O: Operation>(
+        &self,
+        command_pool: &mut PersistentCommandPool<O>,
+    ) {
         unsafe {
             command_pool
                 .fences
@@ -194,7 +197,11 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub fn record_command<T, O: Operation, F: FnOnce(RecordingCommand<T, O>) -> RecordingCommand<T, O>>(
+    pub fn record_command<
+        T,
+        O: Operation,
+        F: FnOnce(RecordingCommand<T, O>) -> RecordingCommand<T, O>,
+    >(
         &self,
         command: BeginCommand<T, O>,
         recorder: F,

@@ -1,7 +1,10 @@
 use ash::{extensions::khr::Swapchain, vk, Instance};
 use std::{error::Error, ffi::CStr};
 
-use crate::renderer::{camera::Camera, vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface}};
+use crate::renderer::{
+    camera::Camera,
+    vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface},
+};
 
 use super::{
     buffer::UniformBuffer,
