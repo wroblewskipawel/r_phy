@@ -2,7 +2,7 @@ use ash::{extensions::khr::Swapchain, vk, Instance};
 use std::{error::Error, ffi::CStr};
 
 use crate::renderer::{
-    camera::Camera,
+    camera::CameraMatrices,
     vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface},
 };
 
@@ -48,8 +48,8 @@ impl SwapchainSync {
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
     command_pool: PersistentCommandPool<Graphics>,
-    camera_uniform_buffer: UniformBuffer<Camera, Graphics>,
-    camera_descriptors: DescriptorPool<Camera>,
+    camera_uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
+    camera_descriptors: DescriptorPool<CameraMatrices>,
     sync: SwapchainSync,
     depth_buffer: VulkanImage2D,
     color_buffer: VulkanImage2D,
@@ -265,7 +265,7 @@ impl VulkanDevice {
     pub fn begin_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
-        camera: &Camera,
+        camera: &CameraMatrices,
     ) -> Result<(BeginCommand<Persistent, Graphics>, SwapchainFrame), Box<dyn Error>> {
         let (command, sync) = self.get_next_frame_data(swapchain);
         let command = self.begin_persistent_command(command)?;

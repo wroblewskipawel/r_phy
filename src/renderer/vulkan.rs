@@ -11,7 +11,7 @@ use self::device::{
 };
 
 use super::{
-    camera::Camera,
+    camera::CameraMatrices,
     mesh::{Mesh, MeshHandle},
     Renderer,
 };
@@ -122,8 +122,9 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
-        let pipeline_layout = device
-            .create_graphics_pipeline_layout(DescriptorLayoutBuilder::new().push::<Camera>())?;
+        let pipeline_layout = device.create_graphics_pipeline_layout(
+            DescriptorLayoutBuilder::new().push::<CameraMatrices>(),
+        )?;
         let pipeline = device.create_graphics_pipeline(
             pipeline_layout,
             &render_pass,
@@ -158,7 +159,8 @@ impl Drop for VulkanRenderer {
             self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destory_render_pass(&mut self.render_pass);
-            self.device.destory_descriptor_set_layout::<Camera>();
+            self.device
+                .destory_descriptor_set_layout::<CameraMatrices>();
             self.device.destory();
             self.surface.destroy();
             drop(self.debug_utils.take());
@@ -188,7 +190,7 @@ impl From<VulkanMeshHandle> for MeshHandle {
 }
 
 impl Renderer for VulkanRenderer {
-    fn begin_frame(&mut self, camera: &Camera) -> Result<(), Box<dyn Error>> {
+    fn begin_frame(&mut self, camera: &CameraMatrices) -> Result<(), Box<dyn Error>> {
         let (command, swapchain_frame) = self.device.begin_frame(&mut self.swapchain, camera)?;
         let command = self.device.record_command(command, |command| {
             command

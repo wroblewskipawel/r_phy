@@ -1,6 +1,6 @@
 use crate::{
     math::types::{Matrix4, Vector3},
-    renderer::{camera::Camera, mesh::Vertex},
+    renderer::{camera::CameraMatrices, mesh::Vertex},
 };
 
 use super::{
@@ -157,7 +157,7 @@ impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
 
 // GraphicsPipelineLayout could be defined in its own separate module
 // which could then expose library of predefined pipeline layouts
-pub type GraphicsPipelineLayoutSimple = Node<Camera, Nil>;
+pub type GraphicsPipelineLayoutSimple = Node<CameraMatrices, Nil>;
 
 // Type T should have some trait bounds imposed,
 // that would require for it to only be derivative of TypeListNode

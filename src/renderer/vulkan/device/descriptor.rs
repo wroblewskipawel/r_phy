@@ -7,7 +7,7 @@ use std::mem::size_of;
 use std::ops::Index;
 use std::sync::Once;
 
-use crate::renderer::camera::Camera;
+use crate::renderer::camera::CameraMatrices;
 
 use super::buffer::UniformBuffer;
 use super::command::operation::Operation;
@@ -42,7 +42,7 @@ pub trait DescriptorLayout {
     fn get_descriptor_write() -> vk::WriteDescriptorSet;
 }
 
-impl DescriptorLayout for Camera {
+impl DescriptorLayout for CameraMatrices {
     fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding] {
         // To support for creation of DescriptorLayout by composition of multiple DescriptorBindings types
         // binding values should be dynamically computed for each such composition
