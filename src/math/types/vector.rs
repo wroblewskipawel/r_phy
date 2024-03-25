@@ -306,6 +306,15 @@ impl Vector3 {
     }
 
     #[inline]
+    pub fn from_euler(yaw: f32, pitch: f32, _roll: f32) -> Self {
+        Self {
+            x: pitch.cos() * yaw.cos(),
+            y: pitch.cos() * yaw.sin(),
+            z: pitch.sin(),
+        }
+    }
+
+    #[inline]
     pub fn length_square(self) -> f32 {
         self * self
     }
