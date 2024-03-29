@@ -16,7 +16,7 @@ use r_phy::{
 
 fn main() -> Result<(), Box<dyn Error>> {
     let meshes = vec![
-        shape::Sphere::new(0.75).into(),
+        shape::Sphere::new(1.5).into(),
         shape::Cube::new(1.0).into(),
         shape::Box::new(3.0, 1.0, 1.0).into(),
     ];

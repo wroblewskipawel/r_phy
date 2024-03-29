@@ -141,6 +141,14 @@ impl Vector2 {
     pub fn approx_equal(self, rhs: Self) -> bool {
         (self.x - rhs.x).abs() < EPS && (self.y - rhs.y).abs() < EPS
     }
+
+    #[inline]
+    pub fn hadamard(self, rhs: Self) -> Self {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -346,6 +354,15 @@ impl Vector3 {
     #[inline]
     pub fn approx_equal(self, rhs: Self) -> bool {
         (self.x - rhs.x).abs() < EPS && (self.y - rhs.y).abs() < EPS && (self.z - rhs.z).abs() < EPS
+    }
+
+    #[inline]
+    pub fn hadamard(self, rhs: Self) -> Self {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+            z: self.z * rhs.z,
+        }
     }
 }
 
@@ -567,5 +584,15 @@ impl Vector4 {
             && (self.y - rhs.y).abs() < EPS
             && (self.z - rhs.z).abs() < EPS
             && (self.w - rhs.w).abs() < EPS
+    }
+
+    #[inline]
+    pub fn hadamard(self, rhs: Self) -> Self {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+            z: self.z * rhs.z,
+            w: self.w * rhs.w,
+        }
     }
 }

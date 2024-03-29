@@ -3,7 +3,7 @@ pub struct Cube {
 }
 
 pub struct Sphere {
-    pub radius: f32,
+    pub diameter: f32,
 }
 
 pub struct Box {
@@ -19,8 +19,8 @@ impl Cube {
 }
 
 impl Sphere {
-    pub fn new(radius: f32) -> Self {
-        Self { radius }
+    pub fn new(diameter: f32) -> Self {
+        Self { diameter }
     }
 }
 

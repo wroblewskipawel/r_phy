@@ -91,15 +91,12 @@ impl VulkanDevice {
             let (_, vertex_ranges) = staging_buffer.load_buffer_data_from_slices(
                 &meshes
                     .iter()
-                    .map(|mesh| mesh.vertices.as_slice())
+                    .map(|mesh| &*mesh.vertices)
                     .collect::<Vec<_>>(),
                 size_of::<f32>(),
             )?;
             let (_, index_ranges) = staging_buffer.load_buffer_data_from_slices(
-                &meshes
-                    .iter()
-                    .map(|mesh| mesh.indices.as_slice())
-                    .collect::<Vec<_>>(),
+                &meshes.iter().map(|mesh| &*mesh.indices).collect::<Vec<_>>(),
                 size_of::<u32>(),
             )?;
             staging_buffer.transfer_data(&buffer, 0)?;
@@ -135,9 +132,9 @@ impl VulkanDevice {
 
     fn get_buffer_ranges(meshes: &[Mesh]) -> BufferRanges {
         let vertex_data_size =
-            Self::get_required_buffer_size(meshes.iter().map(|mesh| mesh.vertices.as_slice()));
+            Self::get_required_buffer_size(meshes.iter().map(|mesh| &*mesh.vertices));
         let index_data_size =
-            Self::get_required_buffer_size(meshes.iter().map(|mesh| mesh.indices.as_slice()));
+            Self::get_required_buffer_size(meshes.iter().map(|mesh| &*mesh.indices));
         let index_buffer_offset = Self::get_offset_aligned(vertex_data_size, size_of::<u32>());
         let mut ranges = BufferRanges::new();
         ranges.set(

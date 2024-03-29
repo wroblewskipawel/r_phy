@@ -17,237 +17,180 @@ pub struct Vertex {
     pub(crate) uv: Vector2,
 }
 
-pub struct Mesh {
+pub struct MeshBuilder {
     pub(crate) vertices: Vec<Vertex>,
     pub(crate) indices: Vec<u32>,
 }
 
-impl Mesh {
-    pub fn triangle() -> Self {
-        Mesh {
-            vertices: vec![
-                Vertex {
-                    pos: Vector3::new(0.0, 0.5, 0.0),
-                    color: Vector3::new(1.0, 0.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 1.0),
-                    uv: Vector2::new(0.5, 1.0),
-                },
-                Vertex {
-                    pos: Vector3::new(0.5, -0.5, 0.0),
-                    color: Vector3::new(0.0, 1.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 1.0),
-                    uv: Vector2::new(1.0, 0.0),
-                },
-                Vertex {
-                    pos: Vector3::new(-0.5, -0.5, 0.0),
-                    color: Vector3::new(0.0, 0.0, 1.0),
-                    norm: Vector3::new(0.0, 0.0, 1.0),
-                    uv: Vector2::new(0.0, 0.0),
-                },
-            ],
-            indices: vec![0, 2, 1],
+pub struct Mesh {
+    pub(crate) vertices: Box<[Vertex]>,
+    pub(crate) indices: Box<[u32]>,
+}
+
+impl MeshBuilder {
+    fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
         }
     }
 
-    pub fn cube() -> Self {
+    fn build(self) -> Mesh {
+        let Self { vertices, indices } = self;
         Mesh {
-            vertices: vec![
-                Vertex {
-                    pos: Vector3::new(-0.5, -0.5, -0.5),
-                    color: Vector3::new(1.0, 0.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(0.0, 0.0),
-                },
-                Vertex {
-                    pos: Vector3::new(0.5, -0.5, -0.5),
-                    color: Vector3::new(0.0, 1.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(1.0, 0.0),
-                },
-                Vertex {
-                    pos: Vector3::new(0.5, 0.5, -0.5),
-                    color: Vector3::new(0.0, 0.0, 1.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(1.0, 1.0),
-                },
-                Vertex {
-                    pos: Vector3::new(-0.5, 0.5, -0.5),
-                    color: Vector3::new(0.0, 0.0, 1.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(0.0, 1.0),
-                },
-                Vertex {
-                    pos: Vector3::new(-0.5, -0.5, 0.5),
-                    color: Vector3::new(1.0, 0.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(0.0, 0.0),
-                },
-                Vertex {
-                    pos: Vector3::new(0.5, -0.5, 0.5),
-                    color: Vector3::new(0.0, 1.0, 0.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(1.0, 0.0),
-                },
-                Vertex {
-                    pos: Vector3::new(0.5, 0.5, 0.5),
-                    color: Vector3::new(0.0, 0.0, 1.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(1.0, 1.0),
-                },
-                Vertex {
-                    pos: Vector3::new(-0.5, 0.5, 0.5),
-                    color: Vector3::new(0.0, 0.0, 1.0),
-                    norm: Vector3::new(0.0, 0.0, 0.0),
-                    uv: Vector2::new(0.0, 1.0),
-                },
-            ],
-            indices: vec![
-                0, 3, 1, 1, 3, 2, 0, 1, 4, 4, 1, 5, 1, 2, 5, 5, 2, 6, 7, 4, 5, 7, 5, 6, 0, 4, 3, 4,
-                7, 3, 7, 2, 3, 7, 6, 2,
-            ],
+            vertices: vertices.into_boxed_slice(),
+            indices: indices.into_boxed_slice(),
         }
     }
 
-    fn unit_cube_subdivided(num_subdiv: usize) -> Mesh {
-        const FACES_BASES: &[(Vector3, Vector3, Vector3, Vector3)] = &[
+    fn extend(mut self, mut value: Self) -> Self {
+        let index_offest = self.vertices.len() as u32;
+        for index in &mut value.indices {
+            *index += index_offest;
+        }
+        self.indices.extend(&value.indices);
+        self.vertices.extend(&value.vertices);
+        self
+    }
+
+    fn offset(mut self, offset: Vector3) -> Self {
+        for vert in &mut self.vertices {
+            vert.pos = vert.pos + offset;
+        }
+        self
+    }
+
+    fn plane_subdivided(
+        num_subdiv: usize,
+        u: Vector3,
+        v: Vector3,
+        color: Vector3,
+        scale_uvs: bool,
+    ) -> Self {
+        let normal = u.cross(v).norm();
+        let u_length = scale_uvs.then_some(u.length()).unwrap_or(1.0);
+        let v_length = scale_uvs.then_some(v.length()).unwrap_or(1.0);
+        let num_edge_vertices = 2 + num_subdiv;
+        let num_vertices = num_edge_vertices.pow(2);
+        let vertices = (0..num_vertices)
+            .map(|index| (index / num_edge_vertices, index % num_edge_vertices))
+            .map(|(i, j)| {
+                let u_scale = j as f32 / (num_edge_vertices - 1) as f32;
+                let v_scale = i as f32 / (num_edge_vertices - 1) as f32;
+                Vertex {
+                    pos: u_scale * u + v_scale * v,
+                    color: color,
+                    norm: normal,
+                    uv: scale_uvs
+                        .then_some(Vector2::new(u_scale * u_length, v_scale * v_length))
+                        .unwrap_or(Vector2::new(u_scale, v_scale)),
+                }
+            })
+            .collect();
+
+        let num_edge_quads = 1 + num_subdiv;
+        let num_quads = num_edge_quads.pow(2);
+        let indices = (0..num_quads)
+            .map(|index| (index / num_edge_quads, index % num_edge_quads))
+            .flat_map(|(i, j)| {
+                let vertex_index = (i * num_edge_vertices + j) as u32;
+                let next_row_vertex_index = vertex_index + num_edge_vertices as u32;
+                [
+                    vertex_index,
+                    vertex_index + 1,
+                    next_row_vertex_index,
+                    next_row_vertex_index + 1,
+                    next_row_vertex_index,
+                    vertex_index + 1,
+                ]
+            })
+            .collect::<Vec<_>>();
+        Self { vertices, indices }
+    }
+
+    fn box_subdivided(num_subdiv: usize, extent: Vector3, scale_uvs: bool) -> Self {
+        const FACES: &[(Vector3, Vector3, Vector3, Vector3)] = &[
             (
-                Vector3::new(-0.5, -0.5, -0.5),
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 1.0, 0.0),
-                Vector3::new(1.0, 0.0, 0.0),
-            ),
-            (
-                Vector3::new(-0.5, -0.5, -0.5),
-                Vector3::new(0.0, 0.0, 1.0),
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 1.0, 0.0),
-            ),
-            (
-                Vector3::new(-0.5, -0.5, -0.5),
-                Vector3::new(0.0, 1.0, 0.0),
-                Vector3::new(0.0, 0.0, 1.0),
-                Vector3::new(0.0, 0.0, 1.0),
-            ),
-            (
-                Vector3::new(0.5, 0.5, 0.5),
+                Vector3::new(0.5, 0.5, -0.5),
                 Vector3::new(0.0, -1.0, 0.0),
                 Vector3::new(-1.0, 0.0, 0.0),
                 Vector3::new(1.0, 0.0, 0.0),
             ),
             (
-                Vector3::new(0.5, 0.5, 0.5),
-                Vector3::new(-1.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, -1.0),
+                Vector3::new(-0.5, -0.5, -0.5),
+                Vector3::new(1.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
                 Vector3::new(0.0, 1.0, 0.0),
             ),
             (
-                Vector3::new(0.5, 0.5, 0.5),
-                Vector3::new(0.0, 0.0, -1.0),
+                Vector3::new(-0.5, 0.5, -0.5),
                 Vector3::new(0.0, -1.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(0.0, 0.0, 1.0),
+            ),
+            (
+                Vector3::new(-0.5, 0.5, 0.5),
+                Vector3::new(0.0, -1.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            (
+                Vector3::new(0.5, 0.5, -0.5),
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(0.0, 1.0, 0.0),
+            ),
+            (
+                Vector3::new(0.5, -0.5, -0.5),
+                Vector3::new(0.0, 1.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
                 Vector3::new(0.0, 0.0, 1.0),
             ),
         ];
-
-        let build_face = |origin: Vector3,
-                          u: Vector3,
-                          v: Vector3,
-                          color: Vector3,
-                          index_offset: usize|
-         -> (Vec<Vertex>, Vec<u32>) {
-            let num_side_vertices = 2 + num_subdiv;
-            let num_face_vertices = num_side_vertices.pow(2);
-            // Can Vec::with_capacity be used here?
-            let mut vertices = vec![Vertex::default(); num_face_vertices];
-            let num_side_quads = 1 + num_subdiv;
-            let num_face_indices = num_side_quads.pow(2) * 6;
-            let face_normal = u.cross(v).norm();
-            // Try use iterator syntax and copare resulting assembly code
-            for i in 0..num_side_vertices {
-                for j in 0..num_side_vertices {
-                    let u_scale = i as f32 / (num_side_vertices - 1) as f32;
-                    let v_scale = j as f32 / (num_side_vertices - 1) as f32;
-                    let vertex = &mut vertices[i * num_side_vertices + j];
-                    vertex.pos = origin + u_scale * u + v_scale * v;
-                    vertex.color = color;
-                    vertex.norm = face_normal;
-                    vertex.uv = Vector2::new(u_scale, v_scale);
-                }
-            }
-            let mut indices = vec![0u32; num_face_indices];
-            for i in 0..num_side_quads {
-                for j in 0..num_side_quads {
-                    let quad_index = i * num_side_quads + j;
-                    let quad = &mut indices[(quad_index * 6)..(quad_index * 6 + 6)];
-                    let vertex_index = (index_offset + (i * num_side_vertices + j)) as u32;
-                    let next_row_vertex_index = vertex_index + num_side_vertices as u32;
-                    quad.copy_from_slice(&[
-                        vertex_index,
-                        vertex_index + 1,
-                        next_row_vertex_index,
-                        next_row_vertex_index + 1,
-                        next_row_vertex_index,
-                        vertex_index + 1,
-                    ]);
-                }
-            }
-            (vertices, indices)
-        };
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-
-        for &(origin, u, v, color) in FACES_BASES {
-            let (face_vertices, face_indices) = build_face(origin, u, v, color, vertices.len());
-            vertices.extend(face_vertices.into_iter());
-            indices.extend(face_indices.into_iter());
-        }
-        Self { vertices, indices }
+        FACES
+            .iter()
+            .map(|&(offset, u, v, color)| {
+                Self::plane_subdivided(
+                    num_subdiv,
+                    u.hadamard(extent),
+                    v.hadamard(extent),
+                    color,
+                    scale_uvs,
+                )
+                .offset(offset.hadamard(extent))
+            })
+            .fold(Self::new(), |builder, face| builder.extend(face))
     }
 }
 
 impl From<shape::Cube> for Mesh {
     fn from(value: shape::Cube) -> Self {
-        let mut mesh = Mesh::unit_cube_subdivided(0);
-        for vert in &mut mesh.vertices {
-            vert.pos = value.side * vert.pos;
-            vert.uv = value.side * vert.uv;
-        }
-        mesh
+        MeshBuilder::box_subdivided(0, Vector3::new(value.side, value.side, value.side), true)
+            .build()
     }
 }
 
 impl From<shape::Sphere> for Mesh {
     fn from(value: shape::Sphere) -> Self {
-        let mut mesh = Mesh::unit_cube_subdivided(5);
+        const UNIT_SPHERE_SUBDIV: usize = 4;
+        let num_subdiv =
+            ((value.diameter * UNIT_SPHERE_SUBDIV as f32) as usize).max(UNIT_SPHERE_SUBDIV);
+        let mut mesh = MeshBuilder::box_subdivided(num_subdiv, Vector3::new(1.0, 1.0, 1.0), false);
         for vert in &mut mesh.vertices {
-            vert.pos = value.radius * vert.pos.norm();
-            vert.uv = value.radius * vert.uv;
+            vert.pos = 0.5 * value.diameter * vert.pos.norm();
+            vert.uv = value.diameter * vert.uv;
         }
-        mesh
+        mesh.build()
     }
 }
 
 impl From<shape::Box> for Mesh {
     fn from(value: shape::Box) -> Self {
-        let diag = Vector3::new(value.width, value.depth, value.height);
-        let faces_uv_scale = [
-            Vector2::new(value.width, value.depth),
-            Vector2::new(value.height, value.width),
-            Vector2::new(value.depth, value.height),
-            Vector2::new(value.depth, value.width),
-            Vector2::new(value.width, value.height),
-            Vector2::new(value.height, value.depth),
-        ];
-        let mut mesh = Mesh::unit_cube_subdivided(0);
-        for (chunk, uv_scale) in &mut mesh.vertices.chunks_mut(4).zip(faces_uv_scale) {
-            for vert in chunk {
-                vert.pos = Vector3::new(
-                    vert.pos.x * diag.x,
-                    vert.pos.y * diag.y,
-                    vert.pos.z * diag.z,
-                );
-                vert.uv = Vector2::new(vert.uv.x * uv_scale.x, vert.uv.y * uv_scale.y)
-            }
-        }
-        mesh
+        MeshBuilder::box_subdivided(
+            0,
+            Vector3::new(value.width, value.depth, value.height),
+            true,
+        )
+        .build()
     }
 }
