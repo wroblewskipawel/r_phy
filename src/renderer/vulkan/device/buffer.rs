@@ -1,5 +1,5 @@
 use ash::{vk, Device};
-use bytemuck::{cast_slice, Pod};
+use bytemuck::{cast_slice_mut, Pod};
 use std::{
     error::Error,
     ffi::c_void,
@@ -20,9 +20,81 @@ use super::{
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Range {
-    pub size: vk::DeviceSize,
-    pub offset: vk::DeviceSize,
+pub struct ByteRange {
+    pub beg: usize,
+    pub end: usize,
+}
+
+impl ByteRange {
+    pub fn empty() -> Self {
+        Self { beg: 0, end: 0 }
+    }
+
+    fn align<T>(offset: usize) -> usize {
+        let alignment = std::mem::align_of::<T>();
+        ((offset + alignment - 1) / alignment) * alignment
+    }
+
+    fn extend<T: Pod>(&mut self, len: usize) -> ByteRange {
+        let beg = ByteRange::align::<T>(self.end);
+        let end = beg + len * size_of::<T>();
+        self.end = end;
+        ByteRange { beg, end }
+    }
+}
+
+impl<T: Pod> From<Range<T>> for ByteRange {
+    fn from(value: Range<T>) -> Self {
+        let beg = value.first * size_of::<T>();
+        Self {
+            beg,
+            end: beg + value.len * size_of::<T>(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Range<T: Pod> {
+    pub len: usize,
+    pub first: usize,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Pod> From<ByteRange> for Range<T> {
+    fn from(value: ByteRange) -> Self {
+        debug_assert_eq!(
+            value.beg % size_of::<T>(),
+            0,
+            "Invalid Range<u8> offset for Range<{}> type!",
+            std::any::type_name::<T>()
+        );
+        debug_assert_eq!(
+            (value.end - value.beg) % size_of::<T>(),
+            0,
+            "Invalid Range<u8> size for Range<{}> type!",
+            std::any::type_name::<T>()
+        );
+        Self {
+            first: value.beg / size_of::<T>(),
+            len: (value.end - value.beg) / size_of::<T>(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Pod> Range<T> {
+    fn alloc(&mut self, len: usize) -> Self {
+        debug_assert!(len <= self.len, "Range alloc overflow!");
+        let first = self.first;
+        self.first += len;
+        self.len -= len;
+        Self {
+            first,
+            len,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 pub struct Buffer {
@@ -95,12 +167,16 @@ impl<'a> From<&'a mut HostVisibleBuffer> for &'a mut Buffer {
 }
 
 impl HostVisibleBuffer {
-    fn map(&mut self, device: &Device, range: Range) -> Result<HostMappedMemory, Box<dyn Error>> {
+    pub fn map(
+        &mut self,
+        device: &Device,
+        range: ByteRange,
+    ) -> Result<HostMappedMemory, Box<dyn Error>> {
         let ptr = unsafe {
             device.map_memory(
                 self.buffer.device_memory,
-                range.offset,
-                range.size,
+                range.beg as vk::DeviceSize,
+                (range.end - range.beg) as vk::DeviceSize,
                 vk::MemoryMapFlags::empty(),
             )?
         };
@@ -117,25 +193,6 @@ pub struct HostMappedMemory {
 }
 
 impl HostMappedMemory {
-    fn transfer_data<T: Pod>(
-        &mut self,
-        dst_offset: vk::DeviceSize,
-        src: &[T],
-    ) -> Result<&mut Self, Box<dyn Error>> {
-        let ptr = self
-            .ptr
-            .ok_or("Host Visible buffer isn't currently mapped!")?;
-        let src_bytes: &[u8] = cast_slice(src);
-        unsafe {
-            copy_nonoverlapping(
-                src_bytes.as_ptr(),
-                (ptr as *mut u8).offset(dst_offset as isize),
-                src_bytes.len(),
-            )
-        };
-        Ok(self)
-    }
-
     fn unmap(&mut self, device: &Device) {
         if self.ptr.take().is_some() {
             unsafe { device.unmap_memory(self.device_memory) };
@@ -210,10 +267,31 @@ impl VulkanDevice {
     }
 }
 
+pub struct StagingBufferBuilder {
+    range: ByteRange,
+}
+
+impl StagingBufferBuilder {
+    pub fn new() -> Self {
+        Self {
+            range: ByteRange::empty(),
+        }
+    }
+
+    pub fn append<T: Pod>(&mut self, len: usize) -> Range<T> {
+        self.range.extend::<T>(len).into()
+    }
+}
+
 pub struct StagingBuffer<'a> {
-    buffer: HostVisibleBuffer,
-    offset: vk::DeviceSize,
+    range: ByteRange,
+    buffer: PersistentBuffer,
     device: &'a VulkanDevice,
+}
+
+pub struct WritableRange<T: Pod> {
+    ptr: *mut T,
+    range: Range<T>,
 }
 
 impl<'a> From<&'a StagingBuffer<'a>> for &'a Buffer {
@@ -230,14 +308,14 @@ impl<'a> From<&'a mut StagingBuffer<'a>> for &'a mut Buffer {
 
 impl<'a> Drop for StagingBuffer<'a> {
     fn drop(&mut self) {
-        self.device.destroy_buffer((&mut self.buffer).into())
+        self.device.destroy_persistent_buffer(&mut self.buffer);
     }
 }
 
 impl<'a> StagingBuffer<'a> {
-    pub fn transfer_data<'b>(
+    pub fn transfer_buffer_data<'b>(
         &self,
-        dst: impl Into<&'b Buffer>,
+        dst: impl Into<&'b mut Buffer>,
         dst_offset: vk::DeviceSize,
     ) -> Result<(), Box<dyn Error>> {
         let command = self
@@ -251,7 +329,7 @@ impl<'a> StagingBuffer<'a> {
                 &[vk::BufferCopy {
                     src_offset: 0,
                     dst_offset,
-                    size: self.offset,
+                    size: self.range.end as vk::DeviceSize,
                 }],
             )
         });
@@ -270,50 +348,53 @@ impl<'a> StagingBuffer<'a> {
         Ok(())
     }
 
-    pub fn load_buffer_data_from_slices<T: Pod>(
-        &mut self,
-        src_slices: &[&[T]],
-        alignment: usize,
-    ) -> Result<(usize, Vec<Range>), Box<dyn Error>> {
-        let mut p_buffer = self.buffer.map(
-            self.device,
-            Range {
-                offset: 0,
-                size: self.buffer.buffer.size as u64,
+    pub fn write_range<T: Pod>(&mut self, range: Range<T>) -> WritableRange<T> {
+        // TODO: Improve safety,
+        // - Range should comme from current staging buffer builder (unnecessary complexity?)
+        debug_assert!(
+            <Range<T> as Into<ByteRange>>::into(range).end <= self.range.end,
+            "Invalid range for StagingBuffer write!"
+        );
+        WritableRange {
+            range: Range {
+                first: 0,
+                len: range.len,
+                _phantom: PhantomData,
             },
-        )?;
-        let mut buffer_offset = Self::align_offset(self.offset, alignment as vk::DeviceSize);
-        let mut slice_ranges = vec![];
-        for slice in src_slices {
-            let bytes: &[u8] = cast_slice(slice);
-            p_buffer.transfer_data(buffer_offset, bytes)?;
-            slice_ranges.push(Range {
-                offset: buffer_offset as vk::DeviceSize,
-                size: bytes.len() as vk::DeviceSize,
-            });
-            buffer_offset += bytes.len() as u64;
+            ptr: unsafe { (self.buffer.ptr.unwrap() as *mut T).add(range.first) },
         }
-        self.offset = buffer_offset as vk::DeviceSize;
-        p_buffer.unmap(self.device);
-        Ok((buffer_offset as usize, slice_ranges))
+    }
+}
+
+impl<T: Pod> WritableRange<T> {
+    pub fn write(&mut self, value: &[T]) -> Range<T> {
+        let range = self.range.alloc(value.len());
+        unsafe { copy_nonoverlapping(value.as_ptr(), self.ptr.add(range.first), value.len()) }
+        range
     }
 
-    fn align_offset(offset: vk::DeviceSize, alignment: vk::DeviceSize) -> vk::DeviceSize {
-        debug_assert_ne!(alignment, 0, "Invalid alignment value!");
-        ((offset + (alignment - 1)) / alignment) * alignment
+    pub fn remaining_as_slice_mut(&mut self) -> &mut [T] {
+        let range = self.range.alloc(self.range.len);
+        let values =
+            unsafe { std::slice::from_raw_parts_mut::<T>(self.ptr.add(range.first), range.len) };
+        cast_slice_mut(values)
     }
 }
 
 impl VulkanDevice {
-    pub fn create_stagging_buffer(&self, size: usize) -> Result<StagingBuffer, Box<dyn Error>> {
-        let buffer = self.create_host_visible_buffer(
-            size,
+    pub fn create_stagging_buffer(
+        &self,
+        builder: StagingBufferBuilder,
+    ) -> Result<StagingBuffer, Box<dyn Error>> {
+        let StagingBufferBuilder { range } = builder;
+        let buffer = self.create_persistent_buffer(
+            range.end,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::SharingMode::EXCLUSIVE,
             &[operation::Transfer::get_queue_family_index(self)],
         )?;
         Ok(StagingBuffer {
-            offset: 0,
+            range,
             buffer,
             device: self,
         })
@@ -347,13 +428,7 @@ impl VulkanDevice {
     ) -> Result<PersistentBuffer, Box<dyn Error>> {
         let mut buffer =
             self.create_host_visible_buffer(size, usage, sharing_mode, queue_families)?;
-        let ptr = buffer.map(
-            self,
-            Range {
-                size: size as vk::DeviceSize,
-                offset: 0,
-            },
-        )?;
+        let ptr = buffer.map(self, ByteRange { beg: 0, end: size })?;
         Ok(PersistentBuffer { buffer, ptr })
     }
 

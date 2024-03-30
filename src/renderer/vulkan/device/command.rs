@@ -7,7 +7,7 @@ use super::{
     buffer::Buffer,
     pipeline::GraphicsPipeline,
     render_pass::VulkanRenderPass,
-    resources::{BufferType, MeshRange, ResourcePack},
+    resources::{BufferType, MeshPack, MeshRange},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
@@ -244,7 +244,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
     pub fn copy_buffer<'b, 'c>(
         self,
         src: impl Into<&'b Buffer>,
-        dst: impl Into<&'c Buffer>,
+        dst: impl Into<&'c mut Buffer>,
         ranges: &[vk::BufferCopy],
     ) -> Self {
         let RecordingCommand(command, device) = self;
@@ -296,20 +296,20 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_resource_pack(self, resources: &ResourcePack) -> Self {
+    pub fn bind_mesh_pack(self, pack: &MeshPack) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_index_buffer(
                 command.buffer,
-                resources.buffer.buffer.buffer,
-                resources.buffer_ranges[BufferType::Index].offset,
+                pack.buffer.buffer.buffer,
+                pack.buffer_ranges[BufferType::Index].beg as vk::DeviceSize,
                 vk::IndexType::UINT32,
             );
             device.cmd_bind_vertex_buffers(
                 command.buffer,
                 0,
-                &[resources.buffer.buffer.buffer],
-                &[resources.buffer_ranges[BufferType::Vertex].offset],
+                &[pack.buffer.buffer.buffer],
+                &[pack.buffer_ranges[BufferType::Vertex].beg as vk::DeviceSize],
             );
         }
         RecordingCommand(command, device)
@@ -361,9 +361,9 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         unsafe {
             device.cmd_draw_indexed(
                 command.buffer,
-                mesh_ranges.indices.count,
+                mesh_ranges.indices.len as u32,
                 1,
-                mesh_ranges.indices.first,
+                mesh_ranges.indices.first as u32,
                 mesh_ranges.vertices.first as i32,
                 0,
             )
