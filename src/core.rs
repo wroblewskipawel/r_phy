@@ -14,31 +14,31 @@ use crate::{
     math::{transform::Transform, types::Matrix4},
     renderer::{
         camera::{Camera, CameraType},
-        mesh::{Mesh, MeshHandle},
+        model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
         Renderer, RendererBackend,
     },
 };
 
 #[derive(Debug, Clone, Copy)]
 struct DrawCommand {
-    mesh: MeshHandle,
+    model: Model,
     transform: Matrix4,
 }
 
 pub struct Object {
-    mesh: MeshHandle,
+    model: Model,
     transform: Transform,
     update: Box<dyn Fn(f32, Transform) -> Transform>,
 }
 
 impl Object {
     pub fn new(
-        mesh: MeshHandle,
+        model: Model,
         transform: Transform,
         update: Box<dyn Fn(f32, Transform) -> Transform>,
     ) -> Self {
         Self {
-            mesh,
+            model,
             transform,
             update,
         }
@@ -47,7 +47,7 @@ impl Object {
     fn update(&mut self, elapsed_time: f32) -> DrawCommand {
         self.transform = (self.update)(elapsed_time, self.transform).into();
         DrawCommand {
-            mesh: self.mesh,
+            model: self.model,
             transform: self.transform.into(),
         }
     }
@@ -90,7 +90,7 @@ pub struct LoopBuilder {
     renderer_backend: Option<RendererBackend>,
     camera: Option<(CameraType, Matrix4)>,
     meshes: Vec<Mesh>,
-    objects: Vec<Object>,
+    materials: Vec<Material>,
 }
 
 impl LoopBuilder {
@@ -100,7 +100,7 @@ impl LoopBuilder {
             renderer_backend: None,
             camera: None,
             meshes: vec![],
-            objects: vec![],
+            materials: vec![],
         }
     }
 
@@ -125,25 +125,21 @@ impl LoopBuilder {
         }
     }
 
-    pub fn with_meshes(self, meshes: Vec<Mesh>) -> (Self, Vec<MeshHandle>) {
-        let mesh_handles = (0..meshes.len() as u64)
-            .map(|index| MeshHandle(index))
-            .collect();
-        (Self { meshes, ..self }, mesh_handles)
+    pub fn with_meshes(self, meshes: Vec<Mesh>) -> Self {
+        Self { meshes, ..self }
     }
 
-    pub fn with_object(mut self, object: Object) -> Self {
-        self.objects.push(object);
-        self
+    pub fn with_materials(self, materials: Vec<Material>) -> Self {
+        Self { materials, ..self }
     }
 
-    pub fn build(self) -> Result<Loop, Box<dyn Error>> {
+    pub fn build(self) -> Result<(Loop, Vec<MeshHandle>, Vec<MaterialHandle>), Box<dyn Error>> {
         let Self {
             window_builder,
             renderer_backend,
             camera,
             meshes,
-            objects,
+            materials,
         } = self;
         let mut input_handler = InputHandler::new();
         let event_loop = EventLoop::new()?;
@@ -155,18 +151,23 @@ impl LoopBuilder {
         let mut renderer = renderer_backend
             .ok_or("Renderer backend not selected for Loop!")?
             .create(&window)?;
-        renderer.load_meshes(&meshes)?;
+        let mesh_handles = renderer.load_meshes(&meshes)?;
+        let material_handles = renderer.load_materials(&materials)?;
         let camera = camera
             .ok_or("Camera not selected for Loop!")
             .and_then(|(camera_type, proj)| Ok(camera_type.create(proj, &mut input_handler)))?;
-        Ok(Loop {
-            event_loop,
-            window,
-            renderer,
-            input_handler,
-            camera,
-            objects,
-        })
+        Ok((
+            Loop {
+                event_loop,
+                window,
+                renderer,
+                input_handler,
+                camera,
+                objects: vec![],
+            },
+            mesh_handles,
+            material_handles,
+        ))
     }
 }
 
@@ -180,6 +181,10 @@ pub struct Loop {
 }
 
 impl Loop {
+    pub fn with_objects(self, objects: Vec<Object>) -> Self {
+        Self { objects, ..self }
+    }
+
     pub fn run(self) -> Result<(), Box<dyn Error>> {
         let Self {
             window,
@@ -236,9 +241,9 @@ impl Loop {
                     elwt.exit();
                 }
                 Event::AboutToWait => {
-                    let _ = renderer.begin_frame(&camera.borrow().get_matrices());
-                    for DrawCommand { mesh, transform } in &draw_commands {
-                        let _ = renderer.draw(*mesh, transform);
+                    let _ = renderer.begin_frame(&*camera.borrow());
+                    for DrawCommand { model, transform } in &draw_commands {
+                        let _ = renderer.draw(*model, transform);
                     }
                     let _ = renderer.end_frame();
                 }

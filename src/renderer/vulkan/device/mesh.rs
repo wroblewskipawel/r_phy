@@ -3,7 +3,7 @@ use std::{error::Error, ops::Index};
 use ash::vk;
 use strum::EnumCount;
 
-use crate::renderer::mesh::{Mesh, Vertex};
+use crate::renderer::model::{Mesh, Vertex};
 
 use super::{
     buffer::{ByteRange, DeviceLocalBuffer, Range, StagingBufferBuilder},
@@ -109,7 +109,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_resource_pack(&self, resources: &mut MeshPack) {
-        self.destroy_buffer((&mut resources.buffer).into());
+    pub fn destory_mesh_pack(&self, pack: &mut MeshPack) {
+        self.destroy_buffer((&mut pack.buffer).into());
     }
 }

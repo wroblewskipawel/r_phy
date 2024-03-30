@@ -158,4 +158,32 @@ impl PhysicalDeviceSurfaceProperties {
             capabilities,
         })
     }
+
+    pub fn get_current_extent(&self) -> vk::Extent2D {
+        let vk::SurfaceCapabilitiesKHR {
+            current_extent,
+            min_image_extent,
+            max_image_extent,
+            ..
+        } = self.capabilities;
+        vk::Extent2D {
+            width: current_extent.width.clamp(0, max_image_extent.width),
+            height: current_extent.height.clamp(0, max_image_extent.height),
+        }
+    }
+
+    pub fn get_image_count(&self) -> u32 {
+        let vk::SurfaceCapabilitiesKHR {
+            min_image_count,
+            max_image_count,
+            ..
+        } = self.capabilities;
+        (min_image_count + 1).clamp(
+            0,
+            match max_image_count {
+                0 => u32::MAX,
+                _ => max_image_count,
+            },
+        )
+    }
 }

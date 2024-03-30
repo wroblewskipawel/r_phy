@@ -1,45 +1,69 @@
-use ash::prelude::VkResult;
 use ash::{vk, Device};
 use bytemuck::Pod;
+use std::any::TypeId;
+use std::collections::HashMap;
 use std::error::Error;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::Index;
-use std::sync::Once;
+use std::sync::{Once, RwLock};
 
 use crate::renderer::camera::CameraMatrices;
 
 use super::buffer::UniformBuffer;
 use super::command::operation::Operation;
+use super::image::Texture2D;
 use super::VulkanDevice;
 
-pub trait DescriptorLayout {
+// Check out once_cell and lazy_static crates to improve the implementation
+fn get_descriptor_set_layout_map(
+) -> &'static RwLock<HashMap<std::any::TypeId, vk::DescriptorSetLayout>> {
+    static mut LAYOUTS: Option<RwLock<HashMap<std::any::TypeId, vk::DescriptorSetLayout>>> = None;
+    static INIT: Once = Once::new();
+    unsafe {
+        INIT.call_once(|| {
+            if LAYOUTS.is_none() {
+                LAYOUTS.replace(RwLock::new(HashMap::new()));
+            }
+        });
+        LAYOUTS.as_ref().unwrap()
+    }
+}
+
+// DescriptorSetLayout should be made separate structure
+// so that it would be possible to create layout by composing multiple DescriptorBindings types
+// similar as it is done currently (as kind of proof of concept) for PipelineLayout
+pub trait DescriptorLayout
+where
+    Self: 'static,
+{
     fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding];
 
-    // DescriptorSetLayout should be made separate structure
-    // so that it would be possible to create layout by composing multiple DescriptorBindings types
-    // similar as it is done currently (as kind of proof of concept) for PipelineLayout
-    fn get_descriptor_set_layout(device: &Device) -> VkResult<vk::DescriptorSetLayout> {
-        unsafe {
-            static mut LAYOUT: Option<VkResult<vk::DescriptorSetLayout>> = None;
-            // Why bother with thread safe creation of set layout when destroying is in plain unsafe code?
-            static INIT: Once = Once::new();
-            INIT.call_once(|| {
-                if LAYOUT.is_none() {
-                    LAYOUT.replace(
-                        device.create_descriptor_set_layout(
-                            &vk::DescriptorSetLayoutCreateInfo::builder()
-                                .bindings(Self::get_descriptor_set_bindings()),
-                            None,
-                        ),
-                    );
-                }
-            });
-            LAYOUT.unwrap()
-        }
-    }
-
     fn get_descriptor_write() -> vk::WriteDescriptorSet;
+
+    fn get_descriptor_set_layout(
+        device: &Device,
+    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
+        let layout_map = get_descriptor_set_layout_map();
+        let layout = if let Some(layout) = {
+            let layout_map_reader = layout_map.read()?;
+            layout_map_reader.get(&TypeId::of::<Self>()).copied()
+        } {
+            layout
+        } else {
+            let mut layout_map_writer = layout_map.try_write()?;
+            let layout = unsafe {
+                device.create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::builder()
+                        .bindings(Self::get_descriptor_set_bindings()),
+                    None,
+                )?
+            };
+            layout_map_writer.insert(TypeId::of::<Self>(), layout);
+            layout
+        };
+        Ok(layout)
+    }
 }
 
 impl DescriptorLayout for CameraMatrices {
@@ -68,6 +92,7 @@ impl DescriptorLayout for CameraMatrices {
 }
 
 pub struct DescriptorPool<T: DescriptorLayout> {
+    pub count: usize,
     pool: vk::DescriptorPool,
     sets: Vec<vk::DescriptorSet>,
     _phantom: PhantomData<T>,
@@ -85,9 +110,10 @@ impl VulkanDevice {
     pub fn create_descriptor_pool<T: DescriptorLayout>(
         &self,
         pool_size: usize,
+        ty: vk::DescriptorType,
     ) -> Result<DescriptorPool<T>, Box<dyn Error>> {
         let pool_sizes = [vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
+            ty,
             descriptor_count: pool_size as u32,
         }];
         let pool_create_info = vk::DescriptorPoolCreateInfo::builder()
@@ -106,6 +132,7 @@ impl VulkanDevice {
             )?
         };
         Ok(DescriptorPool {
+            count: sets.len(),
             pool,
             sets,
             _phantom: PhantomData,
@@ -155,12 +182,45 @@ impl VulkanDevice {
         unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) }
     }
 
-    pub fn destory_descriptor_set_layout<T: DescriptorLayout>(&self) {
-        unsafe {
-            if let Ok(layout) = T::get_descriptor_set_layout(&self.device) {
+    pub fn write_image_samplers(
+        &self,
+        pool: &mut DescriptorPool<Texture2D>,
+        textures: &[Texture2D],
+    ) {
+        debug_assert_eq!(
+            pool.sets.len(),
+            textures.len(),
+            "Not enough Texture2D provided for DescriptorPool write!"
+        );
+        let image_writes = textures
+            .iter()
+            .map(|texture| vk::DescriptorImageInfo {
+                sampler: texture.sampler,
+                image_view: texture.image.image_view,
+                image_layout: texture.image.layout,
+            })
+            .collect::<Vec<_>>();
+        let descriptor_writes = pool
+            .sets
+            .iter()
+            .enumerate()
+            .map(|(index, &set)| vk::WriteDescriptorSet {
+                dst_set: set,
+                p_image_info: &image_writes[index],
+                ..Texture2D::get_descriptor_write()
+            })
+            .collect::<Vec<_>>();
+        unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) }
+    }
+
+    pub fn destory_descriptor_set_layouts(&self) {
+        let layout_map = get_descriptor_set_layout_map();
+        let exclusive_lock = layout_map.write().unwrap();
+        for (_, &layout) in exclusive_lock.iter() {
+            unsafe {
                 self.device.destroy_descriptor_set_layout(layout, None);
             }
-        };
+        }
     }
 
     pub fn destory_descriptor_pool<T: DescriptorLayout>(&self, pool: &mut DescriptorPool<T>) {

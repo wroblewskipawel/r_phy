@@ -1,13 +1,21 @@
-use ash::{vk, Device};
+use ash::{
+    vk::{self, Extent2D, Offset3D},
+    Device,
+};
 use bytemuck::{bytes_of, Pod};
+
+use crate::{math::types::Matrix4, renderer::camera::Camera};
 
 use self::operation::Operation;
 
 use super::{
     buffer::Buffer,
+    image::VulkanImage2D,
+    material::MaterialPack,
+    mesh::{BufferType, MeshPack, MeshRange},
     pipeline::GraphicsPipeline,
     render_pass::VulkanRenderPass,
-    resources::{BufferType, MeshPack, MeshRange},
+    skybox::Skybox,
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
@@ -40,8 +48,8 @@ pub mod operation {
         fn get_queue_family_index(device: &VulkanDevice) -> u32 {
             device.physical_device.queue_families.graphics
         }
-        fn get_transient_command_pool(_device: &VulkanDevice) -> vk::CommandPool {
-            unimplemented!()
+        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool {
+            device.command_pools.graphics
         }
     }
     impl Operation for Compute {
@@ -256,6 +264,228 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
+    pub fn change_layout<'b, 'c>(
+        self,
+        image: impl Into<&'c mut VulkanImage2D>,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        array_layer: u32,
+        base_level: u32,
+        level_count: u32,
+    ) -> Self {
+        let RecordingCommand(command, device) = self;
+        let image = image.into();
+        debug_assert!(
+            base_level + level_count <= image.mip_levels,
+            "Image mip level count exceeded!"
+        );
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command.buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::BY_REGION,
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::TRANSFER_READ
+                        | vk::AccessFlags::TRANSFER_WRITE,
+                    dst_access_mask: vk::AccessFlags::TRANSFER_READ
+                        | vk::AccessFlags::TRANSFER_WRITE,
+                    old_layout,
+                    new_layout,
+                    src_queue_family_index: O::get_queue_family_index(device),
+                    dst_queue_family_index: O::get_queue_family_index(device),
+                    image: image.image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: base_level,
+                        level_count,
+                        base_array_layer: array_layer,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                }],
+            );
+            // TODO: Reconsider setting the layout here as it could be error prone
+            // when handling partial layout transition (e.g. single mip level subresource)
+            // image.layout = new_layout;
+        }
+        RecordingCommand(command, device)
+    }
+
+    pub fn generate_mip<'b, 'c>(
+        self,
+        image: impl Into<&'c mut VulkanImage2D>,
+        array_layer: u32,
+    ) -> Self {
+        let image = image.into();
+        let image_mip_levels = image.mip_levels;
+        // debug_assert!(
+        //     image.layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        //     "Invalid image layout for mip levels generation!"
+        // );
+        (1..image_mip_levels)
+            .fold(self, |command, level| {
+                command.generate_mip_level(image.image, image.extent, level, array_layer)
+            })
+            .change_layout(
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                array_layer,
+                image_mip_levels - 1,
+                1,
+            )
+    }
+
+    fn generate_mip_level<'b, 'c>(
+        self,
+        image: vk::Image,
+        extent: Extent2D,
+        level: u32,
+        layer: u32,
+    ) -> Self {
+        debug_assert!(level > 0, "generate mip level called for base mip level!");
+        let base_level_extent = Extent2D {
+            width: (extent.width / 2u32.pow(level - 1)).max(1),
+            height: (extent.height / 2u32.pow(level - 1)).max(1),
+        };
+        let level_extent = Extent2D {
+            width: (base_level_extent.width / 2).max(1),
+            height: (base_level_extent.height / 2).max(1),
+        };
+        let RecordingCommand(command, device) = self;
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command.buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::BY_REGION,
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+                    dst_access_mask: vk::AccessFlags::TRANSFER_READ,
+                    old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    src_queue_family_index: O::get_queue_family_index(device),
+                    dst_queue_family_index: O::get_queue_family_index(device),
+                    image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: level - 1,
+                        level_count: 1,
+                        base_array_layer: layer,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                }],
+            );
+            device.cmd_pipeline_barrier(
+                command.buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::BY_REGION,
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::TRANSFER_READ,
+                    dst_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+                    old_layout: vk::ImageLayout::UNDEFINED,
+                    new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    src_queue_family_index: O::get_queue_family_index(device),
+                    dst_queue_family_index: O::get_queue_family_index(device),
+                    image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: level,
+                        level_count: 1,
+                        base_array_layer: layer,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                }],
+            );
+            device.cmd_blit_image(
+                command.buffer,
+                image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::ImageBlit {
+                    src_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: level - 1,
+                        base_array_layer: layer,
+                        layer_count: 1,
+                    },
+                    src_offsets: [
+                        Offset3D { x: 0, y: 0, z: 0 },
+                        Offset3D {
+                            x: base_level_extent.width as i32,
+                            y: base_level_extent.height as i32,
+                            z: 1,
+                        },
+                    ],
+                    dst_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: level,
+                        base_array_layer: layer,
+                        layer_count: 1,
+                    },
+                    dst_offsets: [
+                        Offset3D { x: 0, y: 0, z: 0 },
+                        Offset3D {
+                            x: level_extent.width as i32,
+                            y: level_extent.height as i32,
+                            z: 1,
+                        },
+                    ],
+                }],
+                vk::Filter::LINEAR,
+            );
+        }
+        RecordingCommand(command, device)
+    }
+
+    pub fn copy_image<'b, 'c>(
+        self,
+        src: impl Into<&'b Buffer>,
+        dst: impl Into<&'c mut VulkanImage2D>,
+        dst_layer: u32,
+    ) -> Self {
+        let RecordingCommand(command, device) = self;
+        let src = src.into();
+        let dst = dst.into();
+        unsafe {
+            device.cmd_copy_buffer_to_image(
+                command.buffer,
+                src.buffer,
+                dst.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::BufferImageCopy {
+                    buffer_offset: 0,
+                    buffer_row_length: 0,
+                    buffer_image_height: 0,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: dst_layer,
+                        layer_count: 1,
+                    },
+                    image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+                    image_extent: vk::Extent3D {
+                        width: dst.extent.width,
+                        height: dst.extent.height,
+                        depth: 1,
+                    },
+                }],
+            );
+        }
+        RecordingCommand(command, device)
+    }
+
     pub fn begin_render_pass(self, frame: &SwapchainFrame, render_pass: &VulkanRenderPass) -> Self {
         let RecordingCommand(command, device) = self;
         let clear_values = VulkanRenderPass::get_attachment_clear_values();
@@ -315,6 +545,61 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
+    pub fn bind_material<L>(
+        self,
+        pipeline: &GraphicsPipeline<L>,
+        pack: &MaterialPack,
+        material_index: usize,
+    ) -> Self {
+        let RecordingCommand(command, device) = self;
+        unsafe {
+            // This implicitly relies on knowledge that Material samplers
+            // is second descriptor set used by the pipeline
+            device.cmd_bind_descriptor_sets(
+                command.buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                (&pipeline.layout).into(),
+                1u32,
+                &[pack.descriptors[material_index]],
+                &[],
+            )
+        }
+        RecordingCommand(command, device)
+    }
+
+    pub fn draw_skybox(
+        self,
+        skybox: &Skybox,
+        swapchain_frame: &SwapchainFrame,
+        camera: &dyn Camera,
+    ) -> Self {
+        let camera_model = Matrix4::translate(camera.get_position());
+        let RecordingCommand(command, device) = self
+            .bind_pipeline(&skybox.pipeline)
+            .bind_camera_uniform_buffer(&skybox.pipeline, &swapchain_frame);
+        unsafe {
+            device.cmd_bind_descriptor_sets(
+                command.buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                (&skybox.pipeline.layout).into(),
+                // This implicitly relies on knowledge that Material samplers
+                // is second descriptor set used by the pipeline
+                1u32,
+                &[skybox.descriptor[0]],
+                &[],
+            )
+        }
+        RecordingCommand(command, device)
+            .bind_mesh_pack(&skybox.mesh_pack)
+            .push_constants(
+                &skybox.pipeline,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                &camera_model,
+            )
+            .draw_mesh(skybox.mesh_pack.meshes[0])
+    }
+
     pub fn push_constants<L, C: Pod>(
         self,
         pipeline: &GraphicsPipeline<L>,
@@ -343,7 +628,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             // This implicitly relies on knowledge that Camera uniform
-            // is only descriptor set used by the pipeline
+            // is first descriptor set used by the pipeline
             device.cmd_bind_descriptor_sets(
                 command.buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -454,6 +739,7 @@ impl<'a, O: Operation> SubmitedCommand<'a, Persistent, O> {
 
 pub struct TransientCommandPools {
     transfer: vk::CommandPool,
+    graphics: vk::CommandPool,
 }
 
 impl TransientCommandPools {
@@ -469,11 +755,22 @@ impl TransientCommandPools {
                 None,
             )?
         };
-        Ok(Self { transfer })
+        let graphics = unsafe {
+            device.create_command_pool(
+                &vk::CommandPoolCreateInfo::builder()
+                    .queue_family_index(queue_families.graphics)
+                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+                None,
+            )?
+        };
+        Ok(Self { transfer, graphics })
     }
 
     pub fn destory(&mut self, device: &Device) {
-        unsafe { device.destroy_command_pool(self.transfer, None) };
+        unsafe {
+            device.destroy_command_pool(self.transfer, None);
+            device.destroy_command_pool(self.graphics, None)
+        };
     }
 }
 

@@ -21,6 +21,7 @@ pub struct CameraMatrices {
 }
 
 pub trait Camera {
+    fn get_position(&self) -> Vector3;
     fn get_matrices(&self) -> CameraMatrices;
     fn update(&mut self, elapsed_time: f32);
     fn set_active(&mut self, active: bool);

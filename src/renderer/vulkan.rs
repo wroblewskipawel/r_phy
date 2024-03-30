@@ -2,17 +2,20 @@ mod debug;
 mod device;
 mod surface;
 
-use crate::math::types::Matrix4;
+use crate::{math::types::Matrix4, physics::shape};
 
 use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
-    pipeline::{DescriptorLayoutBuilder, GraphicsPipeline, GraphicsPipelineLayoutSimple},
-    resources::MeshPack,
+    image::Texture2D,
+    material::MaterialPack,
+    mesh::MeshPack,
+    pipeline::{DescriptorLayoutBuilder, GraphicsPipeline, GraphicsPipelineLayoutTextured},
+    skybox::Skybox,
 };
 
 use super::{
-    camera::CameraMatrices,
-    mesh::{Mesh, MeshHandle},
+    camera::{Camera, CameraMatrices},
+    model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
     Renderer,
 };
 use ash::{vk, Entry, Instance};
@@ -26,7 +29,6 @@ use std::{
     error::Error,
     ffi::{c_char, CStr},
     path::Path,
-    result::Result,
 };
 use surface::VulkanSurface;
 use winit::window::Window;
@@ -39,8 +41,10 @@ struct FrameState {
 
 pub(super) struct VulkanRenderer {
     current_frame_state: Option<FrameState>,
+    materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
-    pipeline: GraphicsPipeline<GraphicsPipelineLayoutSimple>,
+    skybox: Skybox,
+    pipeline: GraphicsPipeline<GraphicsPipelineLayoutTextured>,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,
@@ -123,20 +127,33 @@ impl VulkanRenderer {
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
         let pipeline_layout = device.create_graphics_pipeline_layout(
-            DescriptorLayoutBuilder::new().push::<CameraMatrices>(),
+            DescriptorLayoutBuilder::new()
+                .push::<CameraMatrices>()
+                .push::<Texture2D>(),
         )?;
+        // TODO: Error handling should be improved - currently when shader source files are missing,
+        // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
+        // while error message indicating true cause of the issue is never presented to the user
+        // TODO: User should be able to load custom shareds,
+        // while also some preset of preconfigured one should be available
+        // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
         let pipeline = device.create_graphics_pipeline(
             pipeline_layout,
             &render_pass,
             &swapchain,
             &[
-                Path::new("shaders/spv/unlit/vert.spv"),
-                Path::new("shaders/spv/unlit/frag.spv"),
+                Path::new("shaders/spv/unlit_textured/vert.spv"),
+                Path::new("shaders/spv/unlit_textured/frag.spv"),
             ],
+            false,
         )?;
+        let skybox =
+            device.create_skybox(&render_pass, &swapchain, &Path::new("assets/skybox/skybox"))?;
         Ok(Self {
             current_frame_state: None,
+            materials: vec![],
             meshes: vec![],
+            skybox,
             pipeline,
             swapchain,
             render_pass,
@@ -153,14 +170,17 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
         unsafe {
+            self.materials
+                .iter_mut()
+                .for_each(|pack| self.device.destory_material_pack(pack));
             self.meshes
                 .iter_mut()
-                .for_each(|resources| self.device.destory_resource_pack(resources));
+                .for_each(|pack| self.device.destory_mesh_pack(pack));
+            self.device.destroy_skybox(&mut self.skybox);
             self.device.destory_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destory_render_pass(&mut self.render_pass);
-            self.device
-                .destory_descriptor_set_layout::<CameraMatrices>();
+            self.device.destory_descriptor_set_layouts();
             self.device.destory();
             self.surface.destroy();
             drop(self.debug_utils.take());
@@ -189,16 +209,42 @@ impl From<VulkanMeshHandle> for MeshHandle {
     }
 }
 
+struct VulkanMaterialHandle {
+    material_pack_index: u32,
+    material_index: u32,
+}
+
+impl From<MaterialHandle> for VulkanMaterialHandle {
+    fn from(value: MaterialHandle) -> Self {
+        Self {
+            material_pack_index: ((0xFFFFFFF0000000 & value.0) >> 32) as u32,
+            material_index: (0x00000000FFFFFFFF & value.0) as u32,
+        }
+    }
+}
+
+impl From<VulkanMaterialHandle> for MaterialHandle {
+    fn from(value: VulkanMaterialHandle) -> Self {
+        Self(((value.material_pack_index as u64) << 32) + value.material_index as u64)
+    }
+}
+
 impl Renderer for VulkanRenderer {
-    fn begin_frame(&mut self, camera: &CameraMatrices) -> Result<(), Box<dyn Error>> {
-        let (command, swapchain_frame) = self.device.begin_frame(&mut self.swapchain, camera)?;
+    fn begin_frame(&mut self, camera: &dyn Camera) -> Result<(), Box<dyn Error>> {
+        let camera_matrices = camera.get_matrices();
+        let (command, swapchain_frame) = self
+            .device
+            .begin_frame(&mut self.swapchain, &camera_matrices)?;
         let command = self.device.record_command(command, |command| {
             command
                 .begin_render_pass(&swapchain_frame, &self.render_pass)
-                .bind_pipeline(&self.pipeline)
+                .bind_pipeline(&self.skybox.pipeline)
                 // Camera descriptor set shoould be bound in VulkanSwapchain::begin_frame,
                 // or VulkanSwapchain should not manage Camera uniform buffers
-                .bind_camera_uniform_buffer(&self.pipeline, &swapchain_frame)
+                .bind_camera_uniform_buffer(&self.skybox.pipeline, &swapchain_frame)
+                .draw_skybox(&self.skybox, &swapchain_frame, camera)
+                .bind_pipeline(&self.pipeline)
+                .bind_camera_uniform_buffer(&self.skybox.pipeline, &swapchain_frame)
         });
         self.current_frame_state.replace(FrameState {
             command,
@@ -228,8 +274,8 @@ impl Renderer for VulkanRenderer {
     fn load_meshes(&mut self, meshes: &[Mesh]) -> Result<Vec<MeshHandle>, Box<dyn Error>> {
         let mesh_pack_index = self.meshes.len() as u32;
         self.meshes.push(self.device.load_mesh_pack(meshes)?);
-        let meshes = self.meshes.last().unwrap();
-        Ok((0..meshes.meshes.len() as u32)
+        let pack = self.meshes.last().unwrap();
+        Ok((0..pack.meshes.len() as u32)
             .map(|mesh_index| {
                 VulkanMeshHandle {
                     mesh_pack_index,
@@ -240,11 +286,35 @@ impl Renderer for VulkanRenderer {
             .collect())
     }
 
-    fn draw(&mut self, mesh: MeshHandle, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
+    fn load_materials(
+        &mut self,
+        materials: &[Material],
+    ) -> Result<Vec<super::model::MaterialHandle>, Box<dyn Error>> {
+        let material_pack_index = self.materials.len() as u32;
+        self.materials
+            .push(self.device.load_material_pack(materials)?);
+        let pack = self.materials.last().unwrap();
+        Ok((0..pack.descriptors.count as u32)
+            .map(|material_index| {
+                VulkanMaterialHandle {
+                    material_pack_index,
+                    material_index,
+                }
+                .into()
+            })
+            .collect())
+    }
+
+    fn draw(&mut self, model: Model, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
+        let Model { mesh, material } = model;
         let VulkanMeshHandle {
             mesh_pack_index,
             mesh_index,
         } = mesh.into();
+        let VulkanMaterialHandle {
+            material_pack_index,
+            material_index,
+        } = material.into();
         let FrameState {
             command,
             swapchain_frame,
@@ -261,6 +331,11 @@ impl Renderer for VulkanRenderer {
             } else {
                 command
             }
+            .bind_material(
+                &self.pipeline,
+                &self.materials[material_pack_index as usize],
+                material_index as usize,
+            )
             .push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0, transform)
             .draw_mesh(mesh_ranges)
         });

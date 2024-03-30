@@ -2,9 +2,11 @@ pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod descriptor;
 pub(super) mod image;
+pub(super) mod material;
+pub(super) mod mesh;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
-pub(super) mod resources;
+pub(super) mod skybox;
 pub(super) mod swapchain;
 
 use self::command::TransientCommandPools;

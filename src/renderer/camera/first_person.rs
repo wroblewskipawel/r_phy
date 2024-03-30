@@ -15,6 +15,10 @@ use crate::{
 use super::{Camera, CameraMatrices};
 
 impl Camera for FirstPersonCamera {
+    fn get_position(&self) -> Vector3 {
+        self.position
+    }
+
     fn get_matrices(&self) -> CameraMatrices {
         self.into()
     }

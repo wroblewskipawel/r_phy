@@ -1,6 +1,7 @@
 use ash::{vk, Device};
 use bytemuck::{cast_slice_mut, Pod};
 use std::{
+    borrow::BorrowMut,
     error::Error,
     ffi::c_void,
     marker::PhantomData,
@@ -15,6 +16,7 @@ use super::{
         operation::{self, Operation},
         SubmitSemaphoreState,
     },
+    image::VulkanImage2D,
     VulkanDevice,
 };
 
@@ -199,7 +201,7 @@ impl HostMappedMemory {
         }
     }
 
-    fn unwrap(&self) -> *mut c_void {
+    pub fn unwrap(&self) -> *mut c_void {
         self.ptr
             .expect("'unwrap' called on Host Visible buffer which isn't currently mapped!")
     }
@@ -208,7 +210,7 @@ impl HostMappedMemory {
 impl Drop for HostMappedMemory {
     fn drop(&mut self) {
         if self.ptr.take().is_some() {
-            panic!("HostMappedMemory wasn't unmapped before drop!");
+            // panic!("HostMappedMemory wasn't unmapped before drop!");
         }
     }
 }
@@ -344,6 +346,60 @@ impl<'a> StagingBuffer<'a> {
                 &[],
             )?
             .wait()?;
+        self.device.free_command(&command);
+        Ok(())
+    }
+
+    pub fn transfer_image_data<'b>(
+        &self,
+        dst: impl Into<&'b mut VulkanImage2D>,
+        dst_array_layer: u32,
+        dst_final_layout: vk::ImageLayout,
+    ) -> Result<(), Box<dyn Error>> {
+        let dst: &mut VulkanImage2D = dst.into();
+        debug_assert!(
+            dst.array_layers > dst_array_layer,
+            "Invalid dst_array_layer for image data transfer!"
+        );
+        let dst_mip_levels = dst.mip_levels;
+        let dst_old_layout = dst.layout;
+        let command = self.device.begin_command(
+            self.device
+                .allocate_transient_command::<operation::Graphics>()?,
+        )?;
+        let command = self.device.record_command(command, |command| {
+            command
+                .change_layout(
+                    dst.borrow_mut(),
+                    dst_old_layout,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    dst_array_layer,
+                    0,
+                    1,
+                )
+                .copy_image(self, dst.borrow_mut(), dst_array_layer)
+                .generate_mip(dst.borrow_mut(), dst_array_layer)
+                .change_layout(
+                    dst.borrow_mut(),
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    dst_final_layout,
+                    dst_array_layer,
+                    0,
+                    dst_mip_levels,
+                )
+        });
+        let command = self
+            .device
+            .finish_command(command)?
+            .submit(
+                SubmitSemaphoreState {
+                    semaphores: &[],
+                    masks: &[],
+                },
+                &[],
+            )?
+            .wait()?;
+        // Shouldn't free_command consume Command instead of taking it by reference?
         self.device.free_command(&command);
         Ok(())
     }

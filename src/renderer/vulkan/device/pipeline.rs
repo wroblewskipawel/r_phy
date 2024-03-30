@@ -1,13 +1,16 @@
 use crate::{
     math::types::{Matrix4, Vector3},
-    renderer::{camera::CameraMatrices, mesh::Vertex},
+    renderer::{
+        camera::CameraMatrices,
+        model::{Material, Vertex},
+    },
 };
 
 use super::{
-    descriptor::DescriptorLayout, render_pass::VulkanRenderPass, swapchain::VulkanSwapchain,
-    AttachmentProperties, VulkanDevice,
+    descriptor::DescriptorLayout, image::Texture2D, render_pass::VulkanRenderPass,
+    swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
 };
-use ash::{prelude::VkResult, vk};
+use ash::vk;
 use std::{error::Error, ffi::CStr, marker::PhantomData, mem::size_of, path::Path};
 
 struct ShaderModule {
@@ -88,7 +91,9 @@ impl DescriptorLayout for Nil {
         unreachable!()
     }
 
-    fn get_descriptor_set_layout(_: &ash::Device) -> VkResult<vk::DescriptorSetLayout> {
+    fn get_descriptor_set_layout(
+        _: &ash::Device,
+    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
         unreachable!()
     }
 
@@ -150,7 +155,7 @@ impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
     fn build(self, device: &ash::Device) -> Result<Vec<vk::DescriptorSetLayout>, Box<dyn Error>> {
         let mut layouts = vec![vk::DescriptorSetLayout::null(); self.head.len()];
         self.head
-            .get_descriptor_layout(device, layouts.iter_mut())?;
+            .get_descriptor_layout(device, layouts.iter_mut().rev())?;
         Ok(layouts)
     }
 }
@@ -158,6 +163,7 @@ impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
 // GraphicsPipelineLayout could be defined in its own separate module
 // which could then expose library of predefined pipeline layouts
 pub type GraphicsPipelineLayoutSimple = Node<CameraMatrices, Nil>;
+pub type GraphicsPipelineLayoutTextured = Node<Texture2D, Node<CameraMatrices, Nil>>;
 
 // Type T should have some trait bounds imposed,
 // that would require for it to only be derivative of TypeListNode
@@ -281,21 +287,35 @@ impl<T> GraphicsPipeline<T> {
         };
         (create_info, viewports, scissors)
     }
-    fn get_rasterization_state() -> vk::PipelineRasterizationStateCreateInfo {
+    fn get_rasterization_state(is_skybox: bool) -> vk::PipelineRasterizationStateCreateInfo {
         vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
-            cull_mode: vk::CullModeFlags::BACK,
+            cull_mode: if !is_skybox {
+                vk::CullModeFlags::BACK
+            } else {
+                vk::CullModeFlags::FRONT
+            },
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
             line_width: 1.0,
             ..Default::default()
         }
     }
-    fn get_depth_stencil_state() -> vk::PipelineDepthStencilStateCreateInfo {
-        vk::PipelineDepthStencilStateCreateInfo {
-            depth_test_enable: vk::TRUE,
-            depth_write_enable: vk::TRUE,
-            depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
-            ..Default::default()
+    fn get_depth_stencil_state(
+        depth_test_enabled: bool,
+    ) -> vk::PipelineDepthStencilStateCreateInfo {
+        if depth_test_enabled {
+            vk::PipelineDepthStencilStateCreateInfo {
+                depth_test_enable: vk::TRUE,
+                depth_write_enable: vk::TRUE,
+                depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
+                ..Default::default()
+            }
+        } else {
+            vk::PipelineDepthStencilStateCreateInfo {
+                depth_test_enable: vk::FALSE,
+                depth_write_enable: vk::FALSE,
+                ..Default::default()
+            }
         }
     }
     fn get_color_blend_state() -> vk::PipelineColorBlendStateCreateInfo {
@@ -339,13 +359,14 @@ impl VulkanDevice {
         render_pass: &VulkanRenderPass,
         swapchain: &VulkanSwapchain,
         modules: &[&Path],
+        is_skybox: bool,
     ) -> Result<GraphicsPipeline<T>, Box<dyn Error>> {
         let vertex_input_state = GraphicsPipeline::<T>::get_vertex_input_state();
         let input_assembly_state = GraphicsPipeline::<T>::get_input_assembly_state();
         let (viewport_state, _viewports, _scissors) =
             GraphicsPipeline::<T>::get_viewport_state(swapchain.image_extent);
-        let rasterization_state = GraphicsPipeline::<T>::get_rasterization_state();
-        let depth_stencil_state = GraphicsPipeline::<T>::get_depth_stencil_state();
+        let rasterization_state = GraphicsPipeline::<T>::get_rasterization_state(is_skybox);
+        let depth_stencil_state = GraphicsPipeline::<T>::get_depth_stencil_state(!is_skybox);
         let color_blend_state = GraphicsPipeline::<T>::get_color_blend_state();
         let multisample_state = GraphicsPipeline::<T>::get_multisample_state(
             &self.physical_device.properties.enabled_features,

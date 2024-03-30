@@ -88,17 +88,8 @@ impl VulkanDevice {
             present_mode,
             ..
         } = self.physical_device.surface_properties;
-        let min_image_count = (min_image_count + 1).clamp(
-            0,
-            match max_image_count {
-                0 => u32::MAX,
-                _ => max_image_count,
-            },
-        );
-        let image_extent = vk::Extent2D {
-            width: current_extent.width.clamp(0, max_image_extent.width),
-            height: current_extent.height.clamp(0, max_image_extent.height),
-        };
+        let min_image_count = self.physical_device.surface_properties.get_image_count();
+        let image_extent = self.physical_device.surface_properties.get_current_extent();
         let queue_family_indices = [self.physical_device.queue_families.graphics];
         let create_info = vk::SwapchainCreateInfoKHR::builder()
             .pre_transform(current_transform)
@@ -117,25 +108,8 @@ impl VulkanDevice {
             .surface(surface.into());
         let loader = Swapchain::new(instance, &self.device);
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
-        let depth_buffer = self.create_image(
-            image_extent,
-            self.physical_device
-                .attachment_properties
-                .formats
-                .depth_stencil,
-            self.physical_device.attachment_properties.msaa_samples,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::ImageAspectFlags::DEPTH,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
-        let color_buffer = self.create_image(
-            image_extent,
-            self.physical_device.attachment_properties.formats.color,
-            self.physical_device.attachment_properties.msaa_samples,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
-            vk::ImageAspectFlags::COLOR,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
+        let depth_buffer = self.create_depth_stencil_attachment_image()?;
+        let color_buffer = self.create_color_attachment_image()?;
         let images = unsafe { loader.get_swapchain_images(handle)? };
         let image_views = images
             .iter()
@@ -165,8 +139,8 @@ impl VulkanDevice {
                         .render_pass(render_pass.into())
                         .attachments(&VulkanRenderPass::get_attachments(
                             image_view,
-                            (&depth_buffer).into(),
-                            (&color_buffer).into(),
+                            depth_buffer.image_view,
+                            color_buffer.image_view,
                         ))
                         .width(image_extent.width)
                         .height(image_extent.height)
@@ -178,7 +152,8 @@ impl VulkanDevice {
         let sync = self.create_swapchain_sync(images.len())?;
         let command_pool = self.create_persistent_command_pool(images.len())?;
         let camera_uniform_buffer = self.create_uniform_buffer(images.len())?;
-        let camera_descriptors = self.create_descriptor_pool(images.len())?;
+        let camera_descriptors =
+            self.create_descriptor_pool(images.len(), vk::DescriptorType::UNIFORM_BUFFER)?;
         self.write_descriptor_sets(&camera_descriptors, &camera_uniform_buffer);
         Ok(VulkanSwapchain {
             image_extent,

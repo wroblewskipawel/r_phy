@@ -1,31 +1,176 @@
-use super::VulkanDevice;
+use super::descriptor::DescriptorLayout;
+use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
-use std::error::Error;
+use png::{self, BitDepth, ColorType, Transformations};
+use std::fs::File;
+use std::usize;
+use std::{borrow::Borrow, error::Error, path::Path};
+use strum::IntoEnumIterator;
 
-pub struct VulkanImage2D {
-    image_view: vk::ImageView,
-    image: vk::Image,
-    device_memory: vk::DeviceMemory,
+struct VulkanImageInfo {
+    extent: vk::Extent2D,
+    format: vk::Format,
+    flags: vk::ImageCreateFlags,
+    samples: vk::SampleCountFlags,
+    usage: vk::ImageUsageFlags,
+    aspect_mask: vk::ImageAspectFlags,
+    view_type: vk::ImageViewType,
+    array_layers: u32,
+    mip_levels: u32,
+    memory_properties: vk::MemoryPropertyFlags,
+}
+struct PngImageReader {
+    reader: png::Reader<File>,
 }
 
-impl From<&VulkanImage2D> for vk::ImageView {
-    fn from(value: &VulkanImage2D) -> Self {
-        value.image_view
+impl PngImageReader {
+    fn get_max_mip_level(extent: vk::Extent2D) -> u32 {
+        u32::max(extent.width, extent.height).ilog2() + 1
+    }
+
+    fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let mut decoder = png::Decoder::new(File::open(path)?);
+        decoder.set_transformations(
+            Transformations::EXPAND | Transformations::ALPHA | Transformations::STRIP_16,
+        );
+        Ok(Self {
+            reader: decoder.read_info()?,
+        })
+    }
+
+    fn read(mut self, dst: &mut [u8]) -> Result<(), Box<dyn Error>> {
+        self.reader.next_frame(dst)?;
+        Ok(())
+    }
+
+    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+        let info = self.reader.info();
+        let extent = vk::Extent2D {
+            width: info.width,
+            height: info.height,
+        };
+        let format = match self.reader.output_color_type() {
+            (ColorType::Rgba, BitDepth::Eight) => vk::Format::R8G8B8A8_SRGB,
+            (ColorType::GrayscaleAlpha, BitDepth::Eight) => vk::Format::R8G8_SRGB,
+            _ => Err(format!("Unsupported png Image ColorType and BitDepth!"))?,
+        };
+        let mip_levels = Self::get_max_mip_level(extent);
+        Ok(VulkanImageInfo {
+            extent,
+            format,
+            mip_levels,
+            flags: vk::ImageCreateFlags::empty(),
+            samples: vk::SampleCountFlags::TYPE_1,
+            usage: vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::TRANSFER_DST,
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            view_type: vk::ImageViewType::TYPE_2D,
+            array_layers: 1,
+            memory_properties: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        })
+    }
+
+    fn required_buffer_size(&self) -> usize {
+        self.reader.output_buffer_size()
     }
 }
 
+#[derive(strum::EnumIter, Debug, Clone, Copy, PartialEq)]
+enum ImageCubeFace {
+    RIGHT = 0,
+    LEFT = 1,
+    TOP = 2,
+    BOTTOM = 3,
+    FRONT = 4,
+    BACK = 5,
+}
+
+impl ImageCubeFace {
+    fn get(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let stem = path.file_stem().unwrap().to_string_lossy();
+        let face = match stem.borrow() {
+            "right" => Self::RIGHT,
+            "left" => Self::LEFT,
+            "top" => Self::TOP,
+            "bottom" => Self::BOTTOM,
+            "front" => Self::FRONT,
+            "back" => Self::BACK,
+            _ => Err(format!("`{}` is not valid ImageCube entry!", stem))?,
+        };
+        Ok(face)
+    }
+}
+
+struct ImageCubeReader {
+    faces: Vec<(ImageCubeFace, PngImageReader)>,
+}
+
+impl ImageCubeReader {
+    fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let faces = path
+            .read_dir()?
+            .into_iter()
+            .filter_map(|entry| entry.and_then(|entry| Ok(entry.path())).ok())
+            .filter(|path| path.is_file())
+            .map(|path| Ok((ImageCubeFace::get(&path)?, PngImageReader::prepare(&path)?)))
+            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+        if let Some(req) =
+            ImageCubeFace::iter().find(|req| !faces.iter().any(|(face, _)| req == face))
+        {
+            Err(format!("Missing {:?} CubeMap data!", req))?;
+        }
+        Ok(Self { faces })
+    }
+
+    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+        let (_, reader) = &self.faces[ImageCubeFace::RIGHT as usize];
+        let info = reader.info()?;
+        Ok(VulkanImageInfo {
+            array_layers: 6,
+            view_type: vk::ImageViewType::CUBE,
+            flags: vk::ImageCreateFlags::CUBE_COMPATIBLE,
+            ..info
+        })
+    }
+
+    fn required_buffer_size(&self) -> usize {
+        let (_, reader) = &self.faces[ImageCubeFace::RIGHT as usize];
+        reader.required_buffer_size()
+    }
+
+    fn iter(self) -> impl Iterator<Item = (ImageCubeFace, PngImageReader)> {
+        let Self { faces } = self;
+        faces.into_iter()
+    }
+}
+
+pub struct VulkanImage2D {
+    pub array_layers: u32,
+    pub mip_levels: u32,
+    pub layout: vk::ImageLayout,
+    pub extent: vk::Extent2D,
+    pub image: vk::Image,
+    pub image_view: vk::ImageView,
+    device_memory: vk::DeviceMemory,
+}
+
 impl VulkanDevice {
-    pub fn create_image(
-        &self,
-        extent: vk::Extent2D,
-        format: vk::Format,
-        samples: vk::SampleCountFlags,
-        usage: vk::ImageUsageFlags,
-        aspect_mask: vk::ImageAspectFlags,
-        memory_properties: vk::MemoryPropertyFlags,
-    ) -> Result<VulkanImage2D, Box<dyn Error>> {
-        let queue_family_indices = [self.physical_device.queue_families.graphics];
+    fn create_image(&self, info: VulkanImageInfo) -> Result<VulkanImage2D, Box<dyn Error>> {
+        let VulkanImageInfo {
+            extent,
+            format,
+            flags,
+            samples,
+            usage,
+            aspect_mask,
+            view_type,
+            array_layers,
+            mip_levels,
+            memory_properties,
+        } = info;
         let image_info = vk::ImageCreateInfo::builder()
+            .flags(flags)
             .extent(vk::Extent3D {
                 width: extent.width,
                 height: extent.height,
@@ -34,11 +179,10 @@ impl VulkanDevice {
             .format(format)
             .image_type(vk::ImageType::TYPE_2D)
             .initial_layout(vk::ImageLayout::UNDEFINED)
-            .mip_levels(1)
-            .array_layers(1)
+            .mip_levels(mip_levels)
+            .array_layers(array_layers)
             .samples(samples)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .queue_family_indices(&queue_family_indices)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(usage);
         let (image_view, image, device_memory) = unsafe {
@@ -59,22 +203,63 @@ impl VulkanDevice {
                 .components(vk::ComponentMapping::default())
                 .format(format)
                 .image(image)
-                .view_type(vk::ImageViewType::TYPE_2D)
+                .view_type(view_type)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask,
                     base_mip_level: 0,
-                    level_count: 1,
+                    level_count: mip_levels,
                     base_array_layer: 0,
-                    layer_count: 1,
+                    layer_count: array_layers,
                 });
             let image_view = self.device.create_image_view(&view_info, None)?;
             (image_view, image, device_memory)
         };
         Ok(VulkanImage2D {
-            image_view,
+            array_layers,
+            mip_levels,
+            layout: vk::ImageLayout::UNDEFINED,
+            extent,
             image,
+            image_view,
             device_memory,
         })
+    }
+
+    pub fn create_color_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
+        let extent = self.physical_device.surface_properties.get_current_extent();
+        Ok(self.create_image(VulkanImageInfo {
+            extent,
+            format: self.physical_device.attachment_properties.formats.color,
+            flags: vk::ImageCreateFlags::empty(),
+            samples: self.physical_device.attachment_properties.msaa_samples,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            view_type: vk::ImageViewType::TYPE_2D,
+            array_layers: 1,
+            mip_levels: 1,
+            memory_properties: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        })?)
+    }
+
+    pub fn create_depth_stencil_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
+        let extent = self.physical_device.surface_properties.get_current_extent();
+        Ok(self.create_image(VulkanImageInfo {
+            extent,
+            format: self
+                .physical_device
+                .attachment_properties
+                .formats
+                .depth_stencil,
+            flags: vk::ImageCreateFlags::empty(),
+            samples: self.physical_device.attachment_properties.msaa_samples,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            aspect_mask: vk::ImageAspectFlags::DEPTH,
+            view_type: vk::ImageViewType::TYPE_2D,
+            array_layers: 1,
+            mip_levels: 1,
+            memory_properties: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        })?)
     }
 
     pub fn destory_image(&self, image: &mut VulkanImage2D) {
@@ -82,6 +267,103 @@ impl VulkanDevice {
             self.device.destroy_image_view(image.image_view, None);
             self.device.destroy_image(image.image, None);
             self.device.free_memory(image.device_memory, None);
+        }
+    }
+}
+
+pub struct Texture2D {
+    pub image: VulkanImage2D,
+    pub sampler: vk::Sampler,
+}
+
+impl DescriptorLayout for Texture2D {
+    fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding] {
+        &[vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            p_immutable_samplers: std::ptr::null(),
+        }]
+    }
+
+    fn get_descriptor_write() -> vk::WriteDescriptorSet {
+        vk::WriteDescriptorSet {
+            dst_binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 1,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            ..Default::default()
+        }
+    }
+}
+
+impl VulkanDevice {
+    pub fn load_texture(&self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
+        let image_reader = PngImageReader::prepare(path)?;
+        let mut image = self.create_image(image_reader.info()?)?;
+
+        let mut builder = StagingBufferBuilder::new();
+        let image_range = builder.append::<u8>(image_reader.required_buffer_size());
+        let mut staging_buffer = self.create_stagging_buffer(builder)?;
+        let mut image_range = staging_buffer.write_range::<u8>(image_range);
+        image_reader.read(image_range.remaining_as_slice_mut())?;
+        staging_buffer.transfer_image_data(
+            &mut image,
+            0,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+        image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+
+        let create_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .border_color(vk::BorderColor::FLOAT_OPAQUE_BLACK)
+            .min_lod(0.0)
+            .max_lod(image.mip_levels as f32);
+        let sampler = unsafe { self.device.create_sampler(&create_info, None)? };
+        Ok(Texture2D { image, sampler })
+    }
+
+    pub fn load_cubemap(&self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
+        let cube_reader = ImageCubeReader::prepare(path)?;
+        let mut image = self.create_image(cube_reader.info()?)?;
+
+        let mut builder = StagingBufferBuilder::new();
+        let image_range = builder.append::<u8>(cube_reader.required_buffer_size());
+        let mut staging_buffer = self.create_stagging_buffer(builder)?;
+        cube_reader.iter().try_for_each(|(face, reader)| {
+            let mut image_range = staging_buffer.write_range::<u8>(image_range);
+            reader.read(image_range.remaining_as_slice_mut())?;
+            staging_buffer.transfer_image_data(
+                &mut image,
+                face as u32,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )
+        })?;
+        image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+
+        let create_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .border_color(vk::BorderColor::FLOAT_OPAQUE_BLACK)
+            .min_lod(0.0)
+            .max_lod(image.mip_levels as f32);
+        let sampler = unsafe { self.device.create_sampler(&create_info, None)? };
+        Ok(Texture2D { image, sampler })
+    }
+
+    pub fn destory_texture(&self, texture: &mut Texture2D) {
+        unsafe {
+            self.device.destroy_sampler(texture.sampler, None);
+            self.destory_image(&mut texture.image);
         }
     }
 }
