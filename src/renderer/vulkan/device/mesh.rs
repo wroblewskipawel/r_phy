@@ -109,7 +109,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_mesh_pack(&self, pack: &mut MeshPack) {
+    pub fn destroy_mesh_pack(&self, pack: &mut MeshPack) {
         self.destroy_buffer((&mut pack.buffer).into());
     }
 }

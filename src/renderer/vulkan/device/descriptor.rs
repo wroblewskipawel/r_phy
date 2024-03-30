@@ -213,7 +213,7 @@ impl VulkanDevice {
         unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) }
     }
 
-    pub fn destory_descriptor_set_layouts(&self) {
+    pub fn destroy_descriptor_set_layouts(&self) {
         let layout_map = get_descriptor_set_layout_map();
         let exclusive_lock = layout_map.write().unwrap();
         for (_, &layout) in exclusive_lock.iter() {
@@ -223,7 +223,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn destory_descriptor_pool<T: DescriptorLayout>(&self, pool: &mut DescriptorPool<T>) {
+    pub fn destroy_descriptor_pool<T: DescriptorLayout>(&self, pool: &mut DescriptorPool<T>) {
         unsafe {
             self.device.destroy_descriptor_pool(pool.pool, None);
         };

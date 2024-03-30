@@ -146,7 +146,7 @@ impl VulkanDevice {
         })
     }
 
-    pub(super) fn destory_persistent_command_pool<O: Operation>(
+    pub(super) fn destroy_persistent_command_pool<O: Operation>(
         &self,
         command_pool: &mut PersistentCommandPool<O>,
     ) {
@@ -766,7 +766,7 @@ impl TransientCommandPools {
         Ok(Self { transfer, graphics })
     }
 
-    pub fn destory(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &Device) {
         unsafe {
             device.destroy_command_pool(self.transfer, None);
             device.destroy_command_pool(self.graphics, None)

@@ -172,16 +172,16 @@ impl Drop for VulkanRenderer {
         unsafe {
             self.materials
                 .iter_mut()
-                .for_each(|pack| self.device.destory_material_pack(pack));
+                .for_each(|pack| self.device.destroy_material_pack(pack));
             self.meshes
                 .iter_mut()
-                .for_each(|pack| self.device.destory_mesh_pack(pack));
+                .for_each(|pack| self.device.destroy_mesh_pack(pack));
             self.device.destroy_skybox(&mut self.skybox);
-            self.device.destory_graphics_pipeline(&mut self.pipeline);
+            self.device.destroy_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
-            self.device.destory_render_pass(&mut self.render_pass);
-            self.device.destory_descriptor_set_layouts();
-            self.device.destory();
+            self.device.destroy_render_pass(&mut self.render_pass);
+            self.device.destroy_descriptor_set_layouts();
+            self.device.destroy();
             self.surface.destroy();
             drop(self.debug_utils.take());
             self.instance.destroy_instance(None);

@@ -27,10 +27,10 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_material_pack(&self, pack: &mut MaterialPack) {
-        self.destory_descriptor_pool(&mut pack.descriptors);
+    pub fn destroy_material_pack(&self, pack: &mut MaterialPack) {
+        self.destroy_descriptor_pool(&mut pack.descriptors);
         pack.textures
             .iter_mut()
-            .for_each(|texture| self.destory_texture(texture));
+            .for_each(|texture| self.destroy_texture(texture));
     }
 }

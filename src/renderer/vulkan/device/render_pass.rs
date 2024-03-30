@@ -166,7 +166,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory_render_pass(&self, render_pass: &mut VulkanRenderPass) {
+    pub fn destroy_render_pass(&self, render_pass: &mut VulkanRenderPass) {
         unsafe {
             self.device.destroy_render_pass(render_pass.handle, None);
         }

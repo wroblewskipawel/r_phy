@@ -408,7 +408,7 @@ impl VulkanDevice {
         Ok(GraphicsPipeline { handle, layout })
     }
 
-    pub fn destory_graphics_pipeline<T>(&self, pipeline: &mut GraphicsPipeline<T>) {
+    pub fn destroy_graphics_pipeline<T>(&self, pipeline: &mut GraphicsPipeline<T>) {
         unsafe {
             self.device.destroy_pipeline(pipeline.handle, None);
             self.device

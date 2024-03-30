@@ -262,7 +262,7 @@ impl VulkanDevice {
         })?)
     }
 
-    pub fn destory_image(&self, image: &mut VulkanImage2D) {
+    pub fn destroy_image(&self, image: &mut VulkanImage2D) {
         unsafe {
             self.device.destroy_image_view(image.image_view, None);
             self.device.destroy_image(image.image, None);
@@ -360,10 +360,10 @@ impl VulkanDevice {
         Ok(Texture2D { image, sampler })
     }
 
-    pub fn destory_texture(&self, texture: &mut Texture2D) {
+    pub fn destroy_texture(&self, texture: &mut Texture2D) {
         unsafe {
             self.device.destroy_sampler(texture.sampler, None);
-            self.destory_image(&mut texture.image);
+            self.destroy_image(&mut texture.image);
         }
     }
 }

@@ -391,9 +391,9 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destory(&mut self) {
+    pub fn destroy(&mut self) {
         unsafe {
-            self.command_pools.destory(&self.device);
+            self.command_pools.destroy(&self.device);
             self.device.destroy_device(None);
         }
     }

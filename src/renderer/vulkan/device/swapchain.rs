@@ -182,12 +182,12 @@ impl VulkanDevice {
                 .iter()
                 .for_each(|&image_view| self.device.destroy_image_view(image_view, None));
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
-            self.destory_image(&mut swapchain.depth_buffer);
-            self.destory_image(&mut swapchain.color_buffer);
-            self.destory_swapchain_sync(&mut swapchain.sync);
-            self.destory_persistent_command_pool(&mut swapchain.command_pool);
+            self.destroy_image(&mut swapchain.depth_buffer);
+            self.destroy_image(&mut swapchain.color_buffer);
+            self.destroy_swapchain_sync(&mut swapchain.sync);
+            self.destroy_persistent_command_pool(&mut swapchain.command_pool);
             self.destroy_uniform_buffer(&mut swapchain.camera_uniform_buffer);
-            self.destory_descriptor_pool(&mut swapchain.camera_descriptors);
+            self.destroy_descriptor_pool(&mut swapchain.camera_descriptors);
         }
     }
 
@@ -218,7 +218,7 @@ impl VulkanDevice {
         })
     }
 
-    fn destory_swapchain_sync(&self, sync: &mut SwapchainSync) {
+    fn destroy_swapchain_sync(&self, sync: &mut SwapchainSync) {
         unsafe {
             sync.draw_ready
                 .iter()

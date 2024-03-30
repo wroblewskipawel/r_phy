@@ -62,9 +62,9 @@ impl VulkanDevice {
     }
 
     pub fn destroy_skybox(&self, skybox: &mut Skybox) {
-        self.destory_descriptor_pool(&mut skybox.descriptor);
-        self.destory_texture(&mut skybox.texture);
-        self.destory_graphics_pipeline(&mut skybox.pipeline);
-        self.destory_mesh_pack(&mut skybox.mesh_pack);
+        self.destroy_descriptor_pool(&mut skybox.descriptor);
+        self.destroy_texture(&mut skybox.texture);
+        self.destroy_graphics_pipeline(&mut skybox.pipeline);
+        self.destroy_mesh_pack(&mut skybox.mesh_pack);
     }
 }
