@@ -9,7 +9,7 @@ use self::device::{
     image::Texture2D,
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{DescriptorLayoutBuilder, GraphicsPipeline, GraphicsPipelineLayoutTextured},
+    pipeline::{ GraphicsPipeline, layout::{DescriptorLayoutBuilder,GraphicsPipelineLayoutTextured}},
     skybox::Skybox,
 };
 
@@ -126,7 +126,7 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
-        let pipeline_layout = device.create_graphics_pipeline_layout(
+        let pipeline_layout = device.get_graphics_pipeline_layout(
             DescriptorLayoutBuilder::new()
                 .push::<CameraMatrices>()
                 .push::<Texture2D>(),
@@ -180,6 +180,7 @@ impl Drop for VulkanRenderer {
             self.device.destroy_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destroy_render_pass(&mut self.render_pass);
+            self.device.destroy_pipeline_layouts();
             self.device.destroy_descriptor_set_layouts();
             self.device.destroy();
             self.surface.destroy();

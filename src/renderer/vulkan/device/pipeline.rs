@@ -1,14 +1,15 @@
-use crate::{
-    math::types::{Matrix4, Vector3},
-    renderer::{camera::CameraMatrices, model::Vertex},
-};
+pub mod graphics;
+pub mod layout;
+
+use crate::{math::types::Vector3, renderer::model::Vertex};
+
+use self::layout::GraphicsPipelineLayout;
 
 use super::{
-    descriptor::DescriptorLayout, image::Texture2D, render_pass::VulkanRenderPass,
-    swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
+    render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
 };
 use ash::vk;
-use std::{error::Error, ffi::CStr, marker::PhantomData, mem::size_of, path::Path};
+use std::{error::Error, ffi::CStr, mem::size_of, path::Path};
 
 struct ShaderModule {
     module: vk::ShaderModule,
@@ -39,160 +40,6 @@ impl ShaderModule {
             },
             None => Err("Invalid shader module path - mising file name component!")?,
         }
-    }
-}
-
-// Rename if this trait ends up used only for DescriptorLayout
-pub trait TypeListNode
-where
-    Self: Sized,
-{
-    type Next: TypeListNode;
-    type Item: DescriptorLayout;
-
-    fn next(&self) -> Option<&Self::Next>;
-    fn push<T: DescriptorLayout>(self) -> Node<T, Self> {
-        Node {
-            next: self,
-            _phantom: PhantomData,
-        }
-    }
-    fn len(&self) -> usize {
-        if let Some(next) = self.next() {
-            1 + next.len()
-        } else {
-            0
-        }
-    }
-    fn get_descriptor_layout<'a>(
-        &self,
-        device: &ash::Device,
-        mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,
-    ) -> Result<(), Box<dyn Error>> {
-        if let Some(entry) = iter.next() {
-            *entry = Self::Item::get_descriptor_set_layout(device)?;
-        }
-        if let Some(next) = self.next() {
-            next.get_descriptor_layout(device, iter)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Nil;
-
-impl DescriptorLayout for Nil {
-    fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding] {
-        unreachable!()
-    }
-
-    fn get_descriptor_set_layout(
-        _: &ash::Device,
-    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
-        unreachable!()
-    }
-
-    fn get_descriptor_write() -> vk::WriteDescriptorSet {
-        unreachable!()
-    }
-}
-
-impl TypeListNode for Nil {
-    type Next = Self;
-    type Item = Self;
-
-    fn next(&self) -> Option<&Self::Next> {
-        None
-    }
-}
-
-// Similar structure could be used to handle creation of DescriptorSetlayout
-// by composing types that would impl DescriptorBinding (not yet implemented)
-// Check if this code could be reused, for traits other than DescriptorLayout,
-// by using associated types trait bounds (which are unstable,
-// see: https://rust-lang.github.io/rfcs/2289-associated-type-bounds.html)
-// or converted to macro
-#[derive(Debug, Clone, Copy)]
-pub struct Node<L: DescriptorLayout, N: TypeListNode> {
-    next: N,
-    _phantom: PhantomData<L>,
-}
-
-impl<L: DescriptorLayout, N: TypeListNode> TypeListNode for Node<L, N> {
-    type Next = N;
-    type Item = L;
-
-    fn next(&self) -> Option<&Self::Next> {
-        Some(&self.next)
-    }
-}
-
-pub struct DescriptorLayoutBuilder<T: TypeListNode> {
-    head: T,
-}
-
-impl DescriptorLayoutBuilder<Nil> {
-    pub fn new() -> Self {
-        Self { head: Nil }
-    }
-}
-
-impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
-    pub fn push<L: DescriptorLayout>(self) -> DescriptorLayoutBuilder<Node<L, T>> {
-        DescriptorLayoutBuilder {
-            head: Node {
-                next: self.head,
-                _phantom: PhantomData::<L>,
-            },
-        }
-    }
-
-    fn build(self, device: &ash::Device) -> Result<Vec<vk::DescriptorSetLayout>, Box<dyn Error>> {
-        let mut layouts = vec![vk::DescriptorSetLayout::null(); self.head.len()];
-        self.head
-            .get_descriptor_layout(device, layouts.iter_mut().rev())?;
-        Ok(layouts)
-    }
-}
-
-// GraphicsPipelineLayout could be defined in its own separate module
-// which could then expose library of predefined pipeline layouts
-// pub type GraphicsPipelineLayoutSimple = Node<CameraMatrices, Nil>;
-pub type GraphicsPipelineLayoutTextured = Node<Texture2D, Node<CameraMatrices, Nil>>;
-
-// Type T should have some trait bounds imposed,
-// that would require for it to only be derivative of TypeListNode
-#[derive(Debug, Clone, Copy)]
-pub struct GraphicsPipelineLayout<T> {
-    pub layout: vk::PipelineLayout,
-    _phantom: PhantomData<T>,
-}
-
-impl VulkanDevice {
-    pub fn create_graphics_pipeline_layout<T: TypeListNode>(
-        &self,
-        layout: DescriptorLayoutBuilder<T>,
-    ) -> Result<GraphicsPipelineLayout<T>, Box<dyn Error>> {
-        const PUSH_CONSTANT_RANGES: &[vk::PushConstantRange] = &[vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            offset: 0,
-            size: (size_of::<Matrix4>() * 3) as u32,
-        }];
-        let set_layouts = layout.build(&self.device)?;
-        let create_info = vk::PipelineLayoutCreateInfo {
-            push_constant_range_count: PUSH_CONSTANT_RANGES.len() as u32,
-            p_push_constant_ranges: PUSH_CONSTANT_RANGES.as_ptr(),
-            set_layout_count: set_layouts.len() as u32,
-            p_set_layouts: set_layouts.as_ptr(),
-            ..Default::default()
-        };
-        let layout = unsafe { self.device.create_pipeline_layout(&create_info, None)? };
-        Ok(GraphicsPipelineLayout {
-            layout,
-            _phantom: PhantomData,
-        })
     }
 }
 
@@ -408,8 +255,6 @@ impl VulkanDevice {
     pub fn destroy_graphics_pipeline<T>(&self, pipeline: &mut GraphicsPipeline<T>) {
         unsafe {
             self.device.destroy_pipeline(pipeline.handle, None);
-            self.device
-                .destroy_pipeline_layout((&pipeline.layout).into(), None);
         }
     }
 }

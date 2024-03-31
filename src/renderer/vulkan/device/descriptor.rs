@@ -1,4 +1,4 @@
-use ash::{vk, Device};
+use ash::vk;
 use bytemuck::Pod;
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -40,30 +40,6 @@ where
     fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding];
 
     fn get_descriptor_write() -> vk::WriteDescriptorSet;
-
-    fn get_descriptor_set_layout(
-        device: &Device,
-    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
-        let layout_map = get_descriptor_set_layout_map();
-        let layout = if let Some(layout) = {
-            let layout_map_reader = layout_map.read()?;
-            layout_map_reader.get(&TypeId::of::<Self>()).copied()
-        } {
-            layout
-        } else {
-            let mut layout_map_writer = layout_map.try_write()?;
-            let layout = unsafe {
-                device.create_descriptor_set_layout(
-                    &vk::DescriptorSetLayoutCreateInfo::builder()
-                        .bindings(Self::get_descriptor_set_bindings()),
-                    None,
-                )?
-            };
-            layout_map_writer.insert(TypeId::of::<Self>(), layout);
-            layout
-        };
-        Ok(layout)
-    }
 }
 
 impl DescriptorLayout for CameraMatrices {
@@ -107,6 +83,31 @@ impl<T: DescriptorLayout> Index<usize> for DescriptorPool<T> {
 }
 
 impl VulkanDevice {
+    pub fn get_descriptor_set_layout<T: DescriptorLayout>(
+        &self,
+    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
+        let layout_map = get_descriptor_set_layout_map();
+        let layout = if let Some(layout) = {
+            let layout_map_reader = layout_map.read()?;
+            layout_map_reader.get(&TypeId::of::<T>()).copied()
+        } {
+            layout
+        } else {
+            // TOD: should be blocking call
+            let mut layout_map_writer = layout_map.try_write()?;
+            let layout = unsafe {
+                self.device.create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::builder()
+                        .bindings(T::get_descriptor_set_bindings()),
+                    None,
+                )?
+            };
+            layout_map_writer.insert(TypeId::of::<T>(), layout);
+            layout
+        };
+        Ok(layout)
+    }
+
     pub fn create_descriptor_pool<T: DescriptorLayout>(
         &self,
         pool_size: usize,
@@ -123,7 +124,7 @@ impl VulkanDevice {
             self.device
                 .create_descriptor_pool(&pool_create_info, None)?
         };
-        let layout = T::get_descriptor_set_layout(&self.device)?;
+        let layout = self.get_descriptor_set_layout::<T>()?;
         let sets = unsafe {
             self.device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()

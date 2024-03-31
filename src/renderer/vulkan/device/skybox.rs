@@ -3,16 +3,16 @@ use std::path::Path;
 
 use ash::vk;
 
-use crate::{
-    physics::shape,
-    renderer::{camera::CameraMatrices, vulkan::device::pipeline::DescriptorLayoutBuilder},
-};
+use crate::{physics::shape, renderer::camera::CameraMatrices};
 
 use super::{
     descriptor::DescriptorPool,
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, GraphicsPipelineLayoutTextured},
+    pipeline::{
+        layout::{DescriptorLayoutBuilder, GraphicsPipelineLayoutTextured},
+        GraphicsPipeline,
+    },
     render_pass::VulkanRenderPass,
     swapchain::VulkanSwapchain,
     VulkanDevice,
@@ -36,7 +36,7 @@ impl VulkanDevice {
         let texture = self.load_cubemap(path)?;
         let mut descriptor =
             self.create_descriptor_pool(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER)?;
-        let pipeline_layout = self.create_graphics_pipeline_layout(
+        let pipeline_layout = self.get_graphics_pipeline_layout(
             DescriptorLayoutBuilder::new()
                 .push::<CameraMatrices>()
                 .push::<Texture2D>(),
