@@ -63,7 +63,7 @@ pub struct FirstPersonCamera {
 impl FirstPersonCamera {
     pub fn new(proj: Matrix4) -> Self {
         Self {
-            proj: proj,
+            proj,
             position: Vector3::zero(),
             forward: Vector3::x(),
             right: -Vector3::y(),

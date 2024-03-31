@@ -13,6 +13,12 @@ pub struct InputHandler {
     cursor_callbacks: Vec<Box<dyn Fn(PhysicalPosition<f64>)>>,
 }
 
+impl Default for InputHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputHandler {
     pub fn new() -> Self {
         Self {

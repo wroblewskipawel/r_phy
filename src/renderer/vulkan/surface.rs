@@ -167,8 +167,12 @@ impl PhysicalDeviceSurfaceProperties {
             ..
         } = self.capabilities;
         vk::Extent2D {
-            width: current_extent.width.clamp(0, max_image_extent.width),
-            height: current_extent.height.clamp(0, max_image_extent.height),
+            width: current_extent
+                .width
+                .clamp(min_image_extent.width, max_image_extent.width),
+            height: current_extent
+                .height
+                .clamp(min_image_extent.height, max_image_extent.height),
         }
     }
 

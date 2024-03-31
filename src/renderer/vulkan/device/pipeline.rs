@@ -1,9 +1,6 @@
 use crate::{
     math::types::{Matrix4, Vector3},
-    renderer::{
-        camera::CameraMatrices,
-        model::{Material, Vertex},
-    },
+    renderer::{camera::CameraMatrices, model::Vertex},
 };
 
 use super::{
@@ -162,7 +159,7 @@ impl<T: TypeListNode> DescriptorLayoutBuilder<T> {
 
 // GraphicsPipelineLayout could be defined in its own separate module
 // which could then expose library of predefined pipeline layouts
-pub type GraphicsPipelineLayoutSimple = Node<CameraMatrices, Nil>;
+// pub type GraphicsPipelineLayoutSimple = Node<CameraMatrices, Nil>;
 pub type GraphicsPipelineLayoutTextured = Node<Texture2D, Node<CameraMatrices, Nil>>;
 
 // Type T should have some trait bounds imposed,

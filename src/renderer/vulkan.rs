@@ -2,7 +2,7 @@ mod debug;
 mod device;
 mod surface;
 
-use crate::{math::types::Matrix4, physics::shape};
+use crate::math::types::Matrix4;
 
 use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
@@ -148,7 +148,7 @@ impl VulkanRenderer {
             false,
         )?;
         let skybox =
-            device.create_skybox(&render_pass, &swapchain, &Path::new("assets/skybox/skybox"))?;
+            device.create_skybox(&render_pass, &swapchain, Path::new("assets/skybox/skybox"))?;
         Ok(Self {
             current_frame_state: None,
             materials: vec![],

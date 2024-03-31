@@ -339,7 +339,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
             )
     }
 
-    fn generate_mip_level<'b, 'c>(
+    fn generate_mip_level(
         self,
         image: vk::Image,
         extent: Extent2D,
@@ -576,7 +576,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         let camera_model = Matrix4::translate(camera.get_position());
         let RecordingCommand(command, device) = self
             .bind_pipeline(&skybox.pipeline)
-            .bind_camera_uniform_buffer(&skybox.pipeline, &swapchain_frame);
+            .bind_camera_uniform_buffer(&skybox.pipeline, swapchain_frame);
         unsafe {
             device.cmd_bind_descriptor_sets(
                 command.buffer,

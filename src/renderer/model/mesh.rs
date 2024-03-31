@@ -68,8 +68,8 @@ impl MeshBuilder {
         scale_uvs: bool,
     ) -> Self {
         let normal = u.cross(v).norm();
-        let u_length = scale_uvs.then_some(u.length()).unwrap_or(1.0);
-        let v_length = scale_uvs.then_some(v.length()).unwrap_or(1.0);
+        let u_length = if scale_uvs { u.length() } else { 1.0 };
+        let v_length = if scale_uvs { v.length() } else { 1.0 };
         let num_edge_vertices = 2 + num_subdiv;
         let num_vertices = num_edge_vertices.pow(2);
         let vertices = (0..num_vertices)
@@ -79,11 +79,13 @@ impl MeshBuilder {
                 let v_scale = i as f32 / (num_edge_vertices - 1) as f32;
                 Vertex {
                     pos: u_scale * u + v_scale * v,
-                    color: color,
+                    color,
                     norm: normal,
-                    uv: scale_uvs
-                        .then_some(Vector2::new(u_scale * u_length, v_scale * v_length))
-                        .unwrap_or(Vector2::new(u_scale, v_scale)),
+                    uv: if scale_uvs {
+                        Vector2::new(u_scale * u_length, v_scale * v_length)
+                    } else {
+                        Vector2::new(u_scale, v_scale)
+                    },
                 }
             })
             .collect();

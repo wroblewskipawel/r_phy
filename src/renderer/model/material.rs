@@ -14,14 +14,13 @@ pub struct Material {
 impl MaterialBuilder {
     pub fn build(self) -> Result<Material, Box<dyn Error>> {
         Ok(Material {
-            albedo: self.albedo.ok_or(format!("Albedo texture not provided!"))?,
+            albedo: self.albedo.ok_or("Albedo texture not provided!")?,
         })
     }
 
     pub fn with_albedo(self, file_path: &'static Path) -> Self {
         Self {
             albedo: Some(file_path),
-            ..self
         }
     }
 }

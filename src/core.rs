@@ -45,7 +45,7 @@ impl Object {
     }
 
     fn update(&mut self, elapsed_time: f32) -> DrawCommand {
-        self.transform = (self.update)(elapsed_time, self.transform).into();
+        self.transform = (self.update)(elapsed_time, self.transform);
         DrawCommand {
             model: self.model,
             transform: self.transform.into(),
@@ -93,6 +93,14 @@ pub struct LoopBuilder {
     materials: Vec<Material>,
 }
 
+impl Default for LoopBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+type LoopData = (Loop, Vec<MeshHandle>, Vec<MaterialHandle>);
+
 impl LoopBuilder {
     pub fn new() -> Self {
         Self {
@@ -133,7 +141,7 @@ impl LoopBuilder {
         Self { materials, ..self }
     }
 
-    pub fn build(self) -> Result<(Loop, Vec<MeshHandle>, Vec<MaterialHandle>), Box<dyn Error>> {
+    pub fn build(self) -> Result<LoopData, Box<dyn Error>> {
         let Self {
             window_builder,
             renderer_backend,
@@ -154,8 +162,8 @@ impl LoopBuilder {
         let mesh_handles = renderer.load_meshes(&meshes)?;
         let material_handles = renderer.load_materials(&materials)?;
         let camera = camera
-            .ok_or("Camera not selected for Loop!")
-            .and_then(|(camera_type, proj)| Ok(camera_type.create(proj, &mut input_handler)))?;
+            .map(|(camera_type, proj)| camera_type.create(proj, &mut input_handler))
+            .ok_or("Camera not selected for Loop!")?;
         Ok((
             Loop {
                 event_loop,

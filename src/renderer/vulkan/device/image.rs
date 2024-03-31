@@ -52,7 +52,10 @@ impl PngImageReader {
         let format = match self.reader.output_color_type() {
             (ColorType::Rgba, BitDepth::Eight) => vk::Format::R8G8B8A8_SRGB,
             (ColorType::GrayscaleAlpha, BitDepth::Eight) => vk::Format::R8G8_SRGB,
-            _ => Err(format!("Unsupported png Image ColorType and BitDepth!"))?,
+            (color_type, bit_depth) => Err(format!(
+                "Unsupported png Image ColorType: {:?} and BitDepth: {:?}!",
+                color_type, bit_depth
+            ))?,
         };
         let mip_levels = Self::get_max_mip_level(extent);
         Ok(VulkanImageInfo {
@@ -78,24 +81,24 @@ impl PngImageReader {
 
 #[derive(strum::EnumIter, Debug, Clone, Copy, PartialEq)]
 enum ImageCubeFace {
-    RIGHT = 0,
-    LEFT = 1,
-    TOP = 2,
-    BOTTOM = 3,
-    FRONT = 4,
-    BACK = 5,
+    Right = 0,
+    Left = 1,
+    Top = 2,
+    Bottom = 3,
+    Front = 4,
+    Back = 5,
 }
 
 impl ImageCubeFace {
     fn get(path: &Path) -> Result<Self, Box<dyn Error>> {
         let stem = path.file_stem().unwrap().to_string_lossy();
         let face = match stem.borrow() {
-            "right" => Self::RIGHT,
-            "left" => Self::LEFT,
-            "top" => Self::TOP,
-            "bottom" => Self::BOTTOM,
-            "front" => Self::FRONT,
-            "back" => Self::BACK,
+            "right" => Self::Right,
+            "left" => Self::Left,
+            "top" => Self::Top,
+            "bottom" => Self::Bottom,
+            "front" => Self::Front,
+            "back" => Self::Back,
             _ => Err(format!("`{}` is not valid ImageCube entry!", stem))?,
         };
         Ok(face)
@@ -110,8 +113,7 @@ impl ImageCubeReader {
     fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
         let faces = path
             .read_dir()?
-            .into_iter()
-            .filter_map(|entry| entry.and_then(|entry| Ok(entry.path())).ok())
+            .filter_map(|entry| entry.map(|entry| entry.path()).ok())
             .filter(|path| path.is_file())
             .map(|path| Ok((ImageCubeFace::get(&path)?, PngImageReader::prepare(&path)?)))
             .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
@@ -124,7 +126,7 @@ impl ImageCubeReader {
     }
 
     fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
-        let (_, reader) = &self.faces[ImageCubeFace::RIGHT as usize];
+        let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
         let info = reader.info()?;
         Ok(VulkanImageInfo {
             array_layers: 6,
@@ -135,7 +137,7 @@ impl ImageCubeReader {
     }
 
     fn required_buffer_size(&self) -> usize {
-        let (_, reader) = &self.faces[ImageCubeFace::RIGHT as usize];
+        let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
         reader.required_buffer_size()
     }
 
@@ -227,7 +229,7 @@ impl VulkanDevice {
 
     pub fn create_color_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        Ok(self.create_image(VulkanImageInfo {
+        self.create_image(VulkanImageInfo {
             extent,
             format: self.physical_device.attachment_properties.formats.color,
             flags: vk::ImageCreateFlags::empty(),
@@ -239,12 +241,12 @@ impl VulkanDevice {
             array_layers: 1,
             mip_levels: 1,
             memory_properties: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        })?)
+        })
     }
 
     pub fn create_depth_stencil_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        Ok(self.create_image(VulkanImageInfo {
+        self.create_image(VulkanImageInfo {
             extent,
             format: self
                 .physical_device
@@ -259,7 +261,7 @@ impl VulkanDevice {
             array_layers: 1,
             mip_levels: 1,
             memory_properties: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        })?)
+        })
     }
 
     pub fn destroy_image(&self, image: &mut VulkanImage2D) {

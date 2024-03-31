@@ -87,12 +87,12 @@ impl VulkanDevice {
             let mut vertex_writer = staging_buffer.write_range::<Vertex>(vertex_range);
             let vertex_ranges = meshes
                 .iter()
-                .map(|mesh| vertex_writer.write(&*mesh.vertices))
+                .map(|mesh| vertex_writer.write(&mesh.vertices))
                 .collect::<Vec<Range<_>>>();
             let mut index_writer = staging_buffer.write_range::<u32>(index_range);
             let index_ranges = meshes
                 .iter()
-                .map(|mesh| index_writer.write(&*mesh.indices))
+                .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<Range<_>>>();
             staging_buffer.transfer_buffer_data(&mut buffer, 0)?;
             (vertex_ranges, index_ranges)

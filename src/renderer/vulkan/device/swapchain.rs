@@ -77,12 +77,7 @@ impl VulkanDevice {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
                 vk::SurfaceCapabilitiesKHR {
-                    min_image_count,
-                    max_image_count,
-                    current_extent,
-                    max_image_extent,
-                    current_transform,
-                    ..
+                    current_transform, ..
                 },
             surface_format,
             present_mode,
