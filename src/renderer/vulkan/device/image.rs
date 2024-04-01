@@ -278,28 +278,6 @@ pub struct Texture2D {
     pub sampler: vk::Sampler,
 }
 
-impl DescriptorLayout for Texture2D {
-    fn get_descriptor_set_bindings() -> &'static [vk::DescriptorSetLayoutBinding] {
-        &[vk::DescriptorSetLayoutBinding {
-            binding: 0,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: std::ptr::null(),
-        }]
-    }
-
-    fn get_descriptor_write() -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: 0,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            ..Default::default()
-        }
-    }
-}
-
 impl VulkanDevice {
     pub fn load_texture(&self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
         let image_reader = PngImageReader::prepare(path)?;

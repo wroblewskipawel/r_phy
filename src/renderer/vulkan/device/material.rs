@@ -2,11 +2,15 @@ use crate::renderer::model::Material;
 use ash::vk;
 use std::error::Error;
 
-use super::{descriptor::DescriptorPool, image::Texture2D, VulkanDevice};
+use super::{
+    descriptor::{DescriptorPool, TextureDescriptorSet},
+    image::Texture2D,
+    VulkanDevice,
+};
 
 pub struct MaterialPack {
     textures: Vec<Texture2D>,
-    pub descriptors: DescriptorPool<Texture2D>,
+    pub descriptors: DescriptorPool<TextureDescriptorSet>,
 }
 
 impl VulkanDevice {
@@ -18,9 +22,10 @@ impl VulkanDevice {
             .iter()
             .map(|material| self.load_texture(material.albedo))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut descriptors = self
-            .create_descriptor_pool(textures.len(), vk::DescriptorType::COMBINED_IMAGE_SAMPLER)?;
-        self.write_image_samplers(&mut descriptors, &textures);
+        let mut descriptors =
+            self.create_descriptor_pool(TextureDescriptorSet::builder(), textures.len())?;
+        let descriptor_write = descriptors.get_writer().write_image(&textures);
+        self.write_descriptor_sets(&mut descriptors, descriptor_write);
         Ok(MaterialPack {
             textures,
             descriptors,

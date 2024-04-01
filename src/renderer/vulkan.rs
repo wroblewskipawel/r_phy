@@ -9,7 +9,10 @@ use self::device::{
     image::Texture2D,
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{ GraphicsPipeline, layout::{DescriptorLayoutBuilder,GraphicsPipelineLayoutTextured}},
+    pipeline::{
+        layout::{DescriptorLayoutNode, GraphicsPipelineLayoutTextured},
+        GraphicsPipeline,
+    },
     skybox::Skybox,
 };
 
@@ -126,11 +129,7 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
-        let pipeline_layout = device.get_graphics_pipeline_layout(
-            DescriptorLayoutBuilder::new()
-                .push::<CameraMatrices>()
-                .push::<Texture2D>(),
-        )?;
+        let pipeline_layout = device.get_graphics_pipeline_layout()?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
         // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
         // while error message indicating true cause of the issue is never presented to the user

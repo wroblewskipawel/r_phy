@@ -3,7 +3,7 @@ pub mod layout;
 
 use crate::{math::types::Vector3, renderer::model::Vertex};
 
-use self::layout::GraphicsPipelineLayout;
+use self::layout::{DescriptorLayoutList, GraphicsPipelineLayout};
 
 use super::{
     render_pass::VulkanRenderPass, swapchain::VulkanSwapchain, AttachmentProperties, VulkanDevice,
@@ -43,18 +43,18 @@ impl ShaderModule {
     }
 }
 
-impl<T> From<&GraphicsPipelineLayout<T>> for vk::PipelineLayout {
+impl<T: DescriptorLayoutList> From<&GraphicsPipelineLayout<T>> for vk::PipelineLayout {
     fn from(value: &GraphicsPipelineLayout<T>) -> Self {
         value.layout
     }
 }
 
-pub struct GraphicsPipeline<T> {
+pub struct GraphicsPipeline<T: DescriptorLayoutList> {
     pub handle: vk::Pipeline,
     pub layout: GraphicsPipelineLayout<T>,
 }
 
-impl<T> GraphicsPipeline<T> {
+impl<T: DescriptorLayoutList> GraphicsPipeline<T> {
     fn get_vertex_input_state() -> vk::PipelineVertexInputStateCreateInfo {
         const VERTEX_BINDINGS: &[vk::VertexInputBindingDescription] =
             &[vk::VertexInputBindingDescription {
@@ -197,7 +197,7 @@ impl VulkanDevice {
         Ok(ShaderModule { module, stage })
     }
 
-    pub fn create_graphics_pipeline<T>(
+    pub fn create_graphics_pipeline<T: DescriptorLayoutList>(
         &self,
         layout: GraphicsPipelineLayout<T>,
         render_pass: &VulkanRenderPass,
@@ -252,7 +252,10 @@ impl VulkanDevice {
         Ok(GraphicsPipeline { handle, layout })
     }
 
-    pub fn destroy_graphics_pipeline<T>(&self, pipeline: &mut GraphicsPipeline<T>) {
+    pub fn destroy_graphics_pipeline<T: DescriptorLayoutList>(
+        &self,
+        pipeline: &mut GraphicsPipeline<T>,
+    ) {
         unsafe {
             self.device.destroy_pipeline(pipeline.handle, None);
         }

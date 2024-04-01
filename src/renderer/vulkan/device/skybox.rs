@@ -3,16 +3,13 @@ use std::path::Path;
 
 use ash::vk;
 
-use crate::{physics::shape, renderer::camera::CameraMatrices};
+use crate::physics::shape;
 
 use super::{
-    descriptor::DescriptorPool,
+    descriptor::{DescriptorPool, TextureDescriptorSet},
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{
-        layout::{DescriptorLayoutBuilder, GraphicsPipelineLayoutTextured},
-        GraphicsPipeline,
-    },
+    pipeline::{layout::GraphicsPipelineLayoutTextured, GraphicsPipeline},
     render_pass::VulkanRenderPass,
     swapchain::VulkanSwapchain,
     VulkanDevice,
@@ -22,7 +19,7 @@ use super::{
 pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
-    pub descriptor: DescriptorPool<Texture2D>,
+    pub descriptor: DescriptorPool<TextureDescriptorSet>,
     pub pipeline: GraphicsPipeline<GraphicsPipelineLayoutTextured>,
 }
 
@@ -34,14 +31,12 @@ impl VulkanDevice {
         path: &Path,
     ) -> Result<Skybox, Box<dyn Error>> {
         let texture = self.load_cubemap(path)?;
-        let mut descriptor =
-            self.create_descriptor_pool(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER)?;
-        let pipeline_layout = self.get_graphics_pipeline_layout(
-            DescriptorLayoutBuilder::new()
-                .push::<CameraMatrices>()
-                .push::<Texture2D>(),
-        )?;
-        self.write_image_samplers(&mut descriptor, std::slice::from_ref(&texture));
+        let mut descriptor = self.create_descriptor_pool(TextureDescriptorSet::builder(), 1)?;
+        let pipeline_layout = self.get_graphics_pipeline_layout()?;
+        let descriptor_write = descriptor
+            .get_writer()
+            .write_image(std::slice::from_ref(&texture));
+        self.write_descriptor_sets(&mut descriptor, descriptor_write);
         let pipeline = self.create_graphics_pipeline(
             pipeline_layout,
             render_pass,

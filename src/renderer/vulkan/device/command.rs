@@ -13,7 +13,7 @@ use super::{
     image::VulkanImage2D,
     material::MaterialPack,
     mesh::{BufferType, MeshPack, MeshRange},
-    pipeline::GraphicsPipeline,
+    pipeline::{layout::DescriptorLayoutList, GraphicsPipeline},
     render_pass::VulkanRenderPass,
     skybox::Skybox,
     swapchain::SwapchainFrame,
@@ -514,7 +514,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<L>(self, pipeline: &GraphicsPipeline<L>) -> Self {
+    pub fn bind_pipeline<L: DescriptorLayoutList>(self, pipeline: &GraphicsPipeline<L>) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -545,7 +545,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_material<L>(
+    pub fn bind_material<L: DescriptorLayoutList>(
         self,
         pipeline: &GraphicsPipeline<L>,
         pack: &MaterialPack,
@@ -600,7 +600,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
             .draw_mesh(skybox.mesh_pack.meshes[0])
     }
 
-    pub fn push_constants<L, C: Pod>(
+    pub fn push_constants<L: DescriptorLayoutList, C: Pod>(
         self,
         pipeline: &GraphicsPipeline<L>,
         stages: vk::ShaderStageFlags,
@@ -620,7 +620,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_camera_uniform_buffer<L>(
+    pub fn bind_camera_uniform_buffer<L: DescriptorLayoutList>(
         self,
         pipeline: &GraphicsPipeline<L>,
         frame: &SwapchainFrame,
