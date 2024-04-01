@@ -1,3 +1,7 @@
+mod presets;
+
+pub use presets::*;
+
 use ash::vk;
 use bytemuck::Pod;
 use std::any::{type_name, TypeId};
@@ -150,8 +154,8 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         if !T::exhausted() {
             if let Some((binding_index, entry)) = iter.next() {
                 *entry = T::Item::get_descriptor_set_binding(binding_index);
+                Self::next_descriptor_binding::<T::Next>(iter);
             }
-            Self::next_descriptor_binding::<T::Next>(iter);
         }
     }
 
@@ -219,83 +223,36 @@ impl<B: DescriptorBindingList> DescriptorLayout for DescriptorLayoutBuilder<B> {
     }
 }
 
-impl DescriptorBinding for CameraMatrices {
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding: binding,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            p_immutable_samplers: std::ptr::null(),
-        }
-    }
-
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            ..Default::default()
-        }
-    }
-
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1 * num_sets,
-        }
-    }
-}
-
-impl DescriptorBinding for Texture2D {
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding: binding,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: std::ptr::null(),
-        }
-    }
-
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            ..Default::default()
-        }
-    }
-
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1 * num_sets,
-        }
-    }
-}
-
-pub type CameraDescriptorSet =
-    DescriptorLayoutBuilder<DescriptorBindingNode<CameraMatrices, DescriptorBindingTerminator>>;
-pub type TextureDescriptorSet =
-    DescriptorLayoutBuilder<DescriptorBindingNode<Texture2D, DescriptorBindingTerminator>>;
-
 pub struct DescriptorSetLayout<T: DescriptorLayout> {
     pub(super) layout: vk::DescriptorSetLayout,
     _phantom: PhantomData<T>,
 }
 
-pub struct DescriptorPool<T: DescriptorLayout> {
-    pub count: usize,
-    pool: vk::DescriptorPool,
-    sets: Vec<vk::DescriptorSet>,
+#[derive(Debug)]
+pub struct Descriptor<T: DescriptorLayout> {
+    pub set: vk::DescriptorSet,
     _phantom: PhantomData<T>,
 }
 
+impl<T: DescriptorLayout> Clone for Descriptor<T> {
+    fn clone(&self) -> Self {
+        Self {
+            set: self.set.clone(),
+            _phantom: self._phantom.clone(),
+        }
+    }
+}
+
+impl<T: DescriptorLayout> Copy for Descriptor<T> {}
+
+pub struct DescriptorPool<T: DescriptorLayout> {
+    pub count: usize,
+    pool: vk::DescriptorPool,
+    sets: Vec<Descriptor<T>>,
+}
+
 impl<T: DescriptorLayout> Index<usize> for DescriptorPool<T> {
-    type Output = vk::DescriptorSet;
+    type Output = Descriptor<T>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.sets[index]
@@ -446,17 +403,23 @@ impl VulkanDevice {
         };
         let layout = self.get_descriptor_set_layout::<T>()?;
         let sets = unsafe {
-            self.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::builder()
-                    .descriptor_pool(pool)
-                    .set_layouts(&vec![layout.layout; num_sets]),
-            )?
+            self.device
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::builder()
+                        .descriptor_pool(pool)
+                        .set_layouts(&vec![layout.layout; num_sets]),
+                )?
+                .into_iter()
+                .map(|set| Descriptor {
+                    set,
+                    _phantom: PhantomData,
+                })
+                .collect::<Vec<_>>()
         };
         Ok(DescriptorPool {
             count: sets.len(),
             pool,
             sets,
-            _phantom: PhantomData,
         })
     }
 
@@ -479,7 +442,7 @@ impl VulkanDevice {
                     buffer_write_index,
                     write,
                 } => vk::WriteDescriptorSet {
-                    dst_set: pool.sets[set_index],
+                    dst_set: pool.sets[set_index].set,
                     p_buffer_info: &bufer_writes[buffer_write_index],
                     ..write
                 },
@@ -488,7 +451,7 @@ impl VulkanDevice {
                     image_write_index,
                     write,
                 } => vk::WriteDescriptorSet {
-                    dst_set: pool.sets[set_index],
+                    dst_set: pool.sets[set_index].set,
                     p_image_info: &image_writes[image_write_index],
                     ..write
                 },

@@ -1,5 +1,4 @@
 use crate::renderer::model::Material;
-use ash::vk;
 use std::error::Error;
 
 use super::{

@@ -6,18 +6,14 @@ use crate::math::types::Matrix4;
 
 use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
-    image::Texture2D,
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{
-        layout::{DescriptorLayoutNode, GraphicsPipelineLayoutTextured},
-        GraphicsPipeline,
-    },
+    pipeline::{GraphicsPipeline, ModelMatrix, PipelineLayoutTextured},
     skybox::Skybox,
 };
 
 use super::{
-    camera::{Camera, CameraMatrices},
+    camera::Camera,
     model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
     Renderer,
 };
@@ -47,7 +43,7 @@ pub(super) struct VulkanRenderer {
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
     skybox: Skybox,
-    pipeline: GraphicsPipeline<GraphicsPipelineLayoutTextured>,
+    pipeline: GraphicsPipeline<PipelineLayoutTextured>,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,
@@ -129,7 +125,6 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.create_render_pass()?;
         let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
-        let pipeline_layout = device.get_graphics_pipeline_layout()?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
         // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
         // while error message indicating true cause of the issue is never presented to the user
@@ -137,7 +132,7 @@ impl VulkanRenderer {
         // while also some preset of preconfigured one should be available
         // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
         let pipeline = device.create_graphics_pipeline(
-            pipeline_layout,
+            PipelineLayoutTextured::builder(),
             &render_pass,
             &swapchain,
             &[
@@ -238,13 +233,9 @@ impl Renderer for VulkanRenderer {
         let command = self.device.record_command(command, |command| {
             command
                 .begin_render_pass(&swapchain_frame, &self.render_pass)
-                .bind_pipeline(&self.skybox.pipeline)
-                // Camera descriptor set shoould be bound in VulkanSwapchain::begin_frame,
-                // or VulkanSwapchain should not manage Camera uniform buffers
-                .bind_camera_uniform_buffer(&self.skybox.pipeline, &swapchain_frame)
-                .draw_skybox(&self.skybox, &swapchain_frame, camera)
+                .draw_skybox(&self.skybox, camera)
                 .bind_pipeline(&self.pipeline)
-                .bind_camera_uniform_buffer(&self.skybox.pipeline, &swapchain_frame)
+                .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
         });
         self.current_frame_state.replace(FrameState {
             command,
@@ -307,6 +298,7 @@ impl Renderer for VulkanRenderer {
 
     fn draw(&mut self, model: Model, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
         let Model { mesh, material } = model;
+        let model_matrix: ModelMatrix = (*transform).into();
         let VulkanMeshHandle {
             mesh_pack_index,
             mesh_index,
@@ -331,12 +323,11 @@ impl Renderer for VulkanRenderer {
             } else {
                 command
             }
-            .bind_material(
+            .bind_descriptor_set(
                 &self.pipeline,
-                &self.materials[material_pack_index as usize],
-                material_index as usize,
+                self.materials[material_pack_index as usize].descriptors[material_index as usize],
             )
-            .push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0, transform)
+            .push_constants(&self.pipeline, &model_matrix)
             .draw_mesh(mesh_ranges)
         });
         self.current_frame_state.replace(FrameState {

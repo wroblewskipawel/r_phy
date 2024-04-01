@@ -1,15 +1,13 @@
 use std::error::Error;
 use std::path::Path;
 
-use ash::vk;
-
 use crate::physics::shape;
 
 use super::{
     descriptor::{DescriptorPool, TextureDescriptorSet},
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{layout::GraphicsPipelineLayoutTextured, GraphicsPipeline},
+    pipeline::{GraphicsPipeline, PipelineLayoutSkybox},
     render_pass::VulkanRenderPass,
     swapchain::VulkanSwapchain,
     VulkanDevice,
@@ -20,7 +18,7 @@ pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
     pub descriptor: DescriptorPool<TextureDescriptorSet>,
-    pub pipeline: GraphicsPipeline<GraphicsPipelineLayoutTextured>,
+    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox>,
 }
 
 impl VulkanDevice {
@@ -32,13 +30,12 @@ impl VulkanDevice {
     ) -> Result<Skybox, Box<dyn Error>> {
         let texture = self.load_cubemap(path)?;
         let mut descriptor = self.create_descriptor_pool(TextureDescriptorSet::builder(), 1)?;
-        let pipeline_layout = self.get_graphics_pipeline_layout()?;
         let descriptor_write = descriptor
             .get_writer()
             .write_image(std::slice::from_ref(&texture));
         self.write_descriptor_sets(&mut descriptor, descriptor_write);
         let pipeline = self.create_graphics_pipeline(
-            pipeline_layout,
+            PipelineLayoutSkybox::builder(),
             render_pass,
             swapchain,
             &[

@@ -4,22 +4,22 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{math::types::Matrix4, renderer::camera::Camera};
+use crate::{math::types::Vector4, renderer::camera::Camera};
 
 use self::operation::Operation;
 
 use super::{
     buffer::Buffer,
+    descriptor::{Descriptor, DescriptorLayout},
     image::VulkanImage2D,
-    material::MaterialPack,
     mesh::{BufferType, MeshPack, MeshRange},
-    pipeline::{layout::DescriptorLayoutList, GraphicsPipeline},
+    pipeline::{GraphicsPipeline, Layout, PushConstant},
     render_pass::VulkanRenderPass,
     skybox::Skybox,
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
-use std::{error::Error, marker::PhantomData};
+use std::{any::type_name, error::Error, marker::PhantomData};
 
 pub struct Transient;
 pub struct Persistent;
@@ -514,7 +514,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<L: DescriptorLayoutList>(self, pipeline: &GraphicsPipeline<L>) -> Self {
+    pub fn bind_pipeline<L: Layout>(self, pipeline: &GraphicsPipeline<L>) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -545,96 +545,57 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_material<L: DescriptorLayoutList>(
-        self,
-        pipeline: &GraphicsPipeline<L>,
-        pack: &MaterialPack,
-        material_index: usize,
-    ) -> Self {
-        let RecordingCommand(command, device) = self;
-        unsafe {
-            // This implicitly relies on knowledge that Material samplers
-            // is second descriptor set used by the pipeline
-            device.cmd_bind_descriptor_sets(
-                command.buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                (&pipeline.layout).into(),
-                1u32,
-                &[pack.descriptors[material_index]],
-                &[],
-            )
-        }
-        RecordingCommand(command, device)
-    }
-
-    pub fn draw_skybox(
-        self,
-        skybox: &Skybox,
-        swapchain_frame: &SwapchainFrame,
-        camera: &dyn Camera,
-    ) -> Self {
-        let camera_model = Matrix4::translate(camera.get_position());
-        let RecordingCommand(command, device) = self
-            .bind_pipeline(&skybox.pipeline)
-            .bind_camera_uniform_buffer(&skybox.pipeline, swapchain_frame);
-        unsafe {
-            device.cmd_bind_descriptor_sets(
-                command.buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                (&skybox.pipeline.layout).into(),
-                // This implicitly relies on knowledge that Material samplers
-                // is second descriptor set used by the pipeline
-                1u32,
-                &[skybox.descriptor[0]],
-                &[],
-            )
-        }
-        RecordingCommand(command, device)
+    pub fn draw_skybox(self, skybox: &Skybox, camera: &dyn Camera) -> Self {
+        let mut camera_matrices = camera.get_matrices();
+        camera_matrices.view[3] = Vector4::w();
+        self.bind_pipeline(&skybox.pipeline)
+            .bind_descriptor_set(&skybox.pipeline, skybox.descriptor[0])
             .bind_mesh_pack(&skybox.mesh_pack)
-            .push_constants(
-                &skybox.pipeline,
-                vk::ShaderStageFlags::VERTEX,
-                0,
-                &camera_model,
-            )
+            .push_constants(&skybox.pipeline, &camera_matrices)
             .draw_mesh(skybox.mesh_pack.meshes[0])
     }
 
-    pub fn push_constants<L: DescriptorLayoutList, C: Pod>(
+    pub fn push_constants<L: Layout, C: PushConstant + Pod>(
         self,
         pipeline: &GraphicsPipeline<L>,
-        stages: vk::ShaderStageFlags,
-        offset: usize,
         data: &C,
     ) -> Self {
+        let range = L::ranges().try_get_range::<C>().expect(&format!(
+            "PushConstant {} not present in layout PushConstantRanges {}!",
+            type_name::<C>(),
+            type_name::<L::PushConstants>()
+        ));
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_push_constants(
                 command.buffer,
-                (&pipeline.layout).into(),
-                stages,
-                offset as u32,
+                pipeline.layout.layout,
+                range.stage_flags,
+                range.offset,
                 bytes_of(data),
             );
         }
         RecordingCommand(command, device)
     }
 
-    pub fn bind_camera_uniform_buffer<L: DescriptorLayoutList>(
+    pub fn bind_descriptor_set<L: Layout, D: DescriptorLayout>(
         self,
         pipeline: &GraphicsPipeline<L>,
-        frame: &SwapchainFrame,
+        descriptor: Descriptor<D>,
     ) -> Self {
+        let set_index = L::sets().get_set_index::<D>().expect(&format!(
+            "DescriptorSet {} not present in layout DescriptorSets {}",
+            type_name::<D>(),
+            type_name::<L::Descriptors>()
+        ));
         let RecordingCommand(command, device) = self;
         unsafe {
-            // This implicitly relies on knowledge that Camera uniform
-            // is first descriptor set used by the pipeline
             device.cmd_bind_descriptor_sets(
                 command.buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                (&pipeline.layout).into(),
-                0u32,
-                &[frame.camera_descriptor],
+                pipeline.layout.layout,
+                set_index,
+                &[descriptor.set],
                 &[],
             )
         }

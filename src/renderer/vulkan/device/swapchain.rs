@@ -12,7 +12,7 @@ use super::{
         operation::Graphics, BeginCommand, NewCommand, Persistent, PersistentCommandPool,
         SubmitSemaphoreState,
     },
-    descriptor::{CameraDescriptorSet, DescriptorPool},
+    descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
     image::VulkanImage2D,
     render_pass::VulkanRenderPass,
     VulkanDevice,
@@ -26,7 +26,7 @@ pub struct FrameSync {
 pub struct SwapchainFrame {
     pub framebuffer: vk::Framebuffer,
     pub render_area: vk::Rect2D,
-    pub camera_descriptor: vk::DescriptorSet,
+    pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     image_index: usize,
     sync: FrameSync,
 }
