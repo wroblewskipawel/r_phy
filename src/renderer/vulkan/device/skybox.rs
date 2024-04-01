@@ -7,7 +7,7 @@ use super::{
     descriptor::{DescriptorPool, TextureDescriptorSet},
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, PipelineLayoutSkybox},
+    pipeline::{GraphicsPipeline, MeshVertexInput, PipelineLayoutSkybox},
     render_pass::VulkanRenderPass,
     swapchain::VulkanSwapchain,
     VulkanDevice,
@@ -18,7 +18,7 @@ pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
     pub descriptor: DescriptorPool<TextureDescriptorSet>,
-    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox>,
+    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox, MeshVertexInput>,
 }
 
 impl VulkanDevice {

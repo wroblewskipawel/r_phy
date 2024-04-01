@@ -8,7 +8,7 @@ use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, ModelMatrix, PipelineLayoutTextured},
+    pipeline::{GraphicsPipeline, MeshVertexInput, ModelMatrix, PipelineLayoutTextured},
     skybox::Skybox,
 };
 
@@ -43,7 +43,7 @@ pub(super) struct VulkanRenderer {
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
     skybox: Skybox,
-    pipeline: GraphicsPipeline<PipelineLayoutTextured>,
+    pipeline: GraphicsPipeline<PipelineLayoutTextured, MeshVertexInput>,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,

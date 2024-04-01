@@ -13,7 +13,7 @@ use super::{
     descriptor::{Descriptor, DescriptorLayout},
     image::VulkanImage2D,
     mesh::{BufferType, MeshPack, MeshRange},
-    pipeline::{GraphicsPipeline, Layout, PushConstant},
+    pipeline::{GraphicsPipeline, Layout, PushConstant, VertexInput},
     render_pass::VulkanRenderPass,
     skybox::Skybox,
     swapchain::SwapchainFrame,
@@ -514,7 +514,10 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<L: Layout>(self, pipeline: &GraphicsPipeline<L>) -> Self {
+    pub fn bind_pipeline<L: Layout, I: VertexInput>(
+        self,
+        pipeline: &GraphicsPipeline<L, I>,
+    ) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -555,9 +558,9 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
             .draw_mesh(skybox.mesh_pack.meshes[0])
     }
 
-    pub fn push_constants<L: Layout, C: PushConstant + Pod>(
+    pub fn push_constants<L: Layout, I: VertexInput, C: PushConstant + Pod>(
         self,
-        pipeline: &GraphicsPipeline<L>,
+        pipeline: &GraphicsPipeline<L, I>,
         data: &C,
     ) -> Self {
         let range = L::ranges().try_get_range::<C>().expect(&format!(
@@ -578,9 +581,9 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_descriptor_set<L: Layout, D: DescriptorLayout>(
+    pub fn bind_descriptor_set<L: Layout, I: VertexInput, D: DescriptorLayout>(
         self,
-        pipeline: &GraphicsPipeline<L>,
+        pipeline: &GraphicsPipeline<L, I>,
         descriptor: Descriptor<D>,
     ) -> Self {
         let set_index = L::sets().get_set_index::<D>().expect(&format!(
