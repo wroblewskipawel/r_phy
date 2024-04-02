@@ -217,6 +217,7 @@ impl<
     }
 }
 
+#[allow(dead_code)]
 impl<
         I: VertexInput,
         A: VertexAssembly,

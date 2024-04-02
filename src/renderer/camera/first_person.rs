@@ -95,7 +95,7 @@ impl FirstPersonCamera {
         let shared_camera = camera.clone();
         input_handler.register_key_pressed_callback(
             KeyCode::KeyW,
-            Box::new(move || {
+            Box::new(move |()| {
                 let mut camera = shared_camera.borrow_mut();
                 if camera.active {
                     camera.move_direction = camera.move_direction + camera.forward;
@@ -105,7 +105,7 @@ impl FirstPersonCamera {
         let shared_camera = camera.clone();
         input_handler.register_key_pressed_callback(
             KeyCode::KeyS,
-            Box::new(move || {
+            Box::new(move |()| {
                 let mut camera = shared_camera.borrow_mut();
                 if camera.active {
                     camera.move_direction = camera.move_direction - camera.forward;
@@ -115,7 +115,7 @@ impl FirstPersonCamera {
         let shared_camera = camera.clone();
         input_handler.register_key_pressed_callback(
             KeyCode::KeyD,
-            Box::new(move || {
+            Box::new(move |()| {
                 let mut camera = shared_camera.borrow_mut();
                 if camera.active {
                     camera.move_direction = camera.move_direction + camera.right;
@@ -125,7 +125,7 @@ impl FirstPersonCamera {
         let shared_camera = camera.clone();
         input_handler.register_key_pressed_callback(
             KeyCode::KeyA,
-            Box::new(move || {
+            Box::new(move |()| {
                 let mut camera = shared_camera.borrow_mut();
                 if camera.active {
                     camera.move_direction = camera.move_direction - camera.right;

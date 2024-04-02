@@ -6,11 +6,13 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
+pub type Callback<Args> = Box<dyn Fn(Args)>;
+
 pub struct InputHandler {
     key_states: Vec<bool>,
-    key_press_callbacks: HashMap<KeyCode, Vec<Box<dyn Fn()>>>,
-    key_state_callbacks: HashMap<KeyCode, Vec<Box<dyn Fn(ElementState)>>>,
-    cursor_callbacks: Vec<Box<dyn Fn(PhysicalPosition<f64>)>>,
+    key_press_callbacks: HashMap<KeyCode, Vec<Callback<()>>>,
+    key_state_callbacks: HashMap<KeyCode, Vec<Callback<ElementState>>>,
+    cursor_callbacks: Vec<Callback<PhysicalPosition<f64>>>,
 }
 
 impl Default for InputHandler {
@@ -29,25 +31,21 @@ impl InputHandler {
         }
     }
 
-    pub fn register_key_pressed_callback(&mut self, key: KeyCode, callback: Box<dyn Fn()>) {
+    pub fn register_key_pressed_callback(&mut self, key: KeyCode, callback: Callback<()>) {
         self.key_press_callbacks
             .entry(key)
             .or_default()
             .push(callback);
     }
 
-    pub fn register_key_state_callback(
-        &mut self,
-        key: KeyCode,
-        callback: Box<dyn Fn(ElementState)>,
-    ) {
+    pub fn register_key_state_callback(&mut self, key: KeyCode, callback: Callback<ElementState>) {
         self.key_state_callbacks
             .entry(key)
             .or_default()
             .push(callback);
     }
 
-    pub fn register_cursor_callback(&mut self, callback: Box<dyn Fn(PhysicalPosition<f64>)>) {
+    pub fn register_cursor_callback(&mut self, callback: Callback<PhysicalPosition<f64>>) {
         self.cursor_callbacks.push(callback);
     }
 
@@ -57,7 +55,7 @@ impl InputHandler {
                 .key_press_callbacks
                 .iter()
                 .filter(|(&key, ..)| self.key_states[key as usize])
-                .for_each(|(_, callbacks)| callbacks.iter().for_each(|callback| callback())),
+                .for_each(|(_, callbacks)| callbacks.iter().for_each(|callback| callback(()))),
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::KeyboardInput {
                     event:

@@ -9,7 +9,7 @@ use super::{
 impl DescriptorBinding for CameraMatrices {
     fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
         vk::DescriptorSetLayoutBinding {
-            binding: binding,
+            binding,
             descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: 1,
             stage_flags: vk::ShaderStageFlags::VERTEX,
@@ -30,7 +30,7 @@ impl DescriptorBinding for CameraMatrices {
     fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
         vk::DescriptorPoolSize {
             ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1 * num_sets,
+            descriptor_count: num_sets,
         }
     }
 }
@@ -38,7 +38,7 @@ impl DescriptorBinding for CameraMatrices {
 impl DescriptorBinding for Texture2D {
     fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
         vk::DescriptorSetLayoutBinding {
-            binding: binding,
+            binding,
             descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: 1,
             stage_flags: vk::ShaderStageFlags::FRAGMENT,
@@ -59,7 +59,7 @@ impl DescriptorBinding for Texture2D {
     fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
         vk::DescriptorPoolSize {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1 * num_sets,
+            descriptor_count: num_sets,
         }
     }
 }

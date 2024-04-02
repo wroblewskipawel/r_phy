@@ -105,6 +105,7 @@ impl<N: PushConstantList> Default for PushConstantRanges<N> {
     }
 }
 
+#[allow(dead_code)]
 impl<N: PushConstantList> PushConstantRanges<N> {
     pub fn new() -> PushConstantRanges<PushConstantTerminator> {
         PushConstantRanges {
@@ -261,6 +262,7 @@ impl<T: DescriptorLayoutList, P: PushConstantList> Default for PipelineLayoutBui
     }
 }
 
+#[allow(dead_code)]
 impl<T: DescriptorLayoutList, P: PushConstantList> PipelineLayoutBuilder<T, P> {
     pub fn new() -> PipelineLayoutBuilder<DescriptorLayoutTerminator, PushConstantTerminator> {
         PipelineLayoutBuilder {

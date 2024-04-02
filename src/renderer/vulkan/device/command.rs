@@ -563,11 +563,13 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         pipeline: &GraphicsPipeline<L, S>,
         data: &C,
     ) -> Self {
-        let range = L::ranges().try_get_range::<C>().expect(&format!(
-            "PushConstant {} not present in layout PushConstantRanges {}!",
-            type_name::<C>(),
-            type_name::<L::PushConstants>()
-        ));
+        let range = L::ranges().try_get_range::<C>().unwrap_or_else(|| {
+            panic!(
+                "PushConstant {} not present in layout PushConstantRanges {}!",
+                type_name::<C>(),
+                type_name::<L::PushConstants>()
+            )
+        });
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_push_constants(
@@ -586,11 +588,13 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         pipeline: &GraphicsPipeline<L, S>,
         descriptor: Descriptor<D>,
     ) -> Self {
-        let set_index = L::sets().get_set_index::<D>().expect(&format!(
-            "DescriptorSet {} not present in layout DescriptorSets {}",
-            type_name::<D>(),
-            type_name::<L::Descriptors>()
-        ));
+        let set_index = L::sets().get_set_index::<D>().unwrap_or_else(|| {
+            panic!(
+                "DescriptorSet {} not present in layout DescriptorSets {}",
+                type_name::<D>(),
+                type_name::<L::Descriptors>()
+            )
+        });
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_descriptor_sets(

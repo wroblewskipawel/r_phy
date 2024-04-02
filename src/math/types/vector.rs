@@ -53,6 +53,7 @@ impl Mul<Vector2> for f32 {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl Div<f32> for Vector2 {
     type Output = Self;
     #[inline]
@@ -217,6 +218,7 @@ impl Mul<Vector3> for f32 {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl Div<f32> for Vector3 {
     type Output = Self;
     #[inline]
@@ -427,6 +429,7 @@ impl Mul<Vector4> for f32 {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl Div<f32> for Vector4 {
     type Output = Self;
     #[inline]

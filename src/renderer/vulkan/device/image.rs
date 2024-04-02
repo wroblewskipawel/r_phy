@@ -1,4 +1,3 @@
-use super::descriptor::DescriptorLayout;
 use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
 use png::{self, BitDepth, ColorType, Transformations};

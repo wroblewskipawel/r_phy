@@ -12,8 +12,6 @@ use std::mem::size_of;
 use std::ops::Index;
 use std::sync::{Once, RwLock};
 
-use crate::renderer::camera::CameraMatrices;
-
 use super::buffer::UniformBuffer;
 use super::command::operation::Operation;
 use super::image::Texture2D;
@@ -129,6 +127,7 @@ impl<B: DescriptorBindingList> Default for DescriptorLayoutBuilder<B> {
     }
 }
 
+#[allow(dead_code)]
 impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
     pub fn new() -> DescriptorLayoutBuilder<DescriptorBindingTerminator> {
         DescriptorLayoutBuilder {
@@ -166,7 +165,7 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         bindings
     }
 
-    fn try_get_descriptor_write<'a, S: DescriptorBinding, T: DescriptorBindingList>(
+    fn try_get_descriptor_write<S: DescriptorBinding, T: DescriptorBindingList>(
         binding: u32,
     ) -> Option<vk::WriteDescriptorSet> {
         if !T::exhausted() {
@@ -184,12 +183,12 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         Self::try_get_descriptor_write::<T, B>(0)
     }
 
-    fn next_descriptor_pool_size<'a, T: DescriptorBindingList>(
+    fn next_descriptor_pool_size<T: DescriptorBindingList>(
         num_sets: u32,
         pool_sizes: &mut HashMap<vk::DescriptorType, u32>,
     ) {
         if !T::exhausted() {
-            let pool_size = T::Item::get_descriptor_pool_size(num_sets as u32);
+            let pool_size = T::Item::get_descriptor_pool_size(num_sets);
             let descriptor_count = pool_sizes.entry(pool_size.ty).or_insert(0);
             *descriptor_count += pool_size.descriptor_count;
             Self::next_descriptor_pool_size::<T::Next>(num_sets, pool_sizes);
@@ -236,10 +235,7 @@ pub struct Descriptor<T: DescriptorLayout> {
 
 impl<T: DescriptorLayout> Clone for Descriptor<T> {
     fn clone(&self) -> Self {
-        Self {
-            set: self.set.clone(),
-            _phantom: self._phantom.clone(),
-        }
+        *self
     }
 }
 
@@ -297,11 +293,13 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         mut self,
         buffer: &UniformBuffer<U, O>,
     ) -> Self {
-        let write = T::get_descriptor_write::<U>().expect(&format!(
-            "Invalid DescriptorBinding type {} for descriptor layout {}",
-            type_name::<U>(),
-            type_name::<T>()
-        ));
+        let write = T::get_descriptor_write::<U>().unwrap_or_else(|| {
+            panic!(
+                "Invalid DescriptorBinding type {} for descriptor layout {}",
+                type_name::<U>(),
+                type_name::<T>()
+            )
+        });
         let num_uniforms = self.num_sets * write.descriptor_count as usize;
         debug_assert_eq!(
             num_uniforms, buffer.size,
@@ -329,11 +327,13 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         I: DescriptorBinding,
         &'a I: Into<&'a Texture2D>,
     {
-        let write = T::get_descriptor_write::<I>().expect(&format!(
-            "Invalid DescriptorBinding type {} for descriptor layout {}",
-            type_name::<I>(),
-            type_name::<T>()
-        ));
+        let write = T::get_descriptor_write::<I>().unwrap_or_else(|| {
+            panic!(
+                "Invalid DescriptorBinding type {} for descriptor layout {}",
+                type_name::<I>(),
+                type_name::<T>()
+            )
+        });
         let num_uniforms = self.num_sets * write.descriptor_count as usize;
         debug_assert_eq!(
             num_uniforms,
