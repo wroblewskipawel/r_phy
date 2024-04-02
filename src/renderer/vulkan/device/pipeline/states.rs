@@ -148,11 +148,11 @@ pub trait VertexAssembly: 'static {
     fn get_input_assembly() -> vk::PipelineInputAssemblyStateCreateInfo;
 }
 
-pub trait DepthStencil {
+pub trait DepthStencil: 'static {
     fn get_state() -> vk::PipelineDepthStencilStateCreateInfo;
 }
 
-pub trait Rasterization {
+pub trait Rasterization: 'static {
     fn get_state() -> vk::PipelineRasterizationStateCreateInfo;
 }
 
@@ -162,22 +162,22 @@ pub struct ViewportInfo {
     pub create_info: vk::PipelineViewportStateCreateInfo,
 }
 
-pub trait Viewport {
+pub trait Viewport: 'static {
     fn get_state(image_extent: vk::Extent2D) -> ViewportInfo;
 }
 
-pub trait ColorBlend {
+pub trait ColorBlend: 'static {
     fn get_state() -> vk::PipelineColorBlendStateCreateInfo;
 }
 
-pub trait Multisample {
+pub trait Multisample: 'static {
     fn get_state(
         device: &PhysicalDeviceProperties,
         attachments: &AttachmentProperties,
     ) -> vk::PipelineMultisampleStateCreateInfo;
 }
 
-pub trait PipelineStates {
+pub trait PipelineStates: 'static {
     type VertexInput: VertexInput;
     type VertexAssembly: VertexAssembly;
     type DepthStencil: DepthStencil;
