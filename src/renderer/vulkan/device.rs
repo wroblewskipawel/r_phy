@@ -121,7 +121,7 @@ impl DeviceQueueBuilder {
     }
 }
 
-struct PhysicalDeviceProperties {
+pub struct PhysicalDeviceProperties {
     enabled_features: vk::PhysicalDeviceFeatures,
     generic: vk::PhysicalDeviceProperties,
     memory: vk::PhysicalDeviceMemoryProperties,
@@ -223,7 +223,7 @@ struct AttachmentFormats {
     depth_stencil: vk::Format,
 }
 
-struct AttachmentProperties {
+pub struct AttachmentProperties {
     formats: AttachmentFormats,
     msaa_samples: vk::SampleCountFlags,
 }

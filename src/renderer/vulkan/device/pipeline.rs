@@ -1,11 +1,15 @@
 mod graphics;
 mod layout;
+mod states;
 
 pub use graphics::*;
 pub use layout::*;
+pub use states::*;
 
 use ash::vk;
 use std::{error::Error, ffi::CStr, path::Path};
+
+use super::VulkanDevice;
 
 struct ShaderModule {
     module: vk::ShaderModule,
@@ -36,5 +40,19 @@ impl ShaderModule {
             },
             None => Err("Invalid shader module path - mising file name component!")?,
         }
+    }
+}
+
+impl VulkanDevice {
+    fn load_shader_module(&self, path: &Path) -> Result<ShaderModule, Box<dyn Error>> {
+        let code = std::fs::read(path)?;
+        let stage = ShaderModule::get_shader_stage(path)?;
+        let create_info = vk::ShaderModuleCreateInfo {
+            code_size: code.len(),
+            p_code: code.as_ptr() as *const _,
+            ..Default::default()
+        };
+        let module = unsafe { self.device.create_shader_module(&create_info, None)? };
+        Ok(ShaderModule { module, stage })
     }
 }

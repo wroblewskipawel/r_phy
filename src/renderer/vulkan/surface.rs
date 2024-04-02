@@ -89,7 +89,7 @@ impl From<&VulkanSurface> for vk::SurfaceKHR {
     }
 }
 
-pub(super) struct PhysicalDeviceSurfaceProperties {
+pub struct PhysicalDeviceSurfaceProperties {
     pub present_mode: vk::PresentModeKHR,
     pub surface_format: vk::SurfaceFormatKHR,
     pub supported_queue_families: HashSet<u32>,

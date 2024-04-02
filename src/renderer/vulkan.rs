@@ -8,7 +8,7 @@ use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, MeshVertexInput, ModelMatrix, PipelineLayoutTextured},
+    pipeline::{GraphicsPipeline, ModelMatrix, PipelineLayoutTextured, PipelineStatesDefault},
     skybox::Skybox,
 };
 
@@ -43,7 +43,7 @@ pub(super) struct VulkanRenderer {
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
     skybox: Skybox,
-    pipeline: GraphicsPipeline<PipelineLayoutTextured, MeshVertexInput>,
+    pipeline: GraphicsPipeline<PipelineLayoutTextured, PipelineStatesDefault>,
     swapchain: VulkanSwapchain,
     render_pass: VulkanRenderPass,
     device: VulkanDevice,
@@ -133,13 +133,13 @@ impl VulkanRenderer {
         // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
         let pipeline = device.create_graphics_pipeline(
             PipelineLayoutTextured::builder(),
+            PipelineStatesDefault::builder(),
             &render_pass,
             &swapchain,
             &[
                 Path::new("shaders/spv/unlit_textured/vert.spv"),
                 Path::new("shaders/spv/unlit_textured/frag.spv"),
             ],
-            false,
         )?;
         let skybox =
             device.create_skybox(&render_pass, &swapchain, Path::new("assets/skybox/skybox"))?;

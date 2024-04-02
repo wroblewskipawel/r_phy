@@ -7,7 +7,7 @@ use super::{
     descriptor::{DescriptorPool, TextureDescriptorSet},
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, MeshVertexInput, PipelineLayoutSkybox},
+    pipeline::{GraphicsPipeline, PipelineLayoutSkybox, PipelineStatesSkybox},
     render_pass::VulkanRenderPass,
     swapchain::VulkanSwapchain,
     VulkanDevice,
@@ -18,7 +18,7 @@ pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
     pub descriptor: DescriptorPool<TextureDescriptorSet>,
-    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox, MeshVertexInput>,
+    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox, PipelineStatesSkybox>,
 }
 
 impl VulkanDevice {
@@ -36,13 +36,13 @@ impl VulkanDevice {
         self.write_descriptor_sets(&mut descriptor, descriptor_write);
         let pipeline = self.create_graphics_pipeline(
             PipelineLayoutSkybox::builder(),
+            PipelineStatesSkybox::builder(),
             render_pass,
             swapchain,
             &[
                 &Path::new("shaders/spv/skybox/vert.spv"),
                 &Path::new("shaders/spv/skybox/frag.spv"),
             ],
-            true,
         )?;
         let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()])?;
         Ok(Skybox {
