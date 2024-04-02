@@ -2,10 +2,13 @@ mod presets;
 
 use std::marker::PhantomData;
 
-use ash::vk;
+use ash::vk::{self, Extent2D};
 pub use presets::*;
 
-use crate::renderer::vulkan::device::{AttachmentProperties, PhysicalDeviceProperties};
+use crate::renderer::vulkan::device::{
+    framebuffer::{AttachmentList, Attachments},
+    AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
+};
 
 pub struct VertexInputInfo {
     _bindings: Vec<vk::VertexInputBindingDescription>,
@@ -166,8 +169,36 @@ pub trait Viewport: 'static {
     fn get_state(image_extent: vk::Extent2D) -> ViewportInfo;
 }
 
+pub struct ColorBlendInfo {
+    _attachments: Vec<vk::PipelineColorBlendAttachmentState>,
+    pub create_info: vk::PipelineColorBlendStateCreateInfo,
+}
+
+pub trait Blend: 'static {
+    const BLEND: vk::PipelineColorBlendAttachmentState;
+}
+
 pub trait ColorBlend: 'static {
-    fn get_state() -> vk::PipelineColorBlendStateCreateInfo;
+    fn get_state() -> ColorBlendInfo;
+}
+
+pub struct ColorBlendBuilder<A: Attachments, B: Blend> {
+    _phantom: PhantomData<(A, B)>,
+}
+
+impl<A: Attachments, B: Blend> ColorBlend for ColorBlendBuilder<A, B> {
+    fn get_state() -> ColorBlendInfo {
+        let attachments = vec![B::BLEND; A::Color::LEN];
+        let create_info = vk::PipelineColorBlendStateCreateInfo {
+            attachment_count: attachments.len() as u32,
+            p_attachments: attachments.as_ptr(),
+            ..Default::default()
+        };
+        ColorBlendInfo {
+            _attachments: attachments,
+            create_info,
+        }
+    }
 }
 
 pub trait Multisample: 'static {
@@ -294,4 +325,34 @@ impl<
     type Viewport = V;
     type ColorBlend = C;
     type Multisample = M;
+}
+
+pub struct PipelineStatesInfo<S: PipelineStates> {
+    pub vertex_input: VertexInputInfo,
+    pub input_assembly: vk::PipelineInputAssemblyStateCreateInfo,
+    pub viewport: ViewportInfo,
+    pub rasterization: vk::PipelineRasterizationStateCreateInfo,
+    pub depth_stencil: vk::PipelineDepthStencilStateCreateInfo,
+    pub color_blend: ColorBlendInfo,
+    pub multisample: vk::PipelineMultisampleStateCreateInfo,
+    _phantom: PhantomData<S>,
+}
+
+pub(super) fn get_pipeline_states_info<S: PipelineStates>(
+    physical_device: &VulkanPhysicalDevice,
+    extent: Extent2D,
+) -> PipelineStatesInfo<S> {
+    PipelineStatesInfo {
+        vertex_input: S::VertexInput::get_state(),
+        input_assembly: S::VertexAssembly::get_input_assembly(),
+        viewport: S::Viewport::get_state(extent),
+        rasterization: S::Rasterization::get_state(),
+        depth_stencil: S::DepthStencil::get_state(),
+        color_blend: S::ColorBlend::get_state(),
+        multisample: S::Multisample::get_state(
+            &physical_device.properties,
+            &physical_device.attachment_properties,
+        ),
+        _phantom: PhantomData,
+    }
 }

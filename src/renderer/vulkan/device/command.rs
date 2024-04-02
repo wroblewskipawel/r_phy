@@ -11,10 +11,11 @@ use self::operation::Operation;
 use super::{
     buffer::Buffer,
     descriptor::{Descriptor, DescriptorLayout},
+    framebuffer::Clear,
     image::VulkanImage2D,
     mesh::{BufferType, MeshPack, MeshRange},
-    pipeline::{GraphicsPipeline, Layout, PipelineStates, PushConstant},
-    render_pass::VulkanRenderPass,
+    pipeline::{GraphicsPipeline, GraphicspipelineConfig, Layout, PushConstant},
+    render_pass::{RenderPass, RenderPassConfig},
     skybox::Skybox,
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
@@ -486,15 +487,20 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn begin_render_pass(self, frame: &SwapchainFrame, render_pass: &VulkanRenderPass) -> Self {
+    pub fn begin_render_pass<C: RenderPassConfig>(
+        self,
+        frame: &SwapchainFrame,
+        render_pass: &RenderPass<C>,
+        clear_values: &Clear<C::Attachments>,
+    ) -> Self {
         let RecordingCommand(command, device) = self;
-        let clear_values = VulkanRenderPass::get_attachment_clear_values();
+        let clear_values = clear_values.get_clear_values();
         unsafe {
             device.cmd_begin_render_pass(
                 command.buffer,
                 &vk::RenderPassBeginInfo {
                     render_pass: render_pass.handle,
-                    framebuffer: frame.framebuffer,
+                    framebuffer: frame.framebuffer.framebuffer,
                     render_area: frame.render_area,
                     clear_value_count: clear_values.len() as u32,
                     p_clear_values: clear_values.as_ptr(),
@@ -514,10 +520,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<L: Layout, S: PipelineStates>(
-        self,
-        pipeline: &GraphicsPipeline<L, S>,
-    ) -> Self {
+    pub fn bind_pipeline<C: GraphicspipelineConfig>(self, pipeline: &GraphicsPipeline<C>) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -558,16 +561,16 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
             .draw_mesh(skybox.mesh_pack.meshes[0])
     }
 
-    pub fn push_constants<L: Layout, S: PipelineStates, C: PushConstant + Pod>(
+    pub fn push_constants<C: GraphicspipelineConfig, P: PushConstant + Pod>(
         self,
-        pipeline: &GraphicsPipeline<L, S>,
-        data: &C,
+        pipeline: &GraphicsPipeline<C>,
+        data: &P,
     ) -> Self {
-        let range = L::ranges().try_get_range::<C>().unwrap_or_else(|| {
+        let range = C::Layout::ranges().try_get_range::<P>().unwrap_or_else(|| {
             panic!(
                 "PushConstant {} not present in layout PushConstantRanges {}!",
-                type_name::<C>(),
-                type_name::<L::PushConstants>()
+                type_name::<P>(),
+                type_name::<<C::Layout as Layout>::PushConstants>()
             )
         });
         let RecordingCommand(command, device) = self;
@@ -583,16 +586,16 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_descriptor_set<L: Layout, S: PipelineStates, D: DescriptorLayout>(
+    pub fn bind_descriptor_set<C: GraphicspipelineConfig, D: DescriptorLayout>(
         self,
-        pipeline: &GraphicsPipeline<L, S>,
+        pipeline: &GraphicsPipeline<C>,
         descriptor: Descriptor<D>,
     ) -> Self {
-        let set_index = L::sets().get_set_index::<D>().unwrap_or_else(|| {
+        let set_index = C::Layout::sets().get_set_index::<D>().unwrap_or_else(|| {
             panic!(
                 "DescriptorSet {} not present in layout DescriptorSets {}",
                 type_name::<D>(),
-                type_name::<L::Descriptors>()
+                type_name::<<C::Layout as Layout>::Descriptors>()
             )
         });
         let RecordingCommand(command, device) = self;

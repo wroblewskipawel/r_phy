@@ -7,15 +7,16 @@ use crate::{
     renderer::{
         model::Vertex,
         vulkan::device::{
-            render_pass::VulkanRenderPass, AttachmentProperties, PhysicalDeviceProperties,
+            framebuffer::presets::AttachmentsColorDepthCombined, AttachmentProperties,
+            PhysicalDeviceProperties,
         },
     },
 };
 
 use super::{
-    ColorBlend, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization, VertexAssembly,
-    VertexBinding, VertexBindingBuilder, VertexBindingNode, VertexBindingTerminator, Viewport,
-    ViewportInfo,
+    Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,
+    VertexAssembly, VertexBinding, VertexBindingBuilder, VertexBindingNode,
+    VertexBindingTerminator, Viewport, ViewportInfo,
 };
 
 impl VertexBinding for Vertex {
@@ -153,18 +154,22 @@ impl Viewport for ViewportDefault {
     }
 }
 
-pub struct ColorBlendDefault {}
+pub struct AttachmentAlphaBlend {}
 
-impl ColorBlend for ColorBlendDefault {
-    fn get_state() -> vk::PipelineColorBlendStateCreateInfo {
-        let attachments = VulkanRenderPass::get_color_attachments_blend_state();
-        vk::PipelineColorBlendStateCreateInfo {
-            attachment_count: attachments.len() as u32,
-            p_attachments: attachments.as_ptr(),
-            ..Default::default()
-        }
-    }
+impl Blend for AttachmentAlphaBlend {
+    const BLEND: vk::PipelineColorBlendAttachmentState = vk::PipelineColorBlendAttachmentState {
+        blend_enable: vk::TRUE,
+        src_color_blend_factor: vk::BlendFactor::SRC_ALPHA,
+        dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
+        color_blend_op: vk::BlendOp::ADD,
+        src_alpha_blend_factor: vk::BlendFactor::ONE,
+        dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+        alpha_blend_op: vk::BlendOp::ADD,
+        color_write_mask: vk::ColorComponentFlags::RGBA,
+    };
 }
+
+pub type AlphaBlend<A> = ColorBlendBuilder<A, AttachmentAlphaBlend>;
 
 pub struct Multisampled {}
 
@@ -190,7 +195,7 @@ pub type PipelineStatesDefault = PipelineStatesBuilder<
     DepthTestEnabled,
     CullBack,
     ViewportDefault,
-    ColorBlendDefault,
+    AlphaBlend<AttachmentsColorDepthCombined>,
     Multisampled,
 >;
 
@@ -200,6 +205,6 @@ pub type PipelineStatesSkybox = PipelineStatesBuilder<
     DepthTestDisabled,
     CullFront,
     ViewportDefault,
-    ColorBlendDefault,
+    AlphaBlend<AttachmentsColorDepthCombined>,
     Multisampled,
 >;

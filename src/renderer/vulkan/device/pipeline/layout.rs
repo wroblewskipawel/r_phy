@@ -325,10 +325,7 @@ impl VulkanDevice {
         Ok(layouts)
     }
 
-    pub fn get_pipeline_layout<L: Layout>(
-        &self,
-        _layout: L,
-    ) -> Result<PipelineLayout<L>, Box<dyn Error>> {
+    pub fn get_pipeline_layout<L: Layout>(&self) -> Result<PipelineLayout<L>, Box<dyn Error>> {
         let push_ranges = PushConstantRanges::<L::PushConstants>::get_ranges();
         let layout_map = get_pipeline_layout_map();
         let layout = if let Some(layout) = {

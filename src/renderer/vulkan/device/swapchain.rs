@@ -13,8 +13,14 @@ use super::{
         SubmitSemaphoreState,
     },
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
+    framebuffer::{
+        presets::{
+            AttachmentsColorDepthCombined, ColorMultisampled, DepthStencilMultisampled, Resolve,
+        },
+        AttachmentsBuilder, Framebuffer,
+    },
     image::VulkanImage2D,
-    render_pass::VulkanRenderPass,
+    render_pass::{ColorDepthCombinedRenderPass, RenderPassConfig},
     VulkanDevice,
 };
 
@@ -24,7 +30,7 @@ pub struct FrameSync {
 }
 
 pub struct SwapchainFrame {
-    pub framebuffer: vk::Framebuffer,
+    pub framebuffer: Framebuffer<AttachmentsColorDepthCombined>,
     pub render_area: vk::Rect2D,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     image_index: usize,
@@ -55,7 +61,7 @@ pub struct VulkanSwapchain {
     color_buffer: VulkanImage2D,
     _images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
-    framebuffers: Vec<vk::Framebuffer>,
+    framebuffers: Vec<Framebuffer<AttachmentsColorDepthCombined>>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
 }
@@ -68,11 +74,10 @@ impl VulkanSwapchain {
 }
 
 impl VulkanDevice {
-    pub fn create_swapchain(
+    pub fn create_swapchain<C: RenderPassConfig>(
         &self,
         instance: &Instance,
         surface: &VulkanSurface,
-        render_pass: &VulkanRenderPass,
     ) -> Result<VulkanSwapchain, Box<dyn Error>> {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
@@ -128,19 +133,13 @@ impl VulkanDevice {
             .collect::<Result<Vec<_>, _>>()?;
         let framebuffers = image_views
             .iter()
-            .map(|&image_view| unsafe {
-                self.device.create_framebuffer(
-                    &vk::FramebufferCreateInfo::builder()
-                        .render_pass(render_pass.into())
-                        .attachments(&VulkanRenderPass::get_attachments(
-                            image_view,
-                            depth_buffer.image_view,
-                            color_buffer.image_view,
-                        ))
-                        .width(image_extent.width)
-                        .height(image_extent.height)
-                        .layers(1),
-                    None,
+            .map(|&image_view| {
+                self.build_framebuffer::<ColorDepthCombinedRenderPass>(
+                    AttachmentsBuilder::new()
+                        .push_color::<ColorMultisampled>(color_buffer.image_view)
+                        .push_depth_stencil::<DepthStencilMultisampled>(depth_buffer.image_view)
+                        .push_resolve::<Resolve>(image_view),
+                    image_extent,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -170,11 +169,11 @@ impl VulkanDevice {
     }
 
     pub fn destroy_swapchain(&self, swapchain: &mut VulkanSwapchain) {
+        swapchain
+            .framebuffers
+            .iter_mut()
+            .for_each(|framebuffer| self.destroy_framebuffer(framebuffer));
         unsafe {
-            swapchain
-                .framebuffers
-                .iter()
-                .for_each(|&framebuffer| self.device.destroy_framebuffer(framebuffer, None));
             swapchain
                 .image_views
                 .iter()

@@ -1,6 +1,7 @@
 pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod descriptor;
+pub(super) mod framebuffer;
 pub(super) mod image;
 pub(super) mod material;
 pub(super) mod mesh;

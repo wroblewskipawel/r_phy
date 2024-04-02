@@ -7,8 +7,7 @@ use super::{
     descriptor::{DescriptorPool, TextureDescriptorSet},
     image::Texture2D,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, PipelineLayoutSkybox, PipelineStatesSkybox},
-    render_pass::VulkanRenderPass,
+    pipeline::{GraphicsPipeline, GraphicsPipelineColorDepthCombinedSkybox, ShaderDirectory},
     swapchain::VulkanSwapchain,
     VulkanDevice,
 };
@@ -18,13 +17,12 @@ pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
     pub descriptor: DescriptorPool<TextureDescriptorSet>,
-    pub pipeline: GraphicsPipeline<PipelineLayoutSkybox, PipelineStatesSkybox>,
+    pub pipeline: GraphicsPipeline<GraphicsPipelineColorDepthCombinedSkybox>,
 }
 
 impl VulkanDevice {
     pub fn create_skybox(
         &self,
-        render_pass: &VulkanRenderPass,
         swapchain: &VulkanSwapchain,
         path: &Path,
     ) -> Result<Skybox, Box<dyn Error>> {
@@ -34,15 +32,9 @@ impl VulkanDevice {
             .get_writer()
             .write_image(std::slice::from_ref(&texture));
         self.write_descriptor_sets(&mut descriptor, descriptor_write);
-        let pipeline = self.create_graphics_pipeline(
-            PipelineLayoutSkybox::builder(),
-            PipelineStatesSkybox::builder(),
-            render_pass,
-            swapchain,
-            &[
-                &Path::new("shaders/spv/skybox/vert.spv"),
-                &Path::new("shaders/spv/skybox/frag.spv"),
-            ],
+        let pipeline = self.create_graphics_pipeline::<GraphicsPipelineColorDepthCombinedSkybox>(
+            ShaderDirectory::new(&Path::new("shaders/spv/skybox")),
+            swapchain.image_extent,
         )?;
         let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()])?;
         Ok(Skybox {

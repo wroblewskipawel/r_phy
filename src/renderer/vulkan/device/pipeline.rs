@@ -6,8 +6,8 @@ pub use graphics::*;
 pub use layout::*;
 pub use states::*;
 
-use ash::vk;
-use std::{error::Error, ffi::CStr, path::Path};
+use ash::{vk, Device};
+use std::{error::Error, ffi::CStr, marker::PhantomData, path::Path};
 
 use super::VulkanDevice;
 
@@ -40,6 +40,73 @@ impl ShaderModule {
             },
             None => Err("Invalid shader module path - mising file name component!")?,
         }
+    }
+}
+
+pub struct Modules<'a> {
+    modules: Vec<ShaderModule>,
+    device: &'a Device,
+}
+
+impl<'a> Drop for Modules<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.modules
+                .iter()
+                .for_each(|module| self.device.destroy_shader_module(module.module, None));
+        }
+    }
+}
+
+pub struct PipelineStagesInfo<'a> {
+    stages: Vec<vk::PipelineShaderStageCreateInfo>,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> Modules<'a> {
+    pub fn get_stages_info(&self) -> PipelineStagesInfo {
+        PipelineStagesInfo {
+            stages: self
+                .modules
+                .iter()
+                .map(|module| module.get_stage_create_info())
+                .collect(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub trait ModuleLoader {
+    fn load(self, device: &VulkanDevice) -> Result<Modules, Box<dyn Error>>;
+}
+
+pub struct ShaderDirectory {
+    path: &'static Path,
+}
+
+impl ShaderDirectory {
+    pub fn new(path: &'static Path) -> Self {
+        Self { path }
+    }
+}
+
+impl ModuleLoader for ShaderDirectory {
+    fn load(self, device: &VulkanDevice) -> Result<Modules, Box<dyn Error>> {
+        let modules = Modules {
+            modules: self
+                .path
+                .read_dir()?
+                .flatten()
+                .filter_map(|entry| {
+                    entry
+                        .file_type()
+                        .is_ok_and(|f| f.is_file())
+                        .then_some(device.load_shader_module(&entry.path()))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            device: &device,
+        };
+        Ok(modules)
     }
 }
 

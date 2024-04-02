@@ -6,9 +6,13 @@ use crate::math::types::Matrix4;
 
 use self::device::{
     command::{operation::Graphics, BeginCommand, Persistent},
+    framebuffer::{ClearColor, ClearDeptStencil, ClearValueBuilder},
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{GraphicsPipeline, ModelMatrix, PipelineLayoutTextured, PipelineStatesDefault},
+    pipeline::{
+        GraphicsPipeline, GraphicsPipelineColorDepthCombinedTextured, ModelMatrix, ShaderDirectory,
+    },
+    render_pass::ColorDepthCombinedRenderPass,
     skybox::Skybox,
 };
 
@@ -20,7 +24,7 @@ use super::{
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
 use device::{
-    render_pass::VulkanRenderPass,
+    render_pass::RenderPass,
     swapchain::{SwapchainFrame, VulkanSwapchain},
     VulkanDevice,
 };
@@ -43,9 +47,9 @@ pub(super) struct VulkanRenderer {
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
     skybox: Skybox,
-    pipeline: GraphicsPipeline<PipelineLayoutTextured, PipelineStatesDefault>,
+    pipeline: GraphicsPipeline<GraphicsPipelineColorDepthCombinedTextured>,
     swapchain: VulkanSwapchain,
-    render_pass: VulkanRenderPass,
+    render_pass: RenderPass<ColorDepthCombinedRenderPass>,
     device: VulkanDevice,
     surface: VulkanSurface,
     debug_utils: Option<VulkanDebugUtils>,
@@ -123,26 +127,21 @@ impl VulkanRenderer {
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
         let surface = VulkanSurface::create(&entry, &instance, window)?;
         let device = VulkanDevice::create(&instance, &surface)?;
-        let render_pass = device.create_render_pass()?;
-        let swapchain = device.create_swapchain(&instance, &surface, &render_pass)?;
+        let render_pass = device.get_render_pass::<ColorDepthCombinedRenderPass>()?;
+        let swapchain =
+            device.create_swapchain::<ColorDepthCombinedRenderPass>(&instance, &surface)?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
         // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
         // while error message indicating true cause of the issue is never presented to the user
         // TODO: User should be able to load custom shareds,
         // while also some preset of preconfigured one should be available
         // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-        let pipeline = device.create_graphics_pipeline(
-            PipelineLayoutTextured::builder(),
-            PipelineStatesDefault::builder(),
-            &render_pass,
-            &swapchain,
-            &[
-                Path::new("shaders/spv/unlit_textured/vert.spv"),
-                Path::new("shaders/spv/unlit_textured/frag.spv"),
-            ],
-        )?;
-        let skybox =
-            device.create_skybox(&render_pass, &swapchain, Path::new("assets/skybox/skybox"))?;
+        let pipeline = device
+            .create_graphics_pipeline::<GraphicsPipelineColorDepthCombinedTextured>(
+                ShaderDirectory::new(Path::new("shaders/spv/unlit_textured")),
+                swapchain.image_extent,
+            )?;
+        let skybox = device.create_skybox(&swapchain, Path::new("assets/skybox/skybox"))?;
         Ok(Self {
             current_frame_state: None,
             materials: vec![],
@@ -173,7 +172,7 @@ impl Drop for VulkanRenderer {
             self.device.destroy_skybox(&mut self.skybox);
             self.device.destroy_graphics_pipeline(&mut self.pipeline);
             self.device.destroy_swapchain(&mut self.swapchain);
-            self.device.destroy_render_pass(&mut self.render_pass);
+            self.device.destroy_render_passes();
             self.device.destroy_pipeline_layouts();
             self.device.destroy_descriptor_set_layouts();
             self.device.destroy();
@@ -230,9 +229,21 @@ impl Renderer for VulkanRenderer {
         let (command, swapchain_frame) = self
             .device
             .begin_frame(&mut self.swapchain, &camera_matrices)?;
+        let clear_values = ClearValueBuilder::new()
+            .push_color(ClearColor {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            })
+            .push_depth_stencil(ClearDeptStencil {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            });
         let command = self.device.record_command(command, |command| {
             command
-                .begin_render_pass(&swapchain_frame, &self.render_pass)
+                .begin_render_pass(&swapchain_frame, &self.render_pass, &clear_values)
                 .draw_skybox(&self.skybox, camera)
                 .bind_pipeline(&self.pipeline)
                 .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
