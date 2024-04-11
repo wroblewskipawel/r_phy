@@ -4,18 +4,21 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{math::types::Vector4, renderer::camera::Camera};
+use crate::{math::types::Vector4, renderer::camera::{Camera, CameraMatrices}};
 
-use self::operation::Operation;
+use self::{
+    level::{Level, Primary, Secondary},
+    operation::Operation,
+};
 
 use super::{
     buffer::Buffer,
     descriptor::{Descriptor, DescriptorLayout},
-    framebuffer::Clear,
+    framebuffer::{Clear, Framebuffer},
     image::VulkanImage2D,
     mesh::{BufferType, MeshPack, MeshRange},
     pipeline::{GraphicsPipeline, GraphicspipelineConfig, Layout, PushConstant},
-    render_pass::{RenderPass, RenderPassConfig},
+    render_pass::{RenderPass, RenderPassConfig, Subpass},
     skybox::Skybox,
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
@@ -24,6 +27,27 @@ use std::{any::type_name, error::Error, marker::PhantomData};
 
 pub struct Transient;
 pub struct Persistent;
+
+pub mod level {
+    use ash::vk;
+
+    pub trait Level {
+        const LEVEL: vk::CommandBufferLevel;
+    }
+
+    pub struct Primary {}
+
+    impl Level for Primary {
+        const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::PRIMARY;
+    }
+
+    pub struct Secondary {}
+
+    impl Level for Secondary {
+        const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::SECONDARY;
+    }
+}
+
 pub mod operation {
     use ash::vk;
 
@@ -77,22 +101,22 @@ pub mod operation {
     }
 }
 
-pub(super) struct Command<T, O: Operation> {
+pub(super) struct Command<T, L: Level, O: Operation> {
     buffer: vk::CommandBuffer,
     pub fence: vk::Fence,
-    _phantom: PhantomData<(T, O)>,
+    _phantom: PhantomData<(T, L, O)>,
 }
 
-pub(super) struct PersistentCommandPool<O: Operation> {
+pub(super) struct PersistentCommandPool<L: Level, O: Operation> {
     head: usize, // Create dedicated ring buffer (wrapper? generic where T: Index) class
     command_pool: vk::CommandPool,
     buffers: Vec<vk::CommandBuffer>,
     fences: Vec<vk::Fence>,
-    _phantom: PhantomData<O>,
+    _phantom: PhantomData<(L, O)>,
 }
 
-impl<O: Operation> PersistentCommandPool<O> {
-    pub fn next(&mut self) -> (usize, NewCommand<Persistent, O>) {
+impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
+    pub fn next(&mut self) -> (usize, NewCommand<Persistent, L, O>) {
         let next_command_index = self.head;
         self.head = (self.head + 1) % self.buffers.len();
         let command = Command {
@@ -105,10 +129,10 @@ impl<O: Operation> PersistentCommandPool<O> {
 }
 
 impl VulkanDevice {
-    pub(super) fn create_persistent_command_pool<O: Operation>(
+    pub(super) fn create_persistent_command_pool<L: Level, O: Operation>(
         &self,
         size: usize,
-    ) -> Result<PersistentCommandPool<O>, Box<dyn Error>> {
+    ) -> Result<PersistentCommandPool<L, O>, Box<dyn Error>> {
         let command_pool = unsafe {
             self.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -119,7 +143,7 @@ impl VulkanDevice {
         };
         let allocate_info = vk::CommandBufferAllocateInfo {
             command_pool,
-            level: vk::CommandBufferLevel::PRIMARY,
+            level: L::LEVEL,
             command_buffer_count: size as u32,
             ..Default::default()
         };
@@ -147,9 +171,9 @@ impl VulkanDevice {
         })
     }
 
-    pub(super) fn destroy_persistent_command_pool<O: Operation>(
+    pub(super) fn destroy_persistent_command_pool<L: Level, O: Operation>(
         &self,
-        command_pool: &mut PersistentCommandPool<O>,
+        command_pool: &mut PersistentCommandPool<L, O>,
     ) {
         unsafe {
             command_pool
@@ -162,19 +186,19 @@ impl VulkanDevice {
     }
 }
 
-pub(in crate::renderer::vulkan) struct NewCommand<T, O: Operation>(Command<T, O>);
+pub(in crate::renderer::vulkan) struct NewCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
-impl<'a, T, O: Operation> From<&'a NewCommand<T, O>> for &'a Command<T, O> {
-    fn from(value: &'a NewCommand<T, O>) -> Self {
+impl<'a, T, L: Level, O: Operation> From<&'a NewCommand<T, L, O>> for &'a Command<T, L, O> {
+    fn from(value: &'a NewCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
 impl VulkanDevice {
-    pub(super) fn begin_command<T, O: Operation>(
+    pub(super) fn begin_primary_command<T, O: Operation>(
         &self,
-        command: NewCommand<T, O>,
-    ) -> Result<BeginCommand<T, O>, Box<dyn Error>> {
+        command: NewCommand<T, Primary, O>,
+    ) -> Result<BeginCommand<T, Primary, O>, Box<dyn Error>> {
         let NewCommand(command) = command;
         unsafe {
             self.device.begin_command_buffer(
@@ -186,10 +210,45 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub(super) fn begin_persistent_command<O: Operation>(
+    pub fn begin_secondary_command<
+        T,
+        O: Operation,
+        C: RenderPassConfig,
+        S: Subpass<C::Attachments>,
+    >(
         &self,
-        command: NewCommand<Persistent, O>,
-    ) -> Result<BeginCommand<Persistent, O>, Box<dyn Error>> {
+        command: NewCommand<T, Secondary, O>,
+        render_pass: RenderPass<C>,
+        framebuffer: Framebuffer<C::Attachments>,
+    ) -> Result<BeginCommand<T, Secondary, O>, Box<dyn Error>> {
+        let subpass = C::try_get_subpass_index::<S>().unwrap_or_else(|| {
+            panic!(
+                "Subpass {} not present in RenderPass {}!",
+                type_name::<S>(),
+                type_name::<C>(),
+            )
+        }) as u32;
+        let NewCommand(command) = command;
+        unsafe {
+            self.device.begin_command_buffer(
+                command.buffer,
+                &vk::CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+                    .inheritance_info(&vk::CommandBufferInheritanceInfo {
+                        render_pass: render_pass.handle,
+                        subpass,
+                        framebuffer: framebuffer.framebuffer,
+                        ..Default::default()
+                    }),
+            )?;
+        }
+        Ok(BeginCommand(command))
+    }
+
+    pub(super) fn begin_persistent_command<L: Level, O: Operation>(
+        &self,
+        command: NewCommand<Persistent, L, O>,
+    ) -> Result<BeginCommand<Persistent, L, O>, Box<dyn Error>> {
         let NewCommand(command) = command;
         unsafe {
             self.device
@@ -206,22 +265,23 @@ impl VulkanDevice {
 
     pub(in crate::renderer::vulkan) fn record_command<
         T,
+        L: Level,
         O: Operation,
-        F: FnOnce(RecordingCommand<T, O>) -> RecordingCommand<T, O>,
+        F: FnOnce(RecordingCommand<T, L, O>) -> RecordingCommand<T, L, O>,
     >(
         &self,
-        command: BeginCommand<T, O>,
+        command: BeginCommand<T, L, O>,
         recorder: F,
-    ) -> BeginCommand<T, O> {
+    ) -> BeginCommand<T, L, O> {
         let BeginCommand(command) = command;
         let RecordingCommand(command, _) = recorder(RecordingCommand(command, self));
         BeginCommand(command)
     }
 
-    pub fn finish_command<T, O: Operation>(
+    pub fn finish_command<T, L: Level, O: Operation>(
         &self,
-        command: BeginCommand<T, O>,
-    ) -> Result<FinishedCommand<T, O>, Box<dyn Error>> {
+        command: BeginCommand<T, L, O>,
+    ) -> Result<FinishedCommand<T, L, O>, Box<dyn Error>> {
         let BeginCommand(command) = command;
         unsafe {
             self.device.end_command_buffer(command.buffer)?;
@@ -230,26 +290,46 @@ impl VulkanDevice {
     }
 }
 
-pub(in crate::renderer::vulkan) struct RecordingCommand<'a, T, O: Operation>(
-    Command<T, O>,
+pub(in crate::renderer::vulkan) struct RecordingCommand<'a, T, L: Level, O: Operation>(
+    Command<T, L, O>,
     &'a VulkanDevice,
 );
 
-impl<'a, T, O: Operation> From<&'a RecordingCommand<'a, T, O>> for &'a Command<T, O> {
-    fn from(value: &'a RecordingCommand<T, O>) -> Self {
+impl<'a, T, L: Level, O: Operation> From<&'a RecordingCommand<'a, T, L, O>>
+    for &'a Command<T, L, O>
+{
+    fn from(value: &'a RecordingCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
-pub(in crate::renderer::vulkan) struct BeginCommand<T, O: Operation>(Command<T, O>);
+pub(in crate::renderer::vulkan) struct BeginCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
-impl<'a, T, O: Operation> From<&'a BeginCommand<T, O>> for &'a Command<T, O> {
-    fn from(value: &'a BeginCommand<T, O>) -> Self {
+impl<'a, T, L: Level, O: Operation> From<&'a BeginCommand<T, L, O>> for &'a Command<T, L, O> {
+    fn from(value: &'a BeginCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
-impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
+impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
+    pub fn next_render_pass(self) -> Self {
+        let RecordingCommand(command, device) = self;
+        unsafe {
+            device.cmd_next_subpass(
+                command.buffer,
+                vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
+            );
+        }
+        RecordingCommand(command, device)
+    }
+
+    pub fn write_secondary(self, secondary: &FinishedCommand<T, Secondary, O>) -> Self {
+        let FinishedCommand(secondary, _) = secondary;
+        let RecordingCommand(command, device) = self;
+        unsafe { device.cmd_execute_commands(command.buffer, &[secondary.buffer]) }
+        RecordingCommand(command, device)
+    }
+
     pub fn copy_buffer<'b, 'c>(
         self,
         src: impl Into<&'b Buffer>,
@@ -506,7 +586,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
                     p_clear_values: clear_values.as_ptr(),
                     ..Default::default()
                 },
-                vk::SubpassContents::INLINE,
+                vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
             )
         }
         RecordingCommand(command, device)
@@ -551,8 +631,7 @@ impl<'a, T, O: Operation> RecordingCommand<'a, T, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn draw_skybox(self, skybox: &Skybox, camera: &dyn Camera) -> Self {
-        let mut camera_matrices = camera.get_matrices();
+    pub fn draw_skybox(self, skybox: &Skybox, mut camera_matrices: CameraMatrices) -> Self {
         camera_matrices.view[3] = Vector4::w();
         self.bind_pipeline(&skybox.pipeline)
             .bind_descriptor_set(&skybox.pipeline, skybox.descriptor[0])
@@ -633,24 +712,26 @@ pub struct SubmitSemaphoreState<'a> {
     pub masks: &'a [vk::PipelineStageFlags],
 }
 
-pub(in crate::renderer::vulkan) struct FinishedCommand<'a, T, O: Operation>(
-    Command<T, O>,
+pub(in crate::renderer::vulkan) struct FinishedCommand<'a, T, L: Level, O: Operation>(
+    Command<T, L, O>,
     &'a VulkanDevice,
 );
 
-impl<'a, T, O: Operation> From<&'a FinishedCommand<'a, T, O>> for &'a Command<T, O> {
-    fn from(value: &'a FinishedCommand<T, O>) -> Self {
+impl<'a, T, L: Level, O: Operation> From<&'a FinishedCommand<'a, T, L, O>>
+    for &'a Command<T, L, O>
+{
+    fn from(value: &'a FinishedCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
-impl<'a, T, O: Operation> FinishedCommand<'a, T, O> {
+impl<'a, T, L: Level, O: Operation> FinishedCommand<'a, T, L, O> {
     // Make wait and submit optional
     pub fn submit(
         self,
         wait: SubmitSemaphoreState,
         signal: &[vk::Semaphore],
-    ) -> Result<SubmitedCommand<'a, T, O>, Box<dyn Error>> {
+    ) -> Result<SubmitedCommand<'a, T, L, O>, Box<dyn Error>> {
         let FinishedCommand(command, device) = self;
         unsafe {
             device.queue_submit(
@@ -671,18 +752,20 @@ impl<'a, T, O: Operation> FinishedCommand<'a, T, O> {
         Ok(SubmitedCommand(command, device))
     }
 }
-pub(in crate::renderer::vulkan) struct SubmitedCommand<'a, T, O: Operation>(
-    Command<T, O>,
+pub(in crate::renderer::vulkan) struct SubmitedCommand<'a, T, L: Level, O: Operation>(
+    Command<T, L, O>,
     &'a VulkanDevice,
 );
 
-impl<'a, T, O: Operation> From<&'a SubmitedCommand<'a, T, O>> for &'a Command<T, O> {
-    fn from(value: &'a SubmitedCommand<T, O>) -> Self {
+impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
+    for &'a Command<T, L, O>
+{
+    fn from(value: &'a SubmitedCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
-impl<'a, O: Operation> SubmitedCommand<'a, Transient, O> {
+impl<'a, L: Level, O: Operation> SubmitedCommand<'a, Transient, L, O> {
     pub fn wait(self) -> Result<Self, Box<dyn Error>> {
         let SubmitedCommand(command, device) = self;
         unsafe {
@@ -692,8 +775,8 @@ impl<'a, O: Operation> SubmitedCommand<'a, Transient, O> {
     }
 }
 
-impl<'a, O: Operation> SubmitedCommand<'a, Persistent, O> {
-    pub fn _reset(self) -> NewCommand<Persistent, O> {
+impl<'a, L: Level, O: Operation> SubmitedCommand<'a, Persistent, L, O> {
+    pub fn _reset(self) -> NewCommand<Persistent, L, O> {
         let SubmitedCommand(command, _) = self;
         NewCommand(command)
     }
@@ -746,14 +829,14 @@ impl TransientCommandPools {
 }
 
 impl VulkanDevice {
-    pub(super) fn allocate_transient_command<O: Operation>(
+    pub(super) fn allocate_transient_command<L: Level, O: Operation>(
         &self,
-    ) -> Result<NewCommand<Transient, O>, Box<dyn Error>> {
+    ) -> Result<NewCommand<Transient, L, O>, Box<dyn Error>> {
         let &buffer = unsafe {
             self.device
                 .allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
-                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .level(L::LEVEL)
                         .command_pool(O::get_transient_command_pool(self))
                         .command_buffer_count(1),
                 )?
@@ -770,9 +853,9 @@ impl VulkanDevice {
             _phantom: PhantomData,
         }))
     }
-    pub(super) fn free_command<'a, T: 'static, O: 'static + Operation>(
+    pub(super) fn free_command<'a, T: 'static, L: 'static + Level, O: 'static + Operation>(
         &self,
-        command: impl Into<&'a Command<T, O>>,
+        command: impl Into<&'a Command<T, L, O>>,
     ) {
         let &Command { buffer, fence, .. } = command.into();
         unsafe {

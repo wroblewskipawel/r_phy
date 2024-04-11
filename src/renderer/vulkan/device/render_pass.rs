@@ -129,7 +129,7 @@ impl SubpassDescription {
         let resolve = Self::get_references(references.resolve());
         let num_color = color.len();
         let num_depth_stencil = depth_stencil.len();
-        let _num_resolve = resolve.len();
+        let num_resolve = resolve.len();
         debug_assert_eq!(num_depth_stencil, 1);
 
         let references = resolve
@@ -142,8 +142,16 @@ impl SubpassDescription {
         let description = vk::SubpassDescription {
             pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
             color_attachment_count: num_color as u32,
-            p_color_attachments: &references[0],
-            p_resolve_attachments: &references[num_color + num_depth_stencil],
+            p_color_attachments: if num_color != 0 {
+                &references[0]
+            } else {
+                std::ptr::null()
+            },
+            p_resolve_attachments: if num_resolve != 0 {
+                &references[num_color + num_depth_stencil]
+            } else {
+                std::ptr::null()
+            },
             p_depth_stencil_attachment: if num_depth_stencil != 0 {
                 &references[num_color]
             } else {
@@ -461,10 +469,19 @@ impl<A: Attachments, T: TransitionList<A>, S: SubpassList<A>> RenderPassConfig
     }
 }
 
+#[derive(Debug)]
 pub struct RenderPass<C: RenderPassConfig> {
     pub handle: vk::RenderPass,
     _phantom: PhantomData<C>,
 }
+
+impl<C: RenderPassConfig> Clone for RenderPass<C> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C: RenderPassConfig> Copy for RenderPass<C> {}
 
 impl VulkanDevice {
     fn create_render_pass_raw<C: RenderPassConfig>(

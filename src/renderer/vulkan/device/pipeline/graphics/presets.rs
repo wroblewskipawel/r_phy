@@ -1,9 +1,9 @@
 use crate::renderer::vulkan::device::{
     framebuffer::presets::AttachmentsColorDepthCombined,
     pipeline::{
-        PipelineLayoutSkybox, PipelineLayoutTextured, PipelineStatesDefault, PipelineStatesSkybox,
+        PipelineLayoutNoMaterial, PipelineLayoutSkybox, PipelineLayoutTextured, PipelineStatesDefault, PipelineStatesDepthWriteDisabled, PipelineStatesSkybox
     },
-    render_pass::{ColorDepthCombinedRenderPass, ColorDepthCombinedSubpass},
+    render_pass::{ColorDepthCombinedRenderPass, ColorDepthCombinedSubpass, ColorPassSubpass, DepthPrepassSubpass, ForwardDepthPrepassRenderPass},
 };
 
 use super::GraphicsPipelineBuilder;
@@ -20,6 +20,22 @@ pub type GraphicsPipelineColorDepthCombinedSkybox = GraphicsPipelineBuilder<
     AttachmentsColorDepthCombined,
     PipelineLayoutSkybox,
     PipelineStatesSkybox,
-    ColorDepthCombinedRenderPass,
-    ColorDepthCombinedSubpass,
+    ForwardDepthPrepassRenderPass,
+    ColorPassSubpass,
+>;
+
+pub type GraphicsPipelineForwardDepthPrepass = GraphicsPipelineBuilder<
+    AttachmentsColorDepthCombined,
+    PipelineLayoutNoMaterial,
+    PipelineStatesDefault,
+    ForwardDepthPrepassRenderPass,
+    DepthPrepassSubpass,
+>;
+
+pub type GraphicsPipelineColorPass = GraphicsPipelineBuilder<
+    AttachmentsColorDepthCombined,
+    PipelineLayoutTextured,
+    PipelineStatesDepthWriteDisabled,
+    ForwardDepthPrepassRenderPass,
+    ColorPassSubpass,
 >;

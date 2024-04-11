@@ -5,19 +5,27 @@ mod surface;
 use crate::math::types::Matrix4;
 
 use self::device::{
-    command::{operation::Graphics, BeginCommand, Persistent},
+    command::{
+        level::{Primary, Secondary},
+        operation::Graphics,
+        BeginCommand, Persistent,
+    },
     framebuffer::{ClearColor, ClearDeptStencil, ClearValueBuilder},
     material::MaterialPack,
     mesh::MeshPack,
     pipeline::{
-        GraphicsPipeline, GraphicsPipelineColorDepthCombinedTextured, ModelMatrix, ShaderDirectory,
+        GraphicsPipeline, GraphicsPipelineColorDepthCombinedTextured, GraphicsPipelineColorPass,
+        GraphicsPipelineForwardDepthPrepass, ModelMatrix, ShaderDirectory,
     },
-    render_pass::ColorDepthCombinedRenderPass,
+    render_pass::{
+        ColorDepthCombinedRenderPass, ColorPassSubpass, DepthPrepassSubpass,
+        ForwardDepthPrepassRenderPass,
+    },
     skybox::Skybox,
 };
 
 use super::{
-    camera::Camera,
+    camera::{Camera, CameraMatrices},
     model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
     Renderer,
 };
@@ -37,12 +45,22 @@ use surface::VulkanSurface;
 use winit::window::Window;
 
 struct FrameState {
-    command: BeginCommand<Persistent, Graphics>,
+    camera_matrices: CameraMatrices,
+    primary_command: BeginCommand<Persistent, Primary, Graphics>,
+    depth_prepass_command: BeginCommand<Persistent, Secondary, Graphics>,
+    color_pass_command: BeginCommand<Persistent, Secondary, Graphics>,
     swapchain_frame: SwapchainFrame,
     mesh_pack_index: Option<u32>,
 }
 
+struct DepthPrepassPipelie {
+    render_pass: RenderPass<ForwardDepthPrepassRenderPass>,
+    depth_prepass: GraphicsPipeline<GraphicsPipelineForwardDepthPrepass>,
+    color_pass: GraphicsPipeline<GraphicsPipelineColorPass>,
+}
+
 pub(super) struct VulkanRenderer {
+    depth_prepass_pipeline: DepthPrepassPipelie,
     current_frame_state: Option<FrameState>,
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
@@ -129,7 +147,7 @@ impl VulkanRenderer {
         let device = VulkanDevice::create(&instance, &surface)?;
         let render_pass = device.get_render_pass::<ColorDepthCombinedRenderPass>()?;
         let swapchain =
-            device.create_swapchain::<ColorDepthCombinedRenderPass>(&instance, &surface)?;
+            device.create_swapchain::<ForwardDepthPrepassRenderPass>(&instance, &surface)?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
         // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
         // while error message indicating true cause of the issue is never presented to the user
@@ -142,7 +160,20 @@ impl VulkanRenderer {
                 swapchain.image_extent,
             )?;
         let skybox = device.create_skybox(&swapchain, Path::new("assets/skybox/skybox"))?;
+
+        let depth_prepass_pipeline = DepthPrepassPipelie {
+            render_pass: device.get_render_pass()?,
+            depth_prepass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/depth_prepass")),
+                swapchain.image_extent,
+            )?,
+            color_pass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/unlit_textured")),
+                swapchain.image_extent,
+            )?,
+        };
         Ok(Self {
+            depth_prepass_pipeline,
             current_frame_state: None,
             materials: vec![],
             meshes: vec![],
@@ -171,6 +202,10 @@ impl Drop for VulkanRenderer {
                 .for_each(|pack| self.device.destroy_mesh_pack(pack));
             self.device.destroy_skybox(&mut self.skybox);
             self.device.destroy_graphics_pipeline(&mut self.pipeline);
+            self.device
+                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.depth_prepass);
+            self.device
+                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.color_pass);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destroy_render_passes();
             self.device.destroy_pipeline_layouts();
@@ -226,9 +261,64 @@ impl From<VulkanMaterialHandle> for MaterialHandle {
 impl Renderer for VulkanRenderer {
     fn begin_frame(&mut self, camera: &dyn Camera) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let (command, swapchain_frame) = self
+        let (primary_command, depth_prepass_command, color_pass_command, swapchain_frame) = self
             .device
             .begin_frame(&mut self.swapchain, &camera_matrices)?;
+        let depth_prepass_command = self
+            .device
+            .begin_secondary_command::<_, _, _, DepthPrepassSubpass>(
+                depth_prepass_command,
+                self.depth_prepass_pipeline.render_pass,
+                swapchain_frame.framebuffer,
+            )?;
+        let depth_prepass_command = self
+            .device
+            .record_command(depth_prepass_command, |command| {
+                command
+                    .bind_pipeline(&self.depth_prepass_pipeline.depth_prepass)
+                    .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
+            });
+        let color_pass_command = self
+            .device
+            .begin_secondary_command::<_, _, _, ColorPassSubpass>(
+                color_pass_command,
+                self.depth_prepass_pipeline.render_pass,
+                swapchain_frame.framebuffer,
+            )?;
+        let color_pass_command = self.device.record_command(color_pass_command, |command| {
+            command
+                .bind_pipeline(&self.depth_prepass_pipeline.color_pass)
+                .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
+        });
+        self.current_frame_state.replace(FrameState {
+            camera_matrices,
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
+            swapchain_frame,
+            mesh_pack_index: None,
+        });
+        Ok(())
+    }
+
+    fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        let FrameState {
+            camera_matrices,
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
+            swapchain_frame,
+            ..
+        } = self
+            .current_frame_state
+            .take()
+            .ok_or("current_frame is None!")?;
+        let depth_prepass_command = self.device.finish_command(depth_prepass_command)?;
+        let color_pass_command = self.device.record_command(color_pass_command, |command| {
+            command.draw_skybox(&self.skybox, camera_matrices)
+        });
+        let color_pass_command = self.device.finish_command(color_pass_command)?;
+
         let clear_values = ClearValueBuilder::new()
             .push_color(ClearColor {
                 color: vk::ClearColorValue {
@@ -241,35 +331,21 @@ impl Renderer for VulkanRenderer {
                     stencil: 0,
                 },
             });
-        let command = self.device.record_command(command, |command| {
+        let primary_command = self.device.record_command(primary_command, |command| {
             command
-                .begin_render_pass(&swapchain_frame, &self.render_pass, &clear_values)
-                .draw_skybox(&self.skybox, camera)
-                .bind_pipeline(&self.pipeline)
-                .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
+                .begin_render_pass(
+                    &swapchain_frame,
+                    &self.depth_prepass_pipeline.render_pass,
+                    &clear_values,
+                )
+                .write_secondary(&depth_prepass_command)
+                .next_render_pass()
+                .write_secondary(&color_pass_command)
+                .end_render_pass()
         });
-        self.current_frame_state.replace(FrameState {
-            command,
-            swapchain_frame,
-            mesh_pack_index: None,
-        });
-        Ok(())
-    }
 
-    fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let FrameState {
-            command,
-            swapchain_frame,
-            ..
-        } = self
-            .current_frame_state
-            .take()
-            .ok_or("current_frame is None!")?;
-        let command = self
-            .device
-            .record_command(command, |command| command.end_render_pass());
         self.device
-            .end_frame(&mut self.swapchain, command, swapchain_frame)?;
+            .end_frame(&mut self.swapchain, primary_command, swapchain_frame)?;
         Ok(())
     }
 
@@ -319,7 +395,10 @@ impl Renderer for VulkanRenderer {
             material_index,
         } = material.into();
         let FrameState {
-            command,
+            camera_matrices,
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
             swapchain_frame,
             mesh_pack_index: current_mesh_pack_index,
         } = self
@@ -328,7 +407,18 @@ impl Renderer for VulkanRenderer {
             .ok_or("current_frame is None!")?;
         let meshes = &self.meshes[mesh_pack_index as usize];
         let mesh_ranges = meshes.meshes[mesh_index as usize];
-        let command = self.device.record_command(command, |command| {
+        let depth_prepass_command = self
+            .device
+            .record_command(depth_prepass_command, |command| {
+                if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
+                    command.bind_mesh_pack(&self.meshes[mesh_pack_index as usize])
+                } else {
+                    command
+                }
+                .push_constants(&self.pipeline, &model_matrix)
+                .draw_mesh(mesh_ranges)
+            });
+        let color_pass_command = self.device.record_command(color_pass_command, |command| {
             if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
                 command.bind_mesh_pack(&self.meshes[mesh_pack_index as usize])
             } else {
@@ -342,7 +432,10 @@ impl Renderer for VulkanRenderer {
             .draw_mesh(mesh_ranges)
         });
         self.current_frame_state.replace(FrameState {
-            command,
+            camera_matrices,
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
             swapchain_frame,
             mesh_pack_index: Some(mesh_pack_index),
         });

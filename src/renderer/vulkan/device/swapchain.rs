@@ -9,8 +9,9 @@ use crate::renderer::{
 use super::{
     buffer::UniformBuffer,
     command::{
-        operation::Graphics, BeginCommand, NewCommand, Persistent, PersistentCommandPool,
-        SubmitSemaphoreState,
+        level::{Primary, Secondary},
+        operation::Graphics,
+        BeginCommand, NewCommand, Persistent, PersistentCommandPool, SubmitSemaphoreState,
     },
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
     framebuffer::{
@@ -20,7 +21,7 @@ use super::{
         AttachmentsBuilder, Framebuffer,
     },
     image::VulkanImage2D,
-    render_pass::{ColorDepthCombinedRenderPass, RenderPassConfig},
+    render_pass::{ForwardDepthPrepassRenderPass, RenderPassConfig},
     VulkanDevice,
 };
 
@@ -53,7 +54,8 @@ impl SwapchainSync {
 
 pub struct VulkanSwapchain {
     pub image_extent: vk::Extent2D,
-    command_pool: PersistentCommandPool<Graphics>,
+    command_pool_primary: PersistentCommandPool<Primary, Graphics>,
+    command_pool_secondary: PersistentCommandPool<Secondary, Graphics>,
     camera_uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
     camera_descriptors: DescriptorPool<CameraDescriptorSet>,
     sync: SwapchainSync,
@@ -134,7 +136,7 @@ impl VulkanDevice {
         let framebuffers = image_views
             .iter()
             .map(|&image_view| {
-                self.build_framebuffer::<ColorDepthCombinedRenderPass>(
+                self.build_framebuffer::<ForwardDepthPrepassRenderPass>(
                     AttachmentsBuilder::new()
                         .push_color::<ColorMultisampled>(color_buffer.image_view)
                         .push_depth_stencil::<DepthStencilMultisampled>(depth_buffer.image_view)
@@ -144,7 +146,8 @@ impl VulkanDevice {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
-        let command_pool = self.create_persistent_command_pool(images.len())?;
+        let command_pool_primary = self.create_persistent_command_pool(images.len())?;
+        let command_pool_secondary = self.create_persistent_command_pool(2 * images.len())?;
         let camera_uniform_buffer = self.create_uniform_buffer(images.len())?;
         let mut camera_descriptors =
             self.create_descriptor_pool(CameraDescriptorSet::builder(), images.len())?;
@@ -154,7 +157,8 @@ impl VulkanDevice {
         self.write_descriptor_sets(&mut camera_descriptors, descriptor_write);
         Ok(VulkanSwapchain {
             image_extent,
-            command_pool,
+            command_pool_primary,
+            command_pool_secondary,
             camera_descriptors,
             camera_uniform_buffer,
             sync,
@@ -182,7 +186,8 @@ impl VulkanDevice {
             self.destroy_image(&mut swapchain.depth_buffer);
             self.destroy_image(&mut swapchain.color_buffer);
             self.destroy_swapchain_sync(&mut swapchain.sync);
-            self.destroy_persistent_command_pool(&mut swapchain.command_pool);
+            self.destroy_persistent_command_pool(&mut swapchain.command_pool_primary);
+            self.destroy_persistent_command_pool(&mut swapchain.command_pool_secondary);
             self.destroy_uniform_buffer(&mut swapchain.camera_uniform_buffer);
             self.destroy_descriptor_pool(&mut swapchain.camera_descriptors);
         }
@@ -229,18 +234,39 @@ impl VulkanDevice {
     fn get_next_frame_data(
         &self,
         swapchain: &mut VulkanSwapchain,
-    ) -> (NewCommand<Persistent, Graphics>, FrameSync) {
-        let (frame_index, command) = swapchain.command_pool.next();
-        (command, swapchain.sync.get_frame(frame_index))
+    ) -> (
+        NewCommand<Persistent, Primary, Graphics>,
+        NewCommand<Persistent, Secondary, Graphics>,
+        NewCommand<Persistent, Secondary, Graphics>,
+        FrameSync,
+    ) {
+        let (frame_index, primary_command) = swapchain.command_pool_primary.next();
+        let (_, depth_prepass_command) = swapchain.command_pool_secondary.next();
+        let (_, color_pass_command) = swapchain.command_pool_secondary.next();
+        (
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
+            swapchain.sync.get_frame(frame_index),
+        )
     }
 
     pub fn begin_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
         camera: &CameraMatrices,
-    ) -> Result<(BeginCommand<Persistent, Graphics>, SwapchainFrame), Box<dyn Error>> {
-        let (command, sync) = self.get_next_frame_data(swapchain);
-        let command = self.begin_persistent_command(command)?;
+    ) -> Result<
+        (
+            BeginCommand<Persistent, Primary, Graphics>,
+            NewCommand<Persistent, Secondary, Graphics>,
+            NewCommand<Persistent, Secondary, Graphics>,
+            SwapchainFrame,
+        ),
+        Box<dyn Error>,
+    > {
+        let (primary_command, depth_prepass_command, color_pass_command, sync) =
+            self.get_next_frame_data(swapchain);
+        let primary_command = self.begin_persistent_command(primary_command)?;
         let image_index = unsafe {
             swapchain
                 .loader
@@ -260,7 +286,9 @@ impl VulkanDevice {
         };
         swapchain.camera_uniform_buffer[image_index] = *camera;
         Ok((
-            command,
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
             SwapchainFrame {
                 framebuffer,
                 camera_descriptor,
@@ -274,7 +302,7 @@ impl VulkanDevice {
     pub fn end_frame(
         &self,
         swapchain: &mut VulkanSwapchain,
-        command: BeginCommand<Persistent, Graphics>,
+        command: BeginCommand<Persistent, Primary, Graphics>,
         frame: SwapchainFrame,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {

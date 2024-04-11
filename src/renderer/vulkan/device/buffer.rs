@@ -13,8 +13,7 @@ use std::{
 
 use super::{
     command::{
-        operation::{self, Operation},
-        SubmitSemaphoreState,
+        level, operation::{self, Operation}, SubmitSemaphoreState
     },
     image::VulkanImage2D,
     VulkanDevice,
@@ -322,8 +321,8 @@ impl<'a> StagingBuffer<'a> {
     ) -> Result<(), Box<dyn Error>> {
         let command = self
             .device
-            .allocate_transient_command::<operation::Transfer>()?;
-        let command = self.device.begin_command(command)?;
+            .allocate_transient_command::<level::Primary, operation::Transfer>()?;
+        let command = self.device.begin_primary_command(command)?;
         let command = self.device.record_command(command, |command| {
             command.copy_buffer(
                 &self.buffer,
@@ -363,9 +362,9 @@ impl<'a> StagingBuffer<'a> {
         );
         let dst_mip_levels = dst.mip_levels;
         let dst_old_layout = dst.layout;
-        let command = self.device.begin_command(
+        let command = self.device.begin_primary_command(
             self.device
-                .allocate_transient_command::<operation::Graphics>()?,
+                .allocate_transient_command::<level::Primary, operation::Graphics>()?,
         )?;
         let command = self.device.record_command(command, |command| {
             command

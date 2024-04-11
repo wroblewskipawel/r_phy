@@ -58,3 +58,8 @@ pub type PipelineLayoutSkybox = PipelineLayoutBuilder<
     DescriptorLayoutNode<TextureDescriptorSet, DescriptorLayoutTerminator>,
     PushConstantNode<CameraMatrices, PushConstantTerminator>,
 >;
+
+pub type PipelineLayoutNoMaterial = PipelineLayoutBuilder<
+    DescriptorLayoutNode<CameraDescriptorSet, DescriptorLayoutTerminator>,
+    PushConstantNode<ModelMatrix, PushConstantTerminator>,
+>;

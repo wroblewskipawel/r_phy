@@ -15,5 +15,6 @@ c;
 
 void main() {
   vs_out.pos_lh = vec3(pos.x, pos.z, pos.y);
-  gl_Position = c.proj * c.view * vec4(pos, 1.0);
+  vec4 pos = c.proj * c.view * vec4(pos, 1.0);
+  gl_Position = pos.xyww;
 }
