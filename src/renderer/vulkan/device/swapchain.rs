@@ -16,12 +16,13 @@ use super::{
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
     framebuffer::{
         presets::{
-            AttachmentsColorDepthCombined, ColorMultisampled, DepthStencilMultisampled, Resolve,
+            AttachmentsDepthPrepass, AttachmentsGBuffer, ColorMultisampled,
+            DepthStencilMultisampled, Resolve,
         },
         AttachmentsBuilder, Framebuffer,
     },
     image::VulkanImage2D,
-    render_pass::{ForwardDepthPrepassRenderPass, RenderPassConfig},
+    render_pass::{DeferedRenderPass, ForwardDepthPrepassRenderPass, RenderPassConfig},
     VulkanDevice,
 };
 
@@ -31,11 +32,19 @@ pub struct FrameSync {
 }
 
 pub struct SwapchainFrame {
-    pub framebuffer: Framebuffer<AttachmentsColorDepthCombined>,
+    pub framebuffer: Framebuffer<AttachmentsGBuffer>,
     pub render_area: vk::Rect2D,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     image_index: usize,
     sync: FrameSync,
+}
+
+pub struct GBufer {
+    pub combined: VulkanImage2D,
+    pub albedo: VulkanImage2D,
+    pub normal: VulkanImage2D,
+    pub position: VulkanImage2D,
+    pub depth: VulkanImage2D,
 }
 
 struct SwapchainSync {
@@ -59,11 +68,14 @@ pub struct VulkanSwapchain {
     camera_uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
     camera_descriptors: DescriptorPool<CameraDescriptorSet>,
     sync: SwapchainSync,
-    depth_buffer: VulkanImage2D,
-    color_buffer: VulkanImage2D,
+    pub depth_buffer: VulkanImage2D,
+    pub color_buffer: VulkanImage2D,
+    pub g_buffer: GBufer,
+    target_buffer: VulkanImage2D,
     _images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
-    framebuffers: Vec<Framebuffer<AttachmentsColorDepthCombined>>,
+    framebuffers: Vec<Framebuffer<AttachmentsDepthPrepass>>,
+    g_buffer_framebuffers: Vec<Framebuffer<AttachmentsGBuffer>>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
 }
@@ -112,6 +124,7 @@ impl VulkanDevice {
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let depth_buffer = self.create_depth_stencil_attachment_image()?;
         let color_buffer = self.create_color_attachment_image()?;
+        let target_buffer = self.create_color_attachment_image()?;
         let images = unsafe { loader.get_swapchain_images(handle)? };
         let image_views = images
             .iter()
@@ -140,6 +153,7 @@ impl VulkanDevice {
                     AttachmentsBuilder::new()
                         .push::<Resolve>(image_view)
                         .push::<DepthStencilMultisampled>(depth_buffer.image_view)
+                        .push::<ColorMultisampled>(target_buffer.image_view)
                         .push::<ColorMultisampled>(color_buffer.image_view),
                     image_extent,
                 )
@@ -147,7 +161,7 @@ impl VulkanDevice {
             .collect::<Result<Vec<_>, _>>()?;
         let sync = self.create_swapchain_sync(images.len())?;
         let command_pool_primary = self.create_persistent_command_pool(images.len())?;
-        let command_pool_secondary = self.create_persistent_command_pool(2 * images.len())?;
+        let command_pool_secondary = self.create_persistent_command_pool(3 * images.len())?;
         let camera_uniform_buffer = self.create_uniform_buffer(images.len())?;
         let mut camera_descriptors =
             self.create_descriptor_pool(CameraDescriptorSet::builder(), images.len())?;
@@ -155,6 +169,28 @@ impl VulkanDevice {
             .get_writer()
             .write_buffer(&camera_uniform_buffer);
         self.write_descriptor_sets(&mut camera_descriptors, descriptor_write);
+        let g_buffer = GBufer {
+            albedo: self.create_color_attachment_image()?,
+            normal: self.create_color_attachment_image()?,
+            position: self.create_color_attachment_image()?,
+            combined: self.create_color_attachment_image()?,
+            depth: self.create_depth_stencil_attachment_image()?,
+        };
+        let g_buffer_framebuffers = image_views
+            .iter()
+            .map(|&image_view| {
+                self.build_framebuffer::<DeferedRenderPass>(
+                    AttachmentsBuilder::new()
+                        .push::<Resolve>(image_view)
+                        .push::<DepthStencilMultisampled>(g_buffer.depth.image_view)
+                        .push::<ColorMultisampled>(g_buffer.position.image_view)
+                        .push::<ColorMultisampled>(g_buffer.normal.image_view)
+                        .push::<ColorMultisampled>(g_buffer.albedo.image_view)
+                        .push::<ColorMultisampled>(g_buffer.combined.image_view),
+                    image_extent,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(VulkanSwapchain {
             image_extent,
             command_pool_primary,
@@ -164,6 +200,9 @@ impl VulkanDevice {
             sync,
             depth_buffer,
             color_buffer,
+            g_buffer,
+            g_buffer_framebuffers,
+            target_buffer,
             _images: images,
             image_views,
             framebuffers,
@@ -185,6 +224,18 @@ impl VulkanDevice {
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
             self.destroy_image(&mut swapchain.depth_buffer);
             self.destroy_image(&mut swapchain.color_buffer);
+            self.destroy_image(&mut swapchain.target_buffer);
+            // Add the following lines to the destroy_swapchain method
+            self.destroy_image(&mut swapchain.g_buffer.albedo);
+            self.destroy_image(&mut swapchain.g_buffer.normal);
+            self.destroy_image(&mut swapchain.g_buffer.position);
+            self.destroy_image(&mut swapchain.g_buffer.depth);
+            self.destroy_image(&mut swapchain.g_buffer.combined);
+            swapchain
+                .g_buffer_framebuffers
+                .iter_mut()
+                .for_each(|framebuffer| self.destroy_framebuffer(framebuffer));
+            // End of the added lines
             self.destroy_swapchain_sync(&mut swapchain.sync);
             self.destroy_persistent_command_pool(&mut swapchain.command_pool_primary);
             self.destroy_persistent_command_pool(&mut swapchain.command_pool_secondary);
@@ -238,14 +289,17 @@ impl VulkanDevice {
         NewCommand<Persistent, Primary, Graphics>,
         NewCommand<Persistent, Secondary, Graphics>,
         NewCommand<Persistent, Secondary, Graphics>,
+        NewCommand<Persistent, Secondary, Graphics>,
         FrameSync,
     ) {
         let (frame_index, primary_command) = swapchain.command_pool_primary.next();
+        let (_, depth_display_command) = swapchain.command_pool_secondary.next();
         let (_, depth_prepass_command) = swapchain.command_pool_secondary.next();
         let (_, color_pass_command) = swapchain.command_pool_secondary.next();
         (
             primary_command,
             depth_prepass_command,
+            depth_display_command,
             color_pass_command,
             swapchain.sync.get_frame(frame_index),
         )
@@ -260,12 +314,18 @@ impl VulkanDevice {
             BeginCommand<Persistent, Primary, Graphics>,
             NewCommand<Persistent, Secondary, Graphics>,
             NewCommand<Persistent, Secondary, Graphics>,
+            NewCommand<Persistent, Secondary, Graphics>,
             SwapchainFrame,
         ),
         Box<dyn Error>,
     > {
-        let (primary_command, depth_prepass_command, color_pass_command, sync) =
-            self.get_next_frame_data(swapchain);
+        let (
+            primary_command,
+            depth_prepass_command,
+            color_pass_command,
+            depth_display_command,
+            sync,
+        ) = self.get_next_frame_data(swapchain);
         let primary_command = self.begin_persistent_command(primary_command)?;
         let image_index = unsafe {
             swapchain
@@ -278,7 +338,7 @@ impl VulkanDevice {
                 )
                 .map(|(image_index, _)| image_index as usize)?
         };
-        let framebuffer = swapchain.framebuffers[image_index];
+        let framebuffer = swapchain.g_buffer_framebuffers[image_index];
         let camera_descriptor = swapchain.camera_descriptors[image_index];
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
@@ -289,6 +349,7 @@ impl VulkanDevice {
             primary_command,
             depth_prepass_command,
             color_pass_command,
+            depth_display_command,
             SwapchainFrame {
                 framebuffer,
                 camera_descriptor,

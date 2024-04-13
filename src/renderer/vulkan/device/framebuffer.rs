@@ -142,6 +142,25 @@ pub enum AttachmentTarget {
     Color,
     DepthStencil,
     Resolve,
+    Input,
+    Preserve,
+}
+
+// Temporary structure to handle DescriptorLayout generation
+// In future, other types of attachements will be also handled as types
+// insetead of AttachmentTarget variants
+pub struct InputAttachment {
+    pub image_view: vk::ImageView,
+}
+
+impl From<&InputAttachment> for vk::DescriptorImageInfo {
+    fn from(attachment: &InputAttachment) -> Self {
+        vk::DescriptorImageInfo {
+            image_view: attachment.image_view,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            sampler: vk::Sampler::null(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -35,7 +35,7 @@ impl MeshBuilder {
         }
     }
 
-    fn build(self) -> Mesh {
+    pub fn build(self) -> Mesh {
         let Self { vertices, indices } = self;
         Mesh {
             vertices: vertices.into_boxed_slice(),
@@ -53,14 +53,14 @@ impl MeshBuilder {
         self
     }
 
-    fn offset(mut self, offset: Vector3) -> Self {
+    pub fn offset(mut self, offset: Vector3) -> Self {
         for vert in &mut self.vertices {
             vert.pos = vert.pos + offset;
         }
         self
     }
 
-    fn plane_subdivided(
+    pub fn plane_subdivided(
         num_subdiv: usize,
         u: Vector3,
         v: Vector3,

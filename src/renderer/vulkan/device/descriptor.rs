@@ -14,7 +14,6 @@ use std::sync::{Once, RwLock};
 
 use super::buffer::UniformBuffer;
 use super::command::operation::Operation;
-use super::image::Texture2D;
 use super::VulkanDevice;
 
 // Check out once_cell and lazy_static crates to improve the implementation
@@ -43,7 +42,7 @@ pub trait DescriptorBinding: 'static {
 pub trait DescriptorLayout: 'static {
     fn get_descriptor_set_bindings() -> Vec<vk::DescriptorSetLayoutBinding>;
 
-    fn get_descriptor_write<T: DescriptorBinding>() -> Option<vk::WriteDescriptorSet>;
+    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet>;
 
     fn get_descriptor_pool_sizes(num_sets: u32) -> Vec<vk::DescriptorPoolSize>;
 }
@@ -165,22 +164,22 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         bindings
     }
 
-    fn try_get_descriptor_write<S: DescriptorBinding, T: DescriptorBindingList>(
+    fn try_get_descriptor_writes<S: DescriptorBinding, T: DescriptorBindingList>(
         binding: u32,
-    ) -> Option<vk::WriteDescriptorSet> {
+        mut vec: Vec<vk::WriteDescriptorSet>,
+    ) -> Vec<vk::WriteDescriptorSet> {
         if !T::exhausted() {
             if TypeId::of::<S>() == TypeId::of::<T::Item>() {
-                Some(T::Item::get_descriptor_write(binding))
-            } else {
-                Self::try_get_descriptor_write::<S, T::Next>(binding + 1)
+                vec.push(T::Item::get_descriptor_write(binding));
             }
+            Self::try_get_descriptor_writes::<S, T::Next>(binding + 1, vec)
         } else {
-            None
+            vec
         }
     }
 
-    pub fn get_descriptor_write<T: DescriptorBinding>() -> Option<vk::WriteDescriptorSet> {
-        Self::try_get_descriptor_write::<T, B>(0)
+    pub fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet> {
+        Self::try_get_descriptor_writes::<T, B>(0, Vec::new())
     }
 
     fn next_descriptor_pool_size<T: DescriptorBindingList>(
@@ -213,8 +212,8 @@ impl<B: DescriptorBindingList> DescriptorLayout for DescriptorLayoutBuilder<B> {
         Self::get_descriptor_bindings()
     }
 
-    fn get_descriptor_write<T: DescriptorBinding>() -> Option<vk::WriteDescriptorSet> {
-        Self::get_descriptor_write::<T>()
+    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet> {
+        Self::get_descriptor_writes::<T>()
     }
 
     fn get_descriptor_pool_sizes(num_sets: u32) -> Vec<vk::DescriptorPoolSize> {
@@ -293,14 +292,19 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         mut self,
         buffer: &UniformBuffer<U, O>,
     ) -> Self {
-        let write = T::get_descriptor_write::<U>().unwrap_or_else(|| {
+        let writes = T::get_descriptor_writes::<U>();
+        if writes.len() == 0 {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
                 type_name::<U>(),
                 type_name::<T>()
             )
-        });
-        let num_uniforms = self.num_sets * write.descriptor_count as usize;
+        }
+        let descriptor_count = writes
+            .iter()
+            .map(|write| write.descriptor_count)
+            .fold(0, |acc, f| acc + f);
+        let num_uniforms = self.num_sets * descriptor_count as usize;
         debug_assert_eq!(
             num_uniforms, buffer.size,
             "UniformBuffer object not large enough for DescriptorPool write!"
@@ -312,50 +316,70 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
                 offset: (size_of::<U>() * index) as vk::DeviceSize,
                 range: size_of::<U>() as vk::DeviceSize,
             }));
-        let set_write_stride = write.descriptor_count as usize;
-        self.writes
-            .extend((0..self.num_sets).map(|set_index| SetWrite::Buffer {
-                set_index,
-                buffer_write_index: buffer_write_base_index + set_index * set_write_stride,
-                write,
-            }));
+        self.writes.extend(
+            (0..self.num_sets)
+                .map(|set_index| {
+                    writes
+                        .iter()
+                        .enumerate()
+                        .map(|(write_index, &write)| SetWrite::Buffer {
+                            set_index,
+                            buffer_write_index: buffer_write_base_index
+                                + set_index * descriptor_count as usize
+                                + write_index as usize,
+                            write,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .flatten(),
+        );
         self
     }
 
-    pub(super) fn write_image<'a, I>(mut self, textures: &'a [I]) -> Self
+    pub fn write_image<'a, I>(mut self, images: &'a [I]) -> Self
     where
         I: DescriptorBinding,
-        &'a I: Into<&'a Texture2D>,
+        &'a I: Into<vk::DescriptorImageInfo>,
     {
-        let write = T::get_descriptor_write::<I>().unwrap_or_else(|| {
+        let writes = T::get_descriptor_writes::<I>();
+        if writes.len() == 0 {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
                 type_name::<I>(),
                 type_name::<T>()
             )
-        });
-        let num_uniforms = self.num_sets * write.descriptor_count as usize;
+        }
+        let descciptor_count = writes
+            .iter()
+            .map(|write| write.descriptor_count)
+            .fold(0, |acc, f| acc + f);
+        let num_uniforms = self.num_sets * descciptor_count as usize;
         debug_assert_eq!(
             num_uniforms,
-            textures.len(),
-            "Not enough image for DescriptorPool write!"
+            images.len(),
+            "Not enough images for DescriptorPool write!"
         );
         let iamge_write_base_index = self.image_writes.len();
-        self.image_writes.extend(textures.iter().map(|texture| {
-            let texture = texture.into();
-            vk::DescriptorImageInfo {
-                sampler: texture.sampler,
-                image_view: texture.image.image_view,
-                image_layout: texture.image.layout,
-            }
-        }));
-        let set_write_stride = write.descriptor_count as usize;
-        self.writes
-            .extend((0..self.num_sets).map(|set_index| SetWrite::Image {
-                set_index,
-                image_write_index: iamge_write_base_index + set_index * set_write_stride,
-                write,
-            }));
+        self.image_writes
+            .extend(images.iter().map(|image| image.into()));
+        self.writes.extend(
+            (0..self.num_sets)
+                .map(|set_index| {
+                    writes
+                        .iter()
+                        .enumerate()
+                        .map(|(write_index, &write)| SetWrite::Image {
+                            set_index,
+                            image_write_index: iamge_write_base_index
+                            // following code is errorous, works currently because write.descriptor_count is always 1
+                                + set_index * descciptor_count as usize
+                                + write_index as usize,
+                            write,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .flatten(),
+        );
         self
     }
 }

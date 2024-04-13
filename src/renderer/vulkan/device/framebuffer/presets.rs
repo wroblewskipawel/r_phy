@@ -51,3 +51,30 @@ pub type AttachmentsColorDepthCombined = AttachmentNode<
     ColorMultisampled,
     AttachmentNode<DepthStencilMultisampled, AttachmentNode<Resolve, AttachmentTerminator>>,
 >;
+
+pub type AttachmentsDepthPrepass = AttachmentNode<
+    ColorMultisampled,
+    AttachmentNode<
+        ColorMultisampled,
+        AttachmentNode<DepthStencilMultisampled, AttachmentNode<Resolve, AttachmentTerminator>>,
+    >,
+>;
+
+// deferred.rs
+
+pub type AttachmentsGBuffer = AttachmentNode<
+    ColorMultisampled, // Combined
+    AttachmentNode<
+        ColorMultisampled, // Albedo
+        AttachmentNode<
+            ColorMultisampled, // Normal
+            AttachmentNode<
+                ColorMultisampled, // Position
+                AttachmentNode<
+                    DepthStencilMultisampled,
+                    AttachmentNode<Resolve, AttachmentTerminator>,
+                >,
+            >,
+        >,
+    >,
+>;

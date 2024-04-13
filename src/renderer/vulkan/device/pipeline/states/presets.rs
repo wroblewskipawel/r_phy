@@ -7,8 +7,8 @@ use crate::{
     renderer::{
         model::Vertex,
         vulkan::device::{
-            framebuffer::presets::AttachmentsColorDepthCombined, AttachmentProperties,
-            PhysicalDeviceProperties,
+            framebuffer::presets::{AttachmentsColorDepthCombined, AttachmentsDepthPrepass, AttachmentsGBuffer},
+            AttachmentProperties, PhysicalDeviceProperties,
         },
     },
 };
@@ -276,49 +276,76 @@ impl Multisample for Multisampled {
 pub type MeshVertexInput = VertexBindingBuilder<VertexBindingNode<Vertex, VertexBindingTerminator>>;
 
 pub type PipelineStatesDefault<S> = PipelineStatesBuilder<
-    AttachmentsColorDepthCombined,
+    AttachmentsDepthPrepass,
     S,
     MeshVertexInput,
     TriangleList,
     DepthTestEnabled,
     CullBack,
     ViewportDefault,
-    AlphaBlend<AttachmentsColorDepthCombined, S>,
+    AlphaBlend<AttachmentsDepthPrepass, S>,
     Multisampled,
 >;
 
 pub type PipelineStatesSkybox<S> = PipelineStatesBuilder<
-    AttachmentsColorDepthCombined,
+    AttachmentsGBuffer,
     S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullFront,
     ViewportDefault,
-    AlphaBlend<AttachmentsColorDepthCombined, S>,
+    AlphaBlend<AttachmentsGBuffer, S>,
     Multisampled,
 >;
 
 pub type PipelineStatesDepthWriteDisabled<S> = PipelineStatesBuilder<
-    AttachmentsColorDepthCombined,
+    AttachmentsDepthPrepass,
     S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullBack,
     ViewportDefault,
-    AlphaBlend<AttachmentsColorDepthCombined, S>,
+    AlphaBlend<AttachmentsDepthPrepass, S>,
     Multisampled,
 >;
 
-pub type PipelineStatesDeptDisplay<S> = PipelineStatesBuilder<
-    AttachmentsColorDepthCombined,
+pub type PipelineStatesDepthDisplay<S> = PipelineStatesBuilder<
+    AttachmentsDepthPrepass,
+    S,
+    MeshVertexInput,
+    TriangleList,
+    DepthTestDisabled,
+    CullFront,
+    ViewportDefault,
+    AlphaBlend<AttachmentsDepthPrepass, S>,
+    Multisampled,
+>;
+
+// deferred.rs
+
+// Attachments should be generic parameter
+pub type DeferedStatesDepthDisabled<S> = PipelineStatesBuilder<
+    AttachmentsGBuffer,
     S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullBack,
-    ViewportHalfRight,
-    AlphaBlend<AttachmentsColorDepthCombined, S>,
+    ViewportDefault,
+    AlphaBlend<AttachmentsGBuffer, S>,
+    Multisampled,
+>;
+
+pub type DeferedStatesDepthEnabled<S> = PipelineStatesBuilder<
+    AttachmentsGBuffer,
+    S,
+    MeshVertexInput,
+    TriangleList,
+    DepthTestEnabled,
+    CullBack,
+    ViewportDefault,
+    AlphaBlend<AttachmentsGBuffer, S>,
     Multisampled,
 >;

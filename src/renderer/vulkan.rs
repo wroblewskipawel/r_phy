@@ -2,7 +2,7 @@ mod debug;
 mod device;
 mod surface;
 
-use crate::math::types::Matrix4;
+use crate::math::types::{Matrix4, Vector3};
 
 use self::device::{
     command::{
@@ -10,23 +10,25 @@ use self::device::{
         operation::Graphics,
         BeginCommand, Persistent,
     },
-    framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
+    descriptor::{DescriptorPool, GBufferDescriptorSet, TwoInputAttachmentDescriptorSet},
+    framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder, InputAttachment},
     material::MaterialPack,
     mesh::MeshPack,
     pipeline::{
-        GraphicsPipeline, GraphicsPipelineColorDepthCombinedTextured, GraphicsPipelineColorPass,
+        GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferWritePassPipeline,
+        GraphicsPipeline, GraphicsPipelineColorPass, GraphicsPipelineDepthDisplay,
         GraphicsPipelineForwardDepthPrepass, ModelMatrix, ShaderDirectory,
     },
     render_pass::{
-        ColorDepthCombinedRenderPass, ColorPassSubpass, DepthPrepassSubpass,
-        ForwardDepthPrepassRenderPass,
+        ColorPassSubpass, DeferedRenderPass, DepthDisplaySubpass, DepthPrepassSubpass,
+        ForwardDepthPrepassRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass,
     },
     skybox::Skybox,
 };
 
 use super::{
     camera::{Camera, CameraMatrices},
-    model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
+    model::{Material, MaterialHandle, Mesh, MeshBuilder, MeshHandle, Model},
     Renderer,
 };
 use ash::{vk, Entry, Instance};
@@ -48,26 +50,38 @@ struct FrameState {
     camera_matrices: CameraMatrices,
     primary_command: BeginCommand<Persistent, Primary, Graphics>,
     depth_prepass_command: BeginCommand<Persistent, Secondary, Graphics>,
-    color_pass_command: BeginCommand<Persistent, Secondary, Graphics>,
+    g_write_command: BeginCommand<Persistent, Secondary, Graphics>,
+    g_combine_command: BeginCommand<Persistent, Secondary, Graphics>,
     swapchain_frame: SwapchainFrame,
     mesh_pack_index: Option<u32>,
+}
+
+struct DeferrredPipeline {
+    render_pass: RenderPass<DeferedRenderPass>,
+    depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline>,
+    write_pass: GraphicsPipeline<GBufferWritePassPipeline>,
+    shading_pass: GraphicsPipeline<GBufferShadingPassPipeline>,
+    descriptors: DescriptorPool<GBufferDescriptorSet>,
+    mesh: MeshPack,
 }
 
 struct DepthPrepassPipelie {
     render_pass: RenderPass<ForwardDepthPrepassRenderPass>,
     depth_prepass: GraphicsPipeline<GraphicsPipelineForwardDepthPrepass>,
     color_pass: GraphicsPipeline<GraphicsPipelineColorPass>,
+    depth_display_pass: GraphicsPipeline<GraphicsPipelineDepthDisplay>,
+    descriptors: DescriptorPool<TwoInputAttachmentDescriptorSet>,
+    mesh: MeshPack,
 }
 
 pub(super) struct VulkanRenderer {
+    defered_pipeline: DeferrredPipeline,
     depth_prepass_pipeline: DepthPrepassPipelie,
     current_frame_state: Option<FrameState>,
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
     skybox: Skybox,
-    pipeline: GraphicsPipeline<GraphicsPipelineColorDepthCombinedTextured>,
     swapchain: VulkanSwapchain,
-    render_pass: RenderPass<ColorDepthCombinedRenderPass>,
     device: VulkanDevice,
     surface: VulkanSurface,
     debug_utils: Option<VulkanDebugUtils>,
@@ -145,7 +159,6 @@ impl VulkanRenderer {
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
         let surface = VulkanSurface::create(&entry, &instance, window)?;
         let device = VulkanDevice::create(&instance, &surface)?;
-        let render_pass = device.get_render_pass::<ColorDepthCombinedRenderPass>()?;
         let swapchain =
             device.create_swapchain::<ForwardDepthPrepassRenderPass>(&instance, &surface)?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
@@ -154,14 +167,9 @@ impl VulkanRenderer {
         // TODO: User should be able to load custom shareds,
         // while also some preset of preconfigured one should be available
         // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-        let pipeline = device
-            .create_graphics_pipeline::<GraphicsPipelineColorDepthCombinedTextured>(
-                ShaderDirectory::new(Path::new("shaders/spv/unlit_textured")),
-                swapchain.image_extent,
-            )?;
         let skybox = device.create_skybox(&swapchain, Path::new("assets/skybox/skybox"))?;
 
-        let depth_prepass_pipeline = DepthPrepassPipelie {
+        let mut depth_prepass_pipeline = DepthPrepassPipelie {
             render_pass: device.get_render_pass()?,
             depth_prepass: device.create_graphics_pipeline(
                 ShaderDirectory::new(Path::new("shaders/spv/depth_prepass")),
@@ -171,16 +179,84 @@ impl VulkanRenderer {
                 ShaderDirectory::new(Path::new("shaders/spv/unlit_textured")),
                 swapchain.image_extent,
             )?,
+            depth_display_pass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/depth_display")),
+                swapchain.image_extent,
+            )?,
+            descriptors: device
+                .create_descriptor_pool(TwoInputAttachmentDescriptorSet::builder(), 1)?,
+            mesh: device.load_mesh_pack(&[MeshBuilder::plane_subdivided(
+                0,
+                2.0 * Vector3::x(),
+                2.0 * Vector3::y(),
+                Vector3::zero(),
+                false,
+            )
+            .offset(Vector3::new(-1.0, -1.0, 0.0))
+            .build()])?,
         };
+        let descriptor_write = depth_prepass_pipeline
+            .descriptors
+            .get_writer()
+            .write_image(&[
+                InputAttachment {
+                    image_view: swapchain.color_buffer.image_view,
+                },
+                InputAttachment {
+                    image_view: swapchain.depth_buffer.image_view,
+                },
+            ]);
+        device.write_descriptor_sets(&mut depth_prepass_pipeline.descriptors, descriptor_write);
+
+        let mut defered_pipeline = DeferrredPipeline {
+            render_pass: device.get_render_pass()?,
+            depth_prepass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/depth_prepass")),
+                swapchain.image_extent,
+            )?,
+            write_pass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/gbuffer_write")),
+                swapchain.image_extent,
+            )?,
+            shading_pass: device.create_graphics_pipeline(
+                ShaderDirectory::new(Path::new("shaders/spv/gbuffer_combine")),
+                swapchain.image_extent,
+            )?,
+            descriptors: device.create_descriptor_pool(GBufferDescriptorSet::builder(), 1)?,
+            mesh: device.load_mesh_pack(&[MeshBuilder::plane_subdivided(
+                0,
+                2.0 * Vector3::y(),
+                2.0 * Vector3::x(),
+                Vector3::zero(),
+                false,
+            )
+            .offset(Vector3::new(-1.0, -1.0, 0.0))
+            .build()])?,
+        };
+
+        let descriptor_write = defered_pipeline.descriptors.get_writer().write_image(&[
+            InputAttachment {
+                image_view: swapchain.g_buffer.albedo.image_view,
+            },
+            InputAttachment {
+                image_view: swapchain.g_buffer.normal.image_view,
+            },
+            InputAttachment {
+                image_view: swapchain.g_buffer.position.image_view,
+            },
+            InputAttachment {
+                image_view: swapchain.g_buffer.depth.image_view,
+            },
+        ]);
+        device.write_descriptor_sets(&mut defered_pipeline.descriptors, descriptor_write);
         Ok(Self {
+            defered_pipeline,
             depth_prepass_pipeline,
             current_frame_state: None,
             materials: vec![],
             meshes: vec![],
             skybox,
-            pipeline,
             swapchain,
-            render_pass,
             device,
             surface,
             debug_utils: Some(debug_utils),
@@ -201,11 +277,31 @@ impl Drop for VulkanRenderer {
                 .iter_mut()
                 .for_each(|pack| self.device.destroy_mesh_pack(pack));
             self.device.destroy_skybox(&mut self.skybox);
-            self.device.destroy_graphics_pipeline(&mut self.pipeline);
+
+            // depth prepass pipeline
             self.device
                 .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.depth_prepass);
             self.device
                 .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.color_pass);
+            self.device
+                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.depth_display_pass);
+            self.device
+                .destroy_descriptor_pool(&mut self.depth_prepass_pipeline.descriptors);
+            self.device
+                .destroy_mesh_pack(&mut self.depth_prepass_pipeline.mesh);
+            // defered pipeline
+            self.device
+                .destroy_graphics_pipeline(&mut self.defered_pipeline.depth_prepass);
+            self.device
+                .destroy_graphics_pipeline(&mut self.defered_pipeline.write_pass);
+            self.device
+                .destroy_graphics_pipeline(&mut self.defered_pipeline.shading_pass);
+            self.device
+                .destroy_mesh_pack(&mut self.defered_pipeline.mesh);
+            self.device
+                .destroy_descriptor_pool(&mut self.defered_pipeline.descriptors);
+            // end destroy pipelines
+
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destroy_render_passes();
             self.device.destroy_pipeline_layouts();
@@ -261,40 +357,70 @@ impl From<VulkanMaterialHandle> for MaterialHandle {
 impl Renderer for VulkanRenderer {
     fn begin_frame(&mut self, camera: &dyn Camera) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let (primary_command, depth_prepass_command, color_pass_command, swapchain_frame) = self
+        let (
+            primary_command,
+            depth_prepass_command,
+            g_write_command,
+            g_combine_command,
+            swapchain_frame,
+        ) = self
             .device
             .begin_frame(&mut self.swapchain, &camera_matrices)?;
         let depth_prepass_command = self
             .device
-            .begin_secondary_command::<_, _, _, DepthPrepassSubpass>(
+            .begin_secondary_command::<_, _, _, GBufferDepthPrepas>(
                 depth_prepass_command,
-                self.depth_prepass_pipeline.render_pass,
+                self.defered_pipeline.render_pass,
                 swapchain_frame.framebuffer,
             )?;
         let depth_prepass_command = self
             .device
             .record_command(depth_prepass_command, |command| {
                 command
-                    .bind_pipeline(&self.depth_prepass_pipeline.depth_prepass)
-                    .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
+                    .bind_pipeline(&self.defered_pipeline.depth_prepass)
+                    .bind_descriptor_set(
+                        &self.defered_pipeline.depth_prepass,
+                        swapchain_frame.camera_descriptor,
+                    )
             });
-        let color_pass_command = self
+        let g_write_command = self
             .device
-            .begin_secondary_command::<_, _, _, ColorPassSubpass>(
-                color_pass_command,
-                self.depth_prepass_pipeline.render_pass,
+            .begin_secondary_command::<_, _, _, GBufferWritePass>(
+                g_write_command,
+                self.defered_pipeline.render_pass,
                 swapchain_frame.framebuffer,
             )?;
-        let color_pass_command = self.device.record_command(color_pass_command, |command| {
+        let g_write_command = self.device.record_command(g_write_command, |command| {
             command
-                .bind_pipeline(&self.depth_prepass_pipeline.color_pass)
-                .bind_descriptor_set(&self.pipeline, swapchain_frame.camera_descriptor)
+                .bind_pipeline(&self.defered_pipeline.write_pass)
+                .bind_descriptor_set(
+                    &self.defered_pipeline.write_pass,
+                    swapchain_frame.camera_descriptor,
+                )
+        });
+        let g_combine_command = self
+            .device
+            .begin_secondary_command::<_, _, _, GBufferShadingPass>(
+                g_combine_command,
+                self.defered_pipeline.render_pass,
+                swapchain_frame.framebuffer,
+            )?;
+        let g_combine_command = self.device.record_command(g_combine_command, |command| {
+            command
+                .bind_pipeline(&self.defered_pipeline.shading_pass)
+                .bind_descriptor_set(
+                    &self.defered_pipeline.shading_pass,
+                    self.defered_pipeline.descriptors[0],
+                )
+                .bind_mesh_pack(&self.defered_pipeline.mesh)
+                .draw_mesh(self.defered_pipeline.mesh.meshes[0])
         });
         self.current_frame_state.replace(FrameState {
             camera_matrices,
             primary_command,
             depth_prepass_command,
-            color_pass_command,
+            g_write_command,
+            g_combine_command,
             swapchain_frame,
             mesh_pack_index: None,
         });
@@ -306,7 +432,8 @@ impl Renderer for VulkanRenderer {
             camera_matrices,
             primary_command,
             depth_prepass_command,
-            color_pass_command,
+            g_write_command,
+            g_combine_command,
             swapchain_frame,
             ..
         } = self
@@ -314,10 +441,11 @@ impl Renderer for VulkanRenderer {
             .take()
             .ok_or("current_frame is None!")?;
         let depth_prepass_command = self.device.finish_command(depth_prepass_command)?;
-        let color_pass_command = self.device.record_command(color_pass_command, |command| {
+        let g_write_command = self.device.record_command(g_write_command, |command| {
             command.draw_skybox(&self.skybox, camera_matrices)
         });
-        let color_pass_command = self.device.finish_command(color_pass_command)?;
+        let g_write_command = self.device.finish_command(g_write_command)?;
+        let g_combine_command = self.device.finish_command(g_combine_command)?;
 
         let clear_values = ClearValueBuilder::new()
             .push(ClearNone {})
@@ -331,17 +459,34 @@ impl Renderer for VulkanRenderer {
                 color: vk::ClearColorValue {
                     float32: [0.0, 0.0, 0.0, 1.0],
                 },
+            })
+            .push(ClearColor {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            })
+            .push(ClearColor {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            })
+            .push(ClearColor {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
             });
         let primary_command = self.device.record_command(primary_command, |command| {
             command
                 .begin_render_pass(
                     &swapchain_frame,
-                    &self.depth_prepass_pipeline.render_pass,
+                    &self.defered_pipeline.render_pass,
                     &clear_values,
                 )
                 .write_secondary(&depth_prepass_command)
                 .next_render_pass()
-                .write_secondary(&color_pass_command)
+                .write_secondary(&g_write_command)
+                .next_render_pass()
+                .write_secondary(&g_combine_command)
                 .end_render_pass()
         });
 
@@ -399,7 +544,8 @@ impl Renderer for VulkanRenderer {
             camera_matrices,
             primary_command,
             depth_prepass_command,
-            color_pass_command,
+            g_combine_command,
+            g_write_command,
             swapchain_frame,
             mesh_pack_index: current_mesh_pack_index,
         } = self
@@ -416,27 +562,28 @@ impl Renderer for VulkanRenderer {
                 } else {
                     command
                 }
-                .push_constants(&self.pipeline, &model_matrix)
+                .push_constants(&self.defered_pipeline.depth_prepass, &model_matrix)
                 .draw_mesh(mesh_ranges)
             });
-        let color_pass_command = self.device.record_command(color_pass_command, |command| {
+        let g_write_command = self.device.record_command(g_write_command, |command| {
             if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
                 command.bind_mesh_pack(&self.meshes[mesh_pack_index as usize])
             } else {
                 command
             }
             .bind_descriptor_set(
-                &self.pipeline,
+                &self.defered_pipeline.write_pass,
                 self.materials[material_pack_index as usize].descriptors[material_index as usize],
             )
-            .push_constants(&self.pipeline, &model_matrix)
+            .push_constants(&self.depth_prepass_pipeline.color_pass, &model_matrix)
             .draw_mesh(mesh_ranges)
         });
         self.current_frame_state.replace(FrameState {
             camera_matrices,
             primary_command,
             depth_prepass_command,
-            color_pass_command,
+            g_write_command,
+            g_combine_command,
             swapchain_frame,
             mesh_pack_index: Some(mesh_pack_index),
         });

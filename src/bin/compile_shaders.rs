@@ -29,13 +29,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             let source_filename = path
                 .to_str()
                 .ok_or("Shader source path is not valid UTF-8 Unicode string!")?;
-            let Output { status, .. } = Command::new("glslc")
+            let Output { status, stderr, .. } = Command::new("glslc")
                 .args([source_filename, "-o", &output_filename])
                 .output()?;
+            let stderr = String::from_utf8(stderr)?;
             if !status.success() {
                 Err(format!(
-                    "Failed to compile shader source at {}",
-                    source_filename
+                    "Failed to compile shader source at {}\n\t with error: {}",
+                    source_filename, stderr,
                 ))?;
             }
         }

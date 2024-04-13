@@ -195,8 +195,8 @@ impl DescriptorLayout for DescriptorLayoutTerminator {
         unreachable!()
     }
 
-    fn get_descriptor_write<T: crate::renderer::vulkan::device::descriptor::DescriptorBinding>(
-    ) -> Option<vk::WriteDescriptorSet> {
+    fn get_descriptor_writes<T: crate::renderer::vulkan::device::descriptor::DescriptorBinding>(
+    ) -> Vec<vk::WriteDescriptorSet> {
         unreachable!()
     }
 }

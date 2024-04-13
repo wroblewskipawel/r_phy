@@ -234,7 +234,8 @@ impl VulkanDevice {
             flags: vk::ImageCreateFlags::empty(),
             samples: self.physical_device.attachment_properties.msaa_samples,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
-                | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+                | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT
+                | vk::ImageUsageFlags::INPUT_ATTACHMENT,
             aspect_mask: vk::ImageAspectFlags::COLOR,
             view_type: vk::ImageViewType::TYPE_2D,
             array_layers: 1,
@@ -254,7 +255,8 @@ impl VulkanDevice {
                 .depth_stencil,
             flags: vk::ImageCreateFlags::empty(),
             samples: self.physical_device.attachment_properties.msaa_samples,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                | vk::ImageUsageFlags::INPUT_ATTACHMENT,
             aspect_mask: vk::ImageAspectFlags::DEPTH,
             view_type: vk::ImageViewType::TYPE_2D,
             array_layers: 1,
@@ -275,6 +277,16 @@ impl VulkanDevice {
 pub struct Texture2D {
     pub image: VulkanImage2D,
     pub sampler: vk::Sampler,
+}
+
+impl From<&Texture2D> for vk::DescriptorImageInfo {
+    fn from(texture: &Texture2D) -> Self {
+        vk::DescriptorImageInfo {
+            sampler: texture.sampler,
+            image_view: texture.image.image_view,
+            image_layout: texture.image.layout,
+        }
+    }
 }
 
 impl VulkanDevice {

@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_albedo(Path::new("assets/textures/tile_2.png"))
             .build()?,
     ];
-    let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-4, 1e4);
+    let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {
             width: 800,

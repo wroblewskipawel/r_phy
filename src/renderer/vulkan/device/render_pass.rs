@@ -7,7 +7,6 @@ use std::{
     collections::HashMap,
     error::Error,
     marker::PhantomData,
-    num,
     sync::{Once, RwLock},
 };
 
@@ -90,6 +89,11 @@ impl AttachmentReference {
                 access: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
                     | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
             }
+        } else if self.usage.contains(vk::ImageUsageFlags::INPUT_ATTACHMENT) {
+            AttachmentUsageFlags {
+                stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                access: vk::AccessFlags::INPUT_ATTACHMENT_READ,
+            }
         } else {
             panic!("Unsupported image usage!");
         }
@@ -126,6 +130,11 @@ impl SubpassDescription {
     pub fn get<R: AttachmentReferences>(references: &R) -> Self {
         let mut references = Self::get_references(references.get());
         references.sort_by_key(|(target, _)| *target as usize);
+        let preserve = references
+            .iter()
+            .filter(|(target, _)| *target == AttachmentTarget::Preserve)
+            .map(|(_, reference)| reference.attachment)
+            .collect::<Vec<_>>();
 
         let num_color = references
             .iter()
@@ -140,6 +149,11 @@ impl SubpassDescription {
         let num_resolve = references
             .iter()
             .filter(|(target, _)| *target == AttachmentTarget::Resolve)
+            .count();
+
+        let num_input = references
+            .iter()
+            .filter(|(target, _)| *target == AttachmentTarget::Input)
             .count();
 
         let references = references
@@ -162,6 +176,18 @@ impl SubpassDescription {
             },
             p_depth_stencil_attachment: if num_depth_stencil != 0 {
                 &references[num_color]
+            } else {
+                std::ptr::null()
+            },
+            input_attachment_count: num_input as u32,
+            p_input_attachments: if num_input != 0 {
+                &references[num_color + num_depth_stencil + num_resolve]
+            } else {
+                std::ptr::null()
+            },
+            preserve_attachment_count: preserve.len() as u32,
+            p_preserve_attachments: if preserve.len() != 0 {
+                preserve.as_ptr()
             } else {
                 std::ptr::null()
             },

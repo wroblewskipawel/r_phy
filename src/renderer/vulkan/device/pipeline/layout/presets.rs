@@ -7,7 +7,9 @@ use crate::{
     math::types::Matrix4,
     renderer::{
         camera::CameraMatrices,
-        vulkan::device::descriptor::{CameraDescriptorSet, TextureDescriptorSet},
+        vulkan::device::descriptor::{
+            CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet, TwoInputAttachmentDescriptorSet
+        },
     },
 };
 
@@ -62,4 +64,16 @@ pub type PipelineLayoutSkybox = PipelineLayoutBuilder<
 pub type PipelineLayoutNoMaterial = PipelineLayoutBuilder<
     DescriptorLayoutNode<CameraDescriptorSet, DescriptorLayoutTerminator>,
     PushConstantNode<ModelMatrix, PushConstantTerminator>,
+>;
+
+pub type PipelineLayoutTwoInputAttachments = PipelineLayoutBuilder<
+    DescriptorLayoutNode<TwoInputAttachmentDescriptorSet, DescriptorLayoutTerminator>,
+    PushConstantTerminator,
+>;
+
+// deferred.rs
+
+pub type PipelineLayoutGBuffer = PipelineLayoutBuilder<
+    DescriptorLayoutNode<GBufferDescriptorSet, DescriptorLayoutTerminator>,
+    PushConstantTerminator,
 >;
