@@ -7,19 +7,20 @@ use std::{
     collections::HashMap,
     error::Error,
     marker::PhantomData,
+    num,
     sync::{Once, RwLock},
 };
 
 use ash::vk;
 
 use crate::renderer::vulkan::device::{
-    framebuffer::Attachments, AttachmentProperties, VulkanDevice,
+    framebuffer::AttachmentList, AttachmentProperties, VulkanDevice,
 };
 
 use super::framebuffer::{
     AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,
-    AttachmentTransistions, AttachmentTransition, IndexedAttachmentReference, References,
-    Transitions,
+    AttachmentTarget, AttachmentTransistions, AttachmentTransition, IndexedAttachmentReference,
+    References, Transitions,
 };
 
 fn get_render_pass_map() -> &'static RwLock<HashMap<TypeId, vk::RenderPass>> {
@@ -52,23 +53,19 @@ fn get_descriptions(
         .collect()
 }
 
-pub trait TransitionList<A: Attachments>: 'static {
+pub trait TransitionList<A: AttachmentList>: 'static {
     fn transitions() -> Transitions<A>;
 
     fn get_descriptions(properties: &AttachmentProperties) -> Vec<vk::AttachmentDescription> {
-        let transitions = Self::transitions();
-        let color = get_descriptions(A::Color::values(properties), transitions.color());
-        let depth_stencil = get_descriptions(
-            A::DepthStencil::values(properties),
-            transitions.depth_stencil(),
-        );
-        let resolve = get_descriptions(A::Resolve::values(properties), transitions.resolve());
-        resolve
-            .into_iter()
-            .chain(depth_stencil)
-            .chain(color)
-            .rev()
-            .collect()
+        get_descriptions(
+            <A as AttachmentListFormats>::values(properties)
+                .into_iter()
+                .rev()
+                .collect(),
+            Self::transitions().get(),
+        )
+        .into_iter()
+        .collect()
     }
 }
 
@@ -107,15 +104,18 @@ pub struct SubpassDescription {
 impl SubpassDescription {
     pub fn get_references(
         references: Vec<Option<IndexedAttachmentReference>>,
-    ) -> Vec<vk::AttachmentReference> {
+    ) -> Vec<(AttachmentTarget, vk::AttachmentReference)> {
         references
             .into_iter()
             .filter_map(|reference| {
                 if let Some(IndexedAttachmentReference { reference, index }) = reference {
-                    Some(vk::AttachmentReference {
-                        attachment: index,
-                        layout: reference.layout,
-                    })
+                    Some((
+                        reference.target,
+                        vk::AttachmentReference {
+                            attachment: index,
+                            layout: reference.layout,
+                        },
+                    ))
                 } else {
                     None
                 }
@@ -124,19 +124,27 @@ impl SubpassDescription {
     }
 
     pub fn get<R: AttachmentReferences>(references: &R) -> Self {
-        let color = Self::get_references(references.color());
-        let depth_stencil = Self::get_references(references.depth_stencil());
-        let resolve = Self::get_references(references.resolve());
-        let num_color = color.len();
-        let num_depth_stencil = depth_stencil.len();
-        let num_resolve = resolve.len();
-        debug_assert_eq!(num_depth_stencil, 1);
+        let mut references = Self::get_references(references.get());
+        references.sort_by_key(|(target, _)| *target as usize);
 
-        let references = resolve
+        let num_color = references
+            .iter()
+            .filter(|(target, _)| *target == AttachmentTarget::Color)
+            .count();
+
+        let num_depth_stencil = references
+            .iter()
+            .filter(|(target, _)| *target == AttachmentTarget::DepthStencil)
+            .count();
+
+        let num_resolve = references
+            .iter()
+            .filter(|(target, _)| *target == AttachmentTarget::Resolve)
+            .count();
+
+        let references = references
             .into_iter()
-            .chain(depth_stencil)
-            .chain(color)
-            .rev()
+            .map(|(_, reference)| reference)
             .collect::<Vec<_>>();
 
         let description = vk::SubpassDescription {
@@ -200,27 +208,21 @@ struct SubpassInfo {
     references: Vec<Option<IndexedAttachmentReference>>,
 }
 
-fn get_subpass_info<A: Attachments, S: Subpass<A>>() -> SubpassInfo {
+fn get_subpass_info<A: AttachmentList, S: Subpass<A>>() -> SubpassInfo {
     let references = S::references();
     let description = SubpassDescription::get(&references);
-    let references = references
-        .color()
-        .into_iter()
-        .chain(references.depth_stencil())
-        .chain(references.resolve())
-        .rev()
-        .collect();
+    let references = references.get().into_iter().collect();
     SubpassInfo {
         description,
         references,
     }
 }
 
-pub trait Subpass<A: Attachments>: 'static {
+pub trait Subpass<A: AttachmentList>: 'static {
     fn references() -> References<A>;
 }
 
-pub trait SubpassList<A: Attachments>: 'static {
+pub trait SubpassList<A: AttachmentList>: 'static {
     const LEN: usize;
     type Item: Subpass<A>;
     type Next: SubpassList<A>;
@@ -244,13 +246,13 @@ pub trait SubpassList<A: Attachments>: 'static {
 
 pub struct SubpassTerminator {}
 
-impl<A: Attachments> Subpass<A> for SubpassTerminator {
+impl<A: AttachmentList> Subpass<A> for SubpassTerminator {
     fn references() -> References<A> {
         unreachable!()
     }
 }
 
-impl<A: Attachments> SubpassList<A> for SubpassTerminator {
+impl<A: AttachmentList> SubpassList<A> for SubpassTerminator {
     const LEN: usize = 0;
     type Item = Self;
     type Next = Self;
@@ -264,11 +266,11 @@ impl<A: Attachments> SubpassList<A> for SubpassTerminator {
     }
 }
 
-pub struct SubpassNode<A: Attachments, S: Subpass<A>, L: SubpassList<A>> {
+pub struct SubpassNode<A: AttachmentList, S: Subpass<A>, L: SubpassList<A>> {
     _phantom: PhantomData<(S, L, A)>,
 }
 
-impl<A: Attachments, R: Subpass<A>, L: SubpassList<A>> SubpassList<A> for SubpassNode<A, R, L> {
+impl<A: AttachmentList, R: Subpass<A>, L: SubpassList<A>> SubpassList<A> for SubpassNode<A, R, L> {
     const LEN: usize = Self::Next::LEN + 1;
     type Item = R;
     type Next = L;
@@ -290,11 +292,11 @@ struct AttachmenState {
     reference: AttachmentReference,
 }
 
-pub struct SubpassDependencyBuilder<A: Attachments, L: SubpassList<A>> {
+pub struct SubpassDependencyBuilder<A: AttachmentList, L: SubpassList<A>> {
     _phantom: PhantomData<(A, L)>,
 }
 
-impl<A: Attachments, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
+impl<A: AttachmentList, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
     fn new() -> Self {
         Self {
             _phantom: PhantomData,
@@ -311,7 +313,6 @@ impl<A: Attachments, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
     fn get_references(&self) -> Vec<Vec<Option<IndexedAttachmentReference>>> {
         let mut references = Vec::with_capacity(L::LEN);
         Self::next_reference::<L>(&mut references);
-        references.reverse();
         references
     }
 
@@ -396,11 +397,11 @@ impl<A: Attachments, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
     }
 }
 
-pub struct RenderPassBuilder<A: Attachments, T: TransitionList<A>, S: SubpassList<A>> {
+pub struct RenderPassBuilder<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> {
     _phantom: PhantomData<(A, T, S)>,
 }
 
-fn write_descriptions<A: Attachments, N: SubpassList<A>>(
+fn write_descriptions<A: AttachmentList, N: SubpassList<A>>(
     mut vec: Vec<SubpassDescription>,
 ) -> Vec<SubpassDescription> {
     if N::LEN > 0 {
@@ -411,7 +412,7 @@ fn write_descriptions<A: Attachments, N: SubpassList<A>>(
     }
 }
 
-impl<A: Attachments, T: TransitionList<A>, S: SubpassList<A>> RenderPassBuilder<A, T, S> {
+impl<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> RenderPassBuilder<A, T, S> {
     fn get_attachment_descriptions(
         properties: &AttachmentProperties,
     ) -> Vec<vk::AttachmentDescription> {
@@ -430,7 +431,7 @@ impl<A: Attachments, T: TransitionList<A>, S: SubpassList<A>> RenderPassBuilder<
 }
 
 pub trait RenderPassConfig: 'static {
-    type Attachments: Attachments;
+    type Attachments: AttachmentList;
     type Transitions: TransitionList<Self::Attachments>;
     type Subpasses: SubpassList<Self::Attachments>;
 
@@ -447,7 +448,7 @@ pub trait RenderPassConfig: 'static {
     fn get_subpass_dependencies() -> Vec<vk::SubpassDependency>;
 }
 
-impl<A: Attachments, T: TransitionList<A>, S: SubpassList<A>> RenderPassConfig
+impl<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> RenderPassConfig
     for RenderPassBuilder<A, T, S>
 {
     type Attachments = A;

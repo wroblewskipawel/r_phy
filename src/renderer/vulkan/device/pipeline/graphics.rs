@@ -7,7 +7,7 @@ use std::{any::type_name, error::Error, marker::PhantomData};
 use ash::vk::{self, Extent2D};
 
 use crate::renderer::vulkan::device::{
-    framebuffer::Attachments,
+    framebuffer::AttachmentList,
     render_pass::{RenderPassConfig, Subpass},
     VulkanDevice,
 };
@@ -19,9 +19,9 @@ use super::{
 };
 
 pub trait GraphicspipelineConfig {
-    type Attachments: Attachments;
+    type Attachments: AttachmentList;
     type Layout: Layout;
-    type PipelineStates: PipelineStates;
+    type PipelineStates: PipelineStates<Self::Attachments, Self::Subpass>;
     type RenderPass: RenderPassConfig<Attachments = Self::Attachments>;
     type Subpass: Subpass<Self::Attachments>;
 
@@ -37,9 +37,9 @@ pub trait GraphicspipelineConfig {
 }
 
 pub struct GraphicsPipelineBuilder<
-    A: Attachments,
+    A: AttachmentList,
     L: Layout,
-    P: PipelineStates,
+    P: PipelineStates<A, S>,
     R: RenderPassConfig<Attachments = A>,
     S: Subpass<A>,
 > {
@@ -47,9 +47,9 @@ pub struct GraphicsPipelineBuilder<
 }
 
 impl<
-        A: Attachments,
+        A: AttachmentList,
         L: Layout,
-        P: PipelineStates,
+        P: PipelineStates<A, S>,
         R: RenderPassConfig<Attachments = A>,
         S: Subpass<A>,
     > GraphicspipelineConfig for GraphicsPipelineBuilder<A, L, P, R, S>
@@ -74,7 +74,10 @@ impl VulkanDevice {
     ) -> Result<GraphicsPipeline<C>, Box<dyn Error>> {
         let layout = self.get_pipeline_layout::<C::Layout>()?;
         let render_pass = self.get_render_pass::<C::RenderPass>()?;
-        let states = get_pipeline_states_info::<C::PipelineStates>(&self.physical_device, extent);
+        let states = get_pipeline_states_info::<C::Attachments, C::Subpass, C::PipelineStates>(
+            &self.physical_device,
+            extent,
+        );
         let modules = modules.load(self)?;
         let stages = modules.get_stages_info();
         let subpass = C::RenderPass::try_get_subpass_index::<C::Subpass>().unwrap_or_else(|| {

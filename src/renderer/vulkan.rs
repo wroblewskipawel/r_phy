@@ -10,7 +10,7 @@ use self::device::{
         operation::Graphics,
         BeginCommand, Persistent,
     },
-    framebuffer::{ClearColor, ClearDeptStencil, ClearValueBuilder},
+    framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
     material::MaterialPack,
     mesh::MeshPack,
     pipeline::{
@@ -320,15 +320,16 @@ impl Renderer for VulkanRenderer {
         let color_pass_command = self.device.finish_command(color_pass_command)?;
 
         let clear_values = ClearValueBuilder::new()
-            .push_color(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push_depth_stencil(ClearDeptStencil {
+            .push(ClearNone {})
+            .push(ClearDeptStencil {
                 depth_stencil: vk::ClearDepthStencilValue {
                     depth: 1.0,
                     stencil: 0,
+                },
+            })
+            .push(ClearColor {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
                 },
             });
         let primary_command = self.device.record_command(primary_command, |command| {

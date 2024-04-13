@@ -3,8 +3,8 @@ use ash::vk;
 use crate::renderer::vulkan::device::AttachmentProperties;
 
 use super::{
-    Attachment, AttachmentFormatInfo, AttachmentNode, AttachmentTerminator, Attachments,
-    ClearColor, ClearDeptStencil, ClearNone,
+    Attachment, AttachmentFormatInfo, AttachmentNode, AttachmentTerminator, ClearColor,
+    ClearDeptStencil, ClearNone,
 };
 
 pub struct ColorMultisampled {}
@@ -46,18 +46,8 @@ impl Attachment for Resolve {
     }
 }
 
-pub struct AttachmentsEmpty {}
-
-impl Attachments for AttachmentsEmpty {
-    type Color = AttachmentTerminator;
-    type DepthStencil = AttachmentTerminator;
-    type Resolve = AttachmentTerminator;
-}
-
-pub struct AttachmentsColorDepthCombined {}
-
-impl Attachments for AttachmentsColorDepthCombined {
-    type Color = AttachmentNode<ColorMultisampled, AttachmentTerminator>;
-    type DepthStencil = AttachmentNode<DepthStencilMultisampled, AttachmentTerminator>;
-    type Resolve = AttachmentNode<Resolve, AttachmentTerminator>;
-}
+pub type AttachmentsEmpty = AttachmentTerminator;
+pub type AttachmentsColorDepthCombined = AttachmentNode<
+    ColorMultisampled,
+    AttachmentNode<DepthStencilMultisampled, AttachmentNode<Resolve, AttachmentTerminator>>,
+>;

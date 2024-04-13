@@ -13,7 +13,9 @@ use std::{
 
 use super::{
     command::{
-        level, operation::{self, Operation}, SubmitSemaphoreState
+        level,
+        operation::{self, Operation},
+        SubmitSemaphoreState,
     },
     image::VulkanImage2D,
     VulkanDevice,

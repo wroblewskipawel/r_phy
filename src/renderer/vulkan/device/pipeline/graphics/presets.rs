@@ -1,9 +1,13 @@
 use crate::renderer::vulkan::device::{
     framebuffer::presets::AttachmentsColorDepthCombined,
     pipeline::{
-        PipelineLayoutNoMaterial, PipelineLayoutSkybox, PipelineLayoutTextured, PipelineStatesDefault, PipelineStatesDepthWriteDisabled, PipelineStatesSkybox
+        PipelineLayoutNoMaterial, PipelineLayoutSkybox, PipelineLayoutTextured,
+        PipelineStatesDefault, PipelineStatesDepthWriteDisabled, PipelineStatesSkybox,
     },
-    render_pass::{ColorDepthCombinedRenderPass, ColorDepthCombinedSubpass, ColorPassSubpass, DepthPrepassSubpass, ForwardDepthPrepassRenderPass},
+    render_pass::{
+        ColorDepthCombinedRenderPass, ColorDepthCombinedSubpass, ColorPassSubpass,
+        DepthPrepassSubpass, ForwardDepthPrepassRenderPass,
+    },
 };
 
 use super::GraphicsPipelineBuilder;
@@ -11,7 +15,7 @@ use super::GraphicsPipelineBuilder;
 pub type GraphicsPipelineColorDepthCombinedTextured = GraphicsPipelineBuilder<
     AttachmentsColorDepthCombined,
     PipelineLayoutTextured,
-    PipelineStatesDefault,
+    PipelineStatesDefault<ColorDepthCombinedSubpass>,
     ColorDepthCombinedRenderPass,
     ColorDepthCombinedSubpass,
 >;
@@ -19,7 +23,7 @@ pub type GraphicsPipelineColorDepthCombinedTextured = GraphicsPipelineBuilder<
 pub type GraphicsPipelineColorDepthCombinedSkybox = GraphicsPipelineBuilder<
     AttachmentsColorDepthCombined,
     PipelineLayoutSkybox,
-    PipelineStatesSkybox,
+    PipelineStatesSkybox<ColorPassSubpass>,
     ForwardDepthPrepassRenderPass,
     ColorPassSubpass,
 >;
@@ -27,7 +31,7 @@ pub type GraphicsPipelineColorDepthCombinedSkybox = GraphicsPipelineBuilder<
 pub type GraphicsPipelineForwardDepthPrepass = GraphicsPipelineBuilder<
     AttachmentsColorDepthCombined,
     PipelineLayoutNoMaterial,
-    PipelineStatesDefault,
+    PipelineStatesDefault<DepthPrepassSubpass>,
     ForwardDepthPrepassRenderPass,
     DepthPrepassSubpass,
 >;
@@ -35,7 +39,7 @@ pub type GraphicsPipelineForwardDepthPrepass = GraphicsPipelineBuilder<
 pub type GraphicsPipelineColorPass = GraphicsPipelineBuilder<
     AttachmentsColorDepthCombined,
     PipelineLayoutTextured,
-    PipelineStatesDepthWriteDisabled,
+    PipelineStatesDepthWriteDisabled<ColorPassSubpass>,
     ForwardDepthPrepassRenderPass,
     ColorPassSubpass,
 >;

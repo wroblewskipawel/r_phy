@@ -138,9 +138,9 @@ impl VulkanDevice {
             .map(|&image_view| {
                 self.build_framebuffer::<ForwardDepthPrepassRenderPass>(
                     AttachmentsBuilder::new()
-                        .push_color::<ColorMultisampled>(color_buffer.image_view)
-                        .push_depth_stencil::<DepthStencilMultisampled>(depth_buffer.image_view)
-                        .push_resolve::<Resolve>(image_view),
+                        .push::<Resolve>(image_view)
+                        .push::<DepthStencilMultisampled>(depth_buffer.image_view)
+                        .push::<ColorMultisampled>(color_buffer.image_view),
                     image_extent,
                 )
             })

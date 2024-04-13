@@ -109,61 +109,35 @@ impl<C: ClearValue, N: ClearValueList> ClearValueList for ClearValueNode<C, N> {
     }
 }
 
-pub struct ClearValueBuilder<C: ClearValueList, D: ClearValueList> {
-    color: C,
-    depth_stencil: D,
+pub struct ClearValueBuilder<C: ClearValueList> {
+    clear_values: C,
 }
 
-impl ClearValueBuilder<ClearValueTerminator, ClearValueTerminator> {
+impl ClearValueBuilder<ClearValueTerminator> {
     pub fn new() -> Self {
         Self {
-            color: ClearValueTerminator {},
-            depth_stencil: ClearValueTerminator {},
+            clear_values: ClearValueTerminator {},
         }
     }
 }
 
-impl<C: ClearValueList, D: ClearValueList> ClearValueBuilder<C, D> {
-    pub fn push_color<N: ClearValue>(self, value: N) -> ClearValueBuilder<ClearValueNode<N, C>, D> {
-        let Self {
-            color,
-            depth_stencil,
-        } = self;
+impl<V: ClearValueList> ClearValueBuilder<V> {
+    pub fn push<N: ClearValue>(self, value: N) -> ClearValueBuilder<ClearValueNode<N, V>> {
+        let Self { clear_values } = self;
         ClearValueBuilder {
-            color: ClearValueNode { value, next: color },
-            depth_stencil,
-        }
-    }
-
-    pub fn push_depth_stencil<N: ClearValue>(
-        self,
-        value: N,
-    ) -> ClearValueBuilder<C, ClearValueNode<N, D>> {
-        let Self {
-            color,
-            depth_stencil,
-        } = self;
-        ClearValueBuilder {
-            color,
-            depth_stencil: ClearValueNode {
+            clear_values: ClearValueNode {
                 value,
-                next: depth_stencil,
+                next: clear_values,
             },
         }
     }
 
     pub fn get_clear_values(&self) -> Vec<vk::ClearValue> {
-        self.depth_stencil
-            .values()
-            .into_iter()
-            .chain(self.color.values())
-            .flatten()
-            .rev()
-            .collect()
+        self.clear_values.values().into_iter().flatten().collect()
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AttachmentTarget {
     Color,
     DepthStencil,
@@ -252,112 +226,40 @@ impl<N: AttachmentReferenceList> AttachmentReferenceList for AttachmentReference
     }
 }
 
-pub struct AttachmentReferenceBuilder<
-    C: AttachmentReferenceList,
-    D: AttachmentReferenceList,
-    R: AttachmentReferenceList,
-> {
-    pub color: C,
-    pub depth_stencil: D,
-    pub resolve: R,
+pub struct AttachmentReferenceBuilder<A: AttachmentReferenceList> {
+    pub references: A,
 }
 
-impl
-    AttachmentReferenceBuilder<
-        AttachmentReferenceTerminator,
-        AttachmentReferenceTerminator,
-        AttachmentReferenceTerminator,
-    >
-{
+impl AttachmentReferenceBuilder<AttachmentReferenceTerminator> {
     pub fn new() -> Self {
         Self {
-            color: AttachmentReferenceTerminator {},
-            depth_stencil: AttachmentReferenceTerminator {},
-            resolve: AttachmentReferenceTerminator {},
+            references: AttachmentReferenceTerminator {},
         }
     }
 }
 
-impl<C: AttachmentReferenceList, D: AttachmentReferenceList, R: AttachmentReferenceList>
-    AttachmentReferenceBuilder<C, D, R>
-{
-    pub fn push_color(
+impl<A: AttachmentReferenceList> AttachmentReferenceBuilder<A> {
+    pub fn push(
         self,
         reference: Option<AttachmentReference>,
-    ) -> AttachmentReferenceBuilder<AttachmentReferenceNode<C>, D, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
+    ) -> AttachmentReferenceBuilder<AttachmentReferenceNode<A>> {
+        let Self { references } = self;
         AttachmentReferenceBuilder {
-            color: AttachmentReferenceNode {
+            references: AttachmentReferenceNode {
                 reference,
-                next: color,
-            },
-            depth_stencil,
-            resolve,
-        }
-    }
-
-    pub fn push_depth_stencil(
-        self,
-        reference: Option<AttachmentReference>,
-    ) -> AttachmentReferenceBuilder<C, AttachmentReferenceNode<D>, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentReferenceBuilder {
-            color,
-            depth_stencil: AttachmentReferenceNode {
-                reference,
-                next: depth_stencil,
-            },
-            resolve,
-        }
-    }
-
-    pub fn push_resolve(
-        self,
-        reference: Option<AttachmentReference>,
-    ) -> AttachmentReferenceBuilder<C, D, AttachmentReferenceNode<R>> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentReferenceBuilder {
-            color,
-            depth_stencil,
-            resolve: AttachmentReferenceNode {
-                reference,
-                next: resolve,
+                next: references,
             },
         }
     }
 }
 
 pub trait AttachmentReferences {
-    fn color(&self) -> Vec<Option<IndexedAttachmentReference>>;
-    fn depth_stencil(&self) -> Vec<Option<IndexedAttachmentReference>>;
-    fn resolve(&self) -> Vec<Option<IndexedAttachmentReference>>;
+    fn get(&self) -> Vec<Option<IndexedAttachmentReference>>;
 }
 
-impl<C: AttachmentReferenceList, D: AttachmentReferenceList, R: AttachmentReferenceList>
-    AttachmentReferences for AttachmentReferenceBuilder<C, D, R>
-{
-    fn color(&self) -> Vec<Option<IndexedAttachmentReference>> {
-        self.color.values(0)
-    }
-
-    fn depth_stencil(&self) -> Vec<Option<IndexedAttachmentReference>> {
-        self.depth_stencil.values(C::LEN)
-    }
-
-    fn resolve(&self) -> Vec<Option<IndexedAttachmentReference>> {
-        self.resolve.values(C::LEN + D::LEN)
+impl<A: AttachmentReferenceList> AttachmentReferences for AttachmentReferenceBuilder<A> {
+    fn get(&self) -> Vec<Option<IndexedAttachmentReference>> {
+        self.references.values(0).into_iter().rev().collect()
     }
 }
 
@@ -433,112 +335,40 @@ impl<N: AttachmentTransitionList> AttachmentTransitionList for AttachmentTransit
     }
 }
 
-pub struct AttachmentTransitionBuilder<
-    C: AttachmentTransitionList,
-    D: AttachmentTransitionList,
-    R: AttachmentTransitionList,
-> {
-    color: C,
-    depth_stencil: D,
-    resolve: R,
+pub struct AttachmentTransitionBuilder<A: AttachmentTransitionList> {
+    transitions: A,
 }
 
-impl
-    AttachmentTransitionBuilder<
-        AttachmentTransitionTerminator,
-        AttachmentTransitionTerminator,
-        AttachmentTransitionTerminator,
-    >
-{
+impl AttachmentTransitionBuilder<AttachmentTransitionTerminator> {
     pub fn new() -> Self {
         Self {
-            color: AttachmentTransitionTerminator {},
-            depth_stencil: AttachmentTransitionTerminator {},
-            resolve: AttachmentTransitionTerminator {},
+            transitions: AttachmentTransitionTerminator {},
         }
     }
 }
 
-impl<C: AttachmentTransitionList, D: AttachmentTransitionList, R: AttachmentTransitionList>
-    AttachmentTransitionBuilder<C, D, R>
-{
-    pub fn push_color(
+impl<A: AttachmentTransitionList> AttachmentTransitionBuilder<A> {
+    pub fn push(
         self,
         transition: AttachmentTransition,
-    ) -> AttachmentTransitionBuilder<AttachmentTransitionNode<C>, D, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
+    ) -> AttachmentTransitionBuilder<AttachmentTransitionNode<A>> {
+        let Self { transitions } = self;
         AttachmentTransitionBuilder {
-            color: AttachmentTransitionNode {
+            transitions: AttachmentTransitionNode {
                 transition,
-                next: color,
-            },
-            depth_stencil,
-            resolve,
-        }
-    }
-
-    pub fn push_depth_stencil(
-        self,
-        transition: AttachmentTransition,
-    ) -> AttachmentTransitionBuilder<C, AttachmentTransitionNode<D>, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentTransitionBuilder {
-            color,
-            depth_stencil: AttachmentTransitionNode {
-                transition,
-                next: depth_stencil,
-            },
-            resolve,
-        }
-    }
-
-    pub fn push_resolve(
-        self,
-        transition: AttachmentTransition,
-    ) -> AttachmentTransitionBuilder<C, D, AttachmentTransitionNode<R>> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentTransitionBuilder {
-            color,
-            depth_stencil,
-            resolve: AttachmentTransitionNode {
-                transition,
-                next: resolve,
+                next: transitions,
             },
         }
     }
 }
 
 pub trait AttachmentTransistions {
-    fn color(&self) -> Vec<AttachmentTransition>;
-    fn depth_stencil(&self) -> Vec<AttachmentTransition>;
-    fn resolve(&self) -> Vec<AttachmentTransition>;
+    fn get(&self) -> Vec<AttachmentTransition>;
 }
 
-impl<C: AttachmentTransitionList, D: AttachmentTransitionList, R: AttachmentTransitionList>
-    AttachmentTransistions for AttachmentTransitionBuilder<C, D, R>
-{
-    fn color(&self) -> Vec<AttachmentTransition> {
-        self.color.values()
-    }
-
-    fn depth_stencil(&self) -> Vec<AttachmentTransition> {
-        self.depth_stencil.values()
-    }
-
-    fn resolve(&self) -> Vec<AttachmentTransition> {
-        self.resolve.values()
+impl<A: AttachmentTransitionList> AttachmentTransistions for AttachmentTransitionBuilder<A> {
+    fn get(&self) -> Vec<AttachmentTransition> {
+        self.transitions.values().into_iter().rev().collect()
     }
 }
 
@@ -598,6 +428,9 @@ fn write_formats<N: AttachmentList + ?Sized>(
 pub trait AttachmentListFormats: AttachmentList {
     fn values(properties: &AttachmentProperties) -> Vec<AttachmentFormatInfo> {
         write_formats::<Self>(properties, Vec::with_capacity(Self::LEN))
+            .into_iter()
+            .rev()
+            .collect()
     }
 }
 
@@ -653,136 +486,59 @@ impl<A: Attachment, N: AttachmentList> AttachmentList for AttachmentNode<A, N> {
     }
 }
 
-pub struct AttachmentsBuilder<C: AttachmentList, D: AttachmentList, R: AttachmentList> {
-    color: C,
-    depth_stencil: D,
-    resolve: R,
+pub struct AttachmentsBuilder<A: AttachmentList> {
+    attachments: A,
 }
 
-impl AttachmentsBuilder<AttachmentTerminator, AttachmentTerminator, AttachmentTerminator> {
+impl AttachmentsBuilder<AttachmentTerminator> {
     pub fn new() -> Self {
         Self {
-            color: AttachmentTerminator {},
-            depth_stencil: AttachmentTerminator {},
-            resolve: AttachmentTerminator {},
+            attachments: AttachmentTerminator {},
         }
     }
 }
 
-impl<C: AttachmentList, D: AttachmentList, R: AttachmentList> AttachmentsBuilder<C, D, R> {
-    pub fn push_color<N: Attachment>(
+impl<A: AttachmentList> AttachmentsBuilder<A> {
+    pub fn push<N: Attachment>(
         self,
         view: vk::ImageView,
-    ) -> AttachmentsBuilder<AttachmentNode<N, C>, D, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
+    ) -> AttachmentsBuilder<AttachmentNode<N, A>> {
+        let Self { attachments } = self;
         AttachmentsBuilder {
-            color: AttachmentNode {
+            attachments: AttachmentNode {
                 view,
-                next: color,
-                _phantom: PhantomData,
-            },
-            depth_stencil,
-            resolve,
-        }
-    }
-
-    pub fn push_depth_stencil<N: Attachment>(
-        self,
-        view: vk::ImageView,
-    ) -> AttachmentsBuilder<C, AttachmentNode<N, D>, R> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentsBuilder {
-            color,
-            depth_stencil: AttachmentNode {
-                view,
-                next: depth_stencil,
-                _phantom: PhantomData,
-            },
-            resolve,
-        }
-    }
-
-    pub fn push_resolve<N: Attachment>(
-        self,
-        view: vk::ImageView,
-    ) -> AttachmentsBuilder<C, D, AttachmentNode<N, R>> {
-        let Self {
-            color,
-            depth_stencil,
-            resolve,
-        } = self;
-        AttachmentsBuilder {
-            color,
-            depth_stencil,
-            resolve: AttachmentNode {
-                view,
-                next: resolve,
+                next: attachments,
                 _phantom: PhantomData,
             },
         }
     }
 
     pub fn get_attachments(&self) -> Vec<vk::ImageView> {
-        self.resolve
-            .values()
-            .into_iter()
-            .chain(self.depth_stencil.values())
-            .chain(self.color.values())
-            .rev()
-            .collect()
+        self.attachments.values().into_iter().collect()
     }
 }
 
-pub trait Attachments: 'static {
-    type Color: AttachmentList;
-    type DepthStencil: AttachmentList;
-    type Resolve: AttachmentList;
-}
+pub type Builder<A> = AttachmentsBuilder<A>;
 
-pub type Builder<A> = AttachmentsBuilder<
-    <A as Attachments>::Color,
-    <A as Attachments>::DepthStencil,
-    <A as Attachments>::Resolve,
->;
+pub type References<A> = AttachmentReferenceBuilder<<A as AttachmentList>::ReferenceListType>;
 
-pub type References<A> = AttachmentReferenceBuilder<
-    <<A as Attachments>::Color as AttachmentList>::ReferenceListType,
-    <<A as Attachments>::DepthStencil as AttachmentList>::ReferenceListType,
-    <<A as Attachments>::Resolve as AttachmentList>::ReferenceListType,
->;
+pub type Transitions<A> = AttachmentTransitionBuilder<<A as AttachmentList>::TransitionListType>;
 
-pub type Transitions<A> = AttachmentTransitionBuilder<
-    <<A as Attachments>::Color as AttachmentList>::TransitionListType,
-    <<A as Attachments>::DepthStencil as AttachmentList>::TransitionListType,
-    <<A as Attachments>::Resolve as AttachmentList>::TransitionListType,
->;
-
-pub type Clear<A> = ClearValueBuilder<
-    <<A as Attachments>::Color as AttachmentList>::ClearListType,
-    <<A as Attachments>::DepthStencil as AttachmentList>::ClearListType,
->;
+pub type Clear<A> = ClearValueBuilder<<A as AttachmentList>::ClearListType>;
 
 #[derive(Debug)]
-pub struct Framebuffer<A: Attachments> {
+pub struct Framebuffer<A: AttachmentList> {
     pub framebuffer: vk::Framebuffer,
     _phantom: PhantomData<A>,
 }
 
-impl<A: Attachments> Clone for Framebuffer<A> {
+impl<A: AttachmentList> Clone for Framebuffer<A> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<A: Attachments> Copy for Framebuffer<A> {}
+impl<A: AttachmentList> Copy for Framebuffer<A> {}
 
 impl VulkanDevice {
     pub fn build_framebuffer<C: RenderPassConfig>(
@@ -805,7 +561,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destroy_framebuffer<A: Attachments>(&self, framebuffer: &mut Framebuffer<A>) {
+    pub fn destroy_framebuffer<A: AttachmentList>(&self, framebuffer: &mut Framebuffer<A>) {
         unsafe {
             self.device
                 .destroy_framebuffer(framebuffer.framebuffer, None);

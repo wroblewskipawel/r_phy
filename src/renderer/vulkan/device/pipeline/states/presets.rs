@@ -255,7 +255,7 @@ impl Blend for AttachmentAlphaBlend {
     };
 }
 
-pub type AlphaBlend<A> = ColorBlendBuilder<A, AttachmentAlphaBlend>;
+pub type AlphaBlend<A, S> = ColorBlendBuilder<A, AttachmentAlphaBlend, S>;
 
 pub struct Multisampled {}
 
@@ -275,42 +275,50 @@ impl Multisample for Multisampled {
 
 pub type MeshVertexInput = VertexBindingBuilder<VertexBindingNode<Vertex, VertexBindingTerminator>>;
 
-pub type PipelineStatesDefault = PipelineStatesBuilder<
+pub type PipelineStatesDefault<S> = PipelineStatesBuilder<
+    AttachmentsColorDepthCombined,
+    S,
     MeshVertexInput,
     TriangleList,
     DepthTestEnabled,
     CullBack,
-    ViewportHalfLeft,
-    AlphaBlend<AttachmentsColorDepthCombined>,
+    ViewportDefault,
+    AlphaBlend<AttachmentsColorDepthCombined, S>,
     Multisampled,
 >;
 
-pub type PipelineStatesSkybox = PipelineStatesBuilder<
+pub type PipelineStatesSkybox<S> = PipelineStatesBuilder<
+    AttachmentsColorDepthCombined,
+    S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullFront,
-    ViewportHalfLeft,
-    AlphaBlend<AttachmentsColorDepthCombined>,
+    ViewportDefault,
+    AlphaBlend<AttachmentsColorDepthCombined, S>,
     Multisampled,
 >;
 
-pub type PipelineStatesDepthWriteDisabled = PipelineStatesBuilder<
+pub type PipelineStatesDepthWriteDisabled<S> = PipelineStatesBuilder<
+    AttachmentsColorDepthCombined,
+    S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullBack,
-    ViewportHalfLeft,
-    AlphaBlend<AttachmentsColorDepthCombined>,
+    ViewportDefault,
+    AlphaBlend<AttachmentsColorDepthCombined, S>,
     Multisampled,
 >;
 
-pub type PipelineStatesDeptDisplay = PipelineStatesBuilder<
+pub type PipelineStatesDeptDisplay<S> = PipelineStatesBuilder<
+    AttachmentsColorDepthCombined,
+    S,
     MeshVertexInput,
     TriangleList,
     DepthWriteDisabled,
     CullBack,
     ViewportHalfRight,
-    AlphaBlend<AttachmentsColorDepthCombined>,
+    AlphaBlend<AttachmentsColorDepthCombined, S>,
     Multisampled,
 >;

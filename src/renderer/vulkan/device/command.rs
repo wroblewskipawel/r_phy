@@ -4,7 +4,10 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{math::types::Vector4, renderer::camera::{Camera, CameraMatrices}};
+use crate::{
+    math::types::Vector4,
+    renderer::camera::{Camera, CameraMatrices},
+};
 
 use self::{
     level::{Level, Primary, Secondary},
