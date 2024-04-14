@@ -128,7 +128,7 @@ impl SubpassDescription {
     }
 
     pub fn get<R: AttachmentReferences>(references: &R) -> Self {
-        let mut references = Self::get_references(references.get());
+        let mut references = Self::get_references(references.get_references());
         references.sort_by_key(|(target, _)| *target as usize);
         let preserve = references
             .iter()
@@ -237,7 +237,7 @@ struct SubpassInfo {
 fn get_subpass_info<A: AttachmentList, S: Subpass<A>>() -> SubpassInfo {
     let references = S::references();
     let description = SubpassDescription::get(&references);
-    let references = references.get().into_iter().collect();
+    let references = references.get_references().into_iter().collect();
     SubpassInfo {
         description,
         references,

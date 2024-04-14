@@ -12,8 +12,8 @@ use self::device::{
     },
     descriptor::{DescriptorPool, GBufferDescriptorSet},
     framebuffer::{
-        presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
-        InputAttachment,
+        presets::AttachmentsGBuffer, AttachmentReferences, ClearColor, ClearDeptStencil, ClearNone,
+        ClearValueBuilder,
     },
     material::MaterialPack,
     mesh::MeshPack,
@@ -21,7 +21,9 @@ use self::device::{
         GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferWritePassPipeline,
         GraphicsPipeline, ModelMatrix, ShaderDirectory,
     },
-    render_pass::{DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass},
+    render_pass::{
+        DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass, Subpass,
+    },
     skybox::Skybox,
 };
 
@@ -184,24 +186,14 @@ impl VulkanRenderer {
             .build()])?,
         };
 
-        let descriptor_write = defered_pipeline.descriptors.get_writer().write_image(&[
-            InputAttachment {
-                image_view: swapchain.g_buffer.albedo.image_view,
-            },
-            InputAttachment {
-                image_view: swapchain.g_buffer.normal.image_view,
-            },
-            InputAttachment {
-                image_view: swapchain.g_buffer.position.image_view,
-            },
-            InputAttachment {
-                image_view: swapchain.g_buffer.depth.image_view,
-            },
-        ]);
+        let descriptor_write = defered_pipeline.descriptors.get_writer().write_image(
+            &GBufferShadingPass::<AttachmentsGBuffer>::references()
+                .get_input_attachments(&swapchain.framebuffers[0]),
+        );
+
         device.write_descriptor_sets(&mut defered_pipeline.descriptors, descriptor_write);
         Ok(Self {
             defered_pipeline,
-            // depth_prepass_pipeline,
             current_frame_state: None,
             materials: vec![],
             meshes: vec![],

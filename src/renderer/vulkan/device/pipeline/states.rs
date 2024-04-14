@@ -193,7 +193,7 @@ pub struct ColorBlendBuilder<B: Blend> {
 impl<B: Blend> ColorBlend for ColorBlendBuilder<B> {
     fn get_state<A: AttachmentList>(references: &References<A>) -> ColorBlendInfo {
         let attachments = references
-            .get()
+            .get_references()
             .into_iter()
             .filter_map(|reference| {
                 if let Some(IndexedAttachmentReference { reference, .. }) = reference {

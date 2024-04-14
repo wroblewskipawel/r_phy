@@ -146,9 +146,6 @@ pub enum AttachmentTarget {
     Preserve,
 }
 
-// Temporary structure to handle DescriptorLayout generation
-// In future, other types of attachements will be also handled as types
-// insetead of AttachmentTarget variants
 pub struct InputAttachment {
     pub image_view: vk::ImageView,
 }
@@ -245,11 +242,11 @@ impl<N: AttachmentReferenceList> AttachmentReferenceList for AttachmentReference
     }
 }
 
-pub struct AttachmentReferenceBuilder<A: AttachmentReferenceList> {
-    pub references: A,
+pub struct AttachmentReferenceBuilder<A: AttachmentList> {
+    pub references: A::ReferenceListType,
 }
 
-impl AttachmentReferenceBuilder<AttachmentReferenceTerminator> {
+impl AttachmentReferenceBuilder<AttachmentTerminator> {
     pub fn new() -> Self {
         Self {
             references: AttachmentReferenceTerminator {},
@@ -257,11 +254,11 @@ impl AttachmentReferenceBuilder<AttachmentReferenceTerminator> {
     }
 }
 
-impl<A: AttachmentReferenceList> AttachmentReferenceBuilder<A> {
-    pub fn push(
+impl<A: AttachmentList> AttachmentReferenceBuilder<A> {
+    pub fn push<N: Attachment>(
         self,
         reference: Option<AttachmentReference>,
-    ) -> AttachmentReferenceBuilder<AttachmentReferenceNode<A>> {
+    ) -> AttachmentReferenceBuilder<AttachmentNode<N, A>> {
         let Self { references } = self;
         AttachmentReferenceBuilder {
             references: AttachmentReferenceNode {
@@ -273,12 +270,43 @@ impl<A: AttachmentReferenceList> AttachmentReferenceBuilder<A> {
 }
 
 pub trait AttachmentReferences {
-    fn get(&self) -> Vec<Option<IndexedAttachmentReference>>;
+    type Attachments: AttachmentList;
+
+    fn get_references(&self) -> Vec<Option<IndexedAttachmentReference>>;
+    fn get_input_attachments(
+        &self,
+        framebuffer: &Framebuffer<Self::Attachments>,
+    ) -> Vec<InputAttachment>;
 }
 
-impl<A: AttachmentReferenceList> AttachmentReferences for AttachmentReferenceBuilder<A> {
-    fn get(&self) -> Vec<Option<IndexedAttachmentReference>> {
-        self.references.values(0).into_iter().rev().collect()
+impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
+    type Attachments = A;
+
+    fn get_references(&self) -> Vec<Option<IndexedAttachmentReference>> {
+        AttachmentReferenceList::values(&self.references, 0)
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
+    fn get_input_attachments(
+        &self,
+        framebuffer: &Framebuffer<Self::Attachments>,
+    ) -> Vec<InputAttachment> {
+        self.get_references()
+            .into_iter()
+            .zip(&framebuffer.attachments)
+            .filter_map(|(reference, &attachment)| {
+                if let Some(reference) = reference {
+                    if reference.reference.target == AttachmentTarget::Input {
+                        return Some(InputAttachment {
+                            image_view: attachment,
+                        });
+                    }
+                }
+                None
+            })
+            .collect()
     }
 }
 
@@ -539,7 +567,7 @@ impl<A: AttachmentList> AttachmentsBuilder<A> {
 
 pub type Builder<A> = AttachmentsBuilder<A>;
 
-pub type References<A> = AttachmentReferenceBuilder<<A as AttachmentList>::ReferenceListType>;
+pub type References<A> = AttachmentReferenceBuilder<A>;
 
 pub type Transitions<A> = AttachmentTransitionBuilder<<A as AttachmentList>::TransitionListType>;
 
@@ -548,16 +576,32 @@ pub type Clear<A> = ClearValueBuilder<<A as AttachmentList>::ClearListType>;
 #[derive(Debug)]
 pub struct Framebuffer<A: AttachmentList> {
     pub framebuffer: vk::Framebuffer,
+    pub attachments: Vec<vk::ImageView>,
     _phantom: PhantomData<A>,
 }
 
-impl<A: AttachmentList> Clone for Framebuffer<A> {
+#[derive(Debug)]
+pub struct FramebufferHandle<A: AttachmentList> {
+    pub framebuffer: vk::Framebuffer,
+    _phantom: PhantomData<A>,
+}
+
+impl<A: AttachmentList> Clone for FramebufferHandle<A> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<A: AttachmentList> Copy for Framebuffer<A> {}
+impl<A: AttachmentList> From<&Framebuffer<A>> for FramebufferHandle<A> {
+    fn from(framebuffer: &Framebuffer<A>) -> Self {
+        Self {
+            framebuffer: framebuffer.framebuffer,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<A: AttachmentList> Copy for FramebufferHandle<A> {}
 
 impl VulkanDevice {
     pub fn build_framebuffer<C: RenderPassConfig>(
@@ -576,6 +620,7 @@ impl VulkanDevice {
         let framebuffer = unsafe { self.device.create_framebuffer(&create_info, None)? };
         Ok(Framebuffer {
             framebuffer,
+            attachments,
             _phantom: PhantomData,
         })
     }

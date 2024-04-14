@@ -14,7 +14,7 @@ use self::{
 use super::{
     buffer::Buffer,
     descriptor::{Descriptor, DescriptorLayout},
-    framebuffer::{Clear, Framebuffer},
+    framebuffer::{Clear, FramebufferHandle},
     image::VulkanImage2D,
     mesh::{BufferType, MeshPack, MeshRange},
     pipeline::{GraphicsPipeline, GraphicspipelineConfig, Layout, PushConstant},
@@ -219,7 +219,7 @@ impl VulkanDevice {
         &self,
         command: NewCommand<T, Secondary, O>,
         render_pass: RenderPass<C>,
-        framebuffer: Framebuffer<C::Attachments>,
+        framebuffer: FramebufferHandle<C::Attachments>,
     ) -> Result<BeginCommand<T, Secondary, O>, Box<dyn Error>> {
         let subpass = C::try_get_subpass_index::<S>().unwrap_or_else(|| {
             panic!(

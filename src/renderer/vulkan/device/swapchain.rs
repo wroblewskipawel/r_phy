@@ -16,7 +16,7 @@ use super::{
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
     framebuffer::{
         presets::{AttachmentsGBuffer, ColorMultisampled, DepthStencilMultisampled, Resolve},
-        AttachmentsBuilder, Framebuffer,
+        AttachmentsBuilder, Framebuffer, FramebufferHandle,
     },
     image::VulkanImage2D,
     render_pass::{DeferedRenderPass, RenderPassConfig},
@@ -29,7 +29,7 @@ pub struct FrameSync {
 }
 
 pub struct SwapchainFrame {
-    pub framebuffer: Framebuffer<AttachmentsGBuffer>,
+    pub framebuffer: FramebufferHandle<AttachmentsGBuffer>,
     pub render_area: vk::Rect2D,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     image_index: usize,
@@ -68,7 +68,7 @@ pub struct VulkanSwapchain {
     pub g_buffer: GBufer,
     _images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
-    framebuffers: Vec<Framebuffer<AttachmentsGBuffer>>,
+    pub framebuffers: Vec<Framebuffer<AttachmentsGBuffer>>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
 }
@@ -304,7 +304,7 @@ impl VulkanDevice {
                 )
                 .map(|(image_index, _)| image_index as usize)?
         };
-        let framebuffer = swapchain.framebuffers[image_index];
+        let framebuffer = (&swapchain.framebuffers[image_index]).into();
         let camera_descriptor = swapchain.camera_descriptors[image_index];
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
