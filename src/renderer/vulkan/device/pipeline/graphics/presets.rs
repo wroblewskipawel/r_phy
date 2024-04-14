@@ -1,79 +1,37 @@
 use crate::renderer::vulkan::device::{
-    framebuffer::presets::{AttachmentsColorDepthCombined, AttachmentsDepthPrepass, AttachmentsGBuffer},
     pipeline::{
-        DeferedStatesDepthDisabled, DeferedStatesDepthEnabled, PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox, PipelineLayoutTextured, PipelineLayoutTwoInputAttachments, PipelineStatesDefault, PipelineStatesDepthDisplay, PipelineStatesDepthWriteDisabled, PipelineStatesSkybox
+        PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox,
+        PipelineLayoutTextured, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
     },
-    render_pass::{
-        ColorDepthCombinedRenderPass, ColorDepthCombinedSubpass, ColorPassSubpass, DeferedRenderPass, DepthDisplaySubpass, DepthPrepassSubpass, ForwardDepthPrepassRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass
-    },
+    render_pass::{DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass},
 };
 
 use super::GraphicsPipelineBuilder;
 
-pub type GraphicsPipelineColorDepthCombinedTextured = GraphicsPipelineBuilder<
-    AttachmentsColorDepthCombined,
-    PipelineLayoutTextured,
-    PipelineStatesDefault<ColorDepthCombinedSubpass>,
-    ColorDepthCombinedRenderPass,
-    ColorDepthCombinedSubpass,
->;
-
-pub type GraphicsPipelineColorDepthCombinedSkybox = GraphicsPipelineBuilder<
-    AttachmentsGBuffer,
+pub type GraphicsPipelineColorDepthCombinedSkybox<A> = GraphicsPipelineBuilder<
     PipelineLayoutSkybox,
-    PipelineStatesSkybox<GBufferWritePass>,
-    DeferedRenderPass,
-    GBufferWritePass,
+    StatesSkybox,
+    DeferedRenderPass<A>,
+    GBufferWritePass<A>,
 >;
 
-pub type GraphicsPipelineForwardDepthPrepass = GraphicsPipelineBuilder<
-    AttachmentsDepthPrepass,
+pub type GBufferDepthPrepasPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutNoMaterial,
-    PipelineStatesDefault<DepthPrepassSubpass>,
-    ForwardDepthPrepassRenderPass,
-    DepthPrepassSubpass,
+    StatesDepthTestEnabled,
+    DeferedRenderPass<A>,
+    GBufferDepthPrepas<A>,
 >;
 
-pub type GraphicsPipelineColorPass = GraphicsPipelineBuilder<
-    AttachmentsDepthPrepass,
+pub type GBufferWritePassPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutTextured,
-    PipelineStatesDepthWriteDisabled<ColorPassSubpass>,
-    ForwardDepthPrepassRenderPass,
-    ColorPassSubpass,
+    StatesDepthWriteDisabled,
+    DeferedRenderPass<A>,
+    GBufferWritePass<A>,
 >;
 
-pub type GraphicsPipelineDepthDisplay = GraphicsPipelineBuilder<
-    AttachmentsDepthPrepass,
-    PipelineLayoutTwoInputAttachments,
-    PipelineStatesDepthDisplay<DepthDisplaySubpass>,
-    ForwardDepthPrepassRenderPass,
-    DepthDisplaySubpass,
->;
-
-// deferred.rs
-
-pub type GBufferDepthPrepasPipeline = GraphicsPipelineBuilder<
-    AttachmentsGBuffer,
-    PipelineLayoutNoMaterial,
-    DeferedStatesDepthEnabled<GBufferDepthPrepas>,
-    DeferedRenderPass,
-    GBufferDepthPrepas,
->;
-
-pub type GBufferWritePassPipeline = GraphicsPipelineBuilder<
-    AttachmentsGBuffer,
-    PipelineLayoutTextured,
-    DeferedStatesDepthDisabled<GBufferWritePass>,
-    DeferedRenderPass,
-    GBufferWritePass,
->;
-
-pub type GBufferShadingPassPipeline = GraphicsPipelineBuilder<
-    AttachmentsGBuffer,
+pub type GBufferShadingPassPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutGBuffer,
-    DeferedStatesDepthDisabled<GBufferShadingPass>,
-    DeferedRenderPass,
-    GBufferShadingPass,
+    StatesDepthWriteDisabled,
+    DeferedRenderPass<A>,
+    GBufferShadingPass<A>,
 >;
-
-// deferred.rs

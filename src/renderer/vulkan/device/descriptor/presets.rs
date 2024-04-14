@@ -98,25 +98,25 @@ impl DescriptorBinding for InputAttachment {
 
 pub type CameraDescriptorSet =
     DescriptorLayoutBuilder<DescriptorBindingNode<CameraMatrices, DescriptorBindingTerminator>>;
+
 pub type TextureDescriptorSet =
     DescriptorLayoutBuilder<DescriptorBindingNode<Texture2D, DescriptorBindingTerminator>>;
-pub type TwoInputAttachmentDescriptorSet = DescriptorLayoutBuilder<
-    DescriptorBindingNode<
-        InputAttachment,
-        DescriptorBindingNode<InputAttachment, DescriptorBindingTerminator>,
-    >,
->;
-
-// deferred.rs
 
 pub type GBufferDescriptorSet = DescriptorLayoutBuilder<
     DescriptorBindingNode<
-        InputAttachment, // Albedo
+        // Albedo
+        InputAttachment,
         DescriptorBindingNode<
-            InputAttachment, // Position
+            // Position
+            InputAttachment,
             DescriptorBindingNode<
-                InputAttachment, // Normal
-                DescriptorBindingNode<InputAttachment, DescriptorBindingTerminator>, // Depth
+                // Normal
+                InputAttachment,
+                DescriptorBindingNode<
+                    // Depth
+                    InputAttachment,
+                    DescriptorBindingTerminator,
+                >,
             >,
         >,
     >,

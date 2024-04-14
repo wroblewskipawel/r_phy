@@ -5,6 +5,7 @@ use crate::physics::shape;
 
 use super::{
     descriptor::{DescriptorPool, TextureDescriptorSet},
+    framebuffer::presets::AttachmentsGBuffer,
     image::Texture2D,
     mesh::MeshPack,
     pipeline::{GraphicsPipeline, GraphicsPipelineColorDepthCombinedSkybox, ShaderDirectory},
@@ -17,7 +18,7 @@ pub struct Skybox {
     texture: Texture2D,
     pub mesh_pack: MeshPack,
     pub descriptor: DescriptorPool<TextureDescriptorSet>,
-    pub pipeline: GraphicsPipeline<GraphicsPipelineColorDepthCombinedSkybox>,
+    pub pipeline: GraphicsPipeline<GraphicsPipelineColorDepthCombinedSkybox<AttachmentsGBuffer>>,
 }
 
 impl VulkanDevice {
@@ -32,7 +33,7 @@ impl VulkanDevice {
             .get_writer()
             .write_image(std::slice::from_ref(&texture));
         self.write_descriptor_sets(&mut descriptor, descriptor_write);
-        let pipeline = self.create_graphics_pipeline::<GraphicsPipelineColorDepthCombinedSkybox>(
+        let pipeline = self.create_graphics_pipeline(
             ShaderDirectory::new(&Path::new("shaders/spv/skybox")),
             swapchain.image_extent,
         )?;

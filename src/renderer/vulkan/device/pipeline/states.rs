@@ -8,6 +8,7 @@ pub use presets::*;
 use crate::renderer::vulkan::device::{
     framebuffer::{
         AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
+        References,
     },
     render_pass::Subpass,
     AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
@@ -182,16 +183,16 @@ pub trait Blend: 'static {
 }
 
 pub trait ColorBlend: 'static {
-    fn get_state() -> ColorBlendInfo;
+    fn get_state<A: AttachmentList>(references: &References<A>) -> ColorBlendInfo;
 }
 
-pub struct ColorBlendBuilder<A: AttachmentList, B: Blend, S: Subpass<A>> {
-    _phantom: PhantomData<(A, B, S)>,
+pub struct ColorBlendBuilder<B: Blend> {
+    _phantom: PhantomData<B>,
 }
 
-impl<A: AttachmentList, B: Blend, S: Subpass<A>> ColorBlend for ColorBlendBuilder<A, B, S> {
-    fn get_state() -> ColorBlendInfo {
-        let attachments = S::references()
+impl<B: Blend> ColorBlend for ColorBlendBuilder<B> {
+    fn get_state<A: AttachmentList>(references: &References<A>) -> ColorBlendInfo {
+        let attachments = references
             .get()
             .into_iter()
             .filter_map(|reference| {
@@ -222,7 +223,7 @@ pub trait Multisample: 'static {
     ) -> vk::PipelineMultisampleStateCreateInfo;
 }
 
-pub trait PipelineStates<A: AttachmentList, S: Subpass<A>>: 'static {
+pub trait PipelineStates: 'static {
     type VertexInput: VertexInput;
     type VertexAssembly: VertexAssembly;
     type DepthStencil: DepthStencil;
@@ -234,8 +235,6 @@ pub trait PipelineStates<A: AttachmentList, S: Subpass<A>>: 'static {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PipelineStatesBuilder<
-    L: AttachmentList,
-    S: Subpass<L>,
     I: VertexInput,
     A: VertexAssembly,
     D: DepthStencil,
@@ -244,12 +243,10 @@ pub struct PipelineStatesBuilder<
     C: ColorBlend,
     M: Multisample,
 > {
-    _phantom: PhantomData<(L, S, I, A, D, R, V, C, M)>,
+    _phantom: PhantomData<(I, A, D, R, V, C, M)>,
 }
 
 impl<
-        L: AttachmentList,
-        S: Subpass<L>,
         I: VertexInput,
         A: VertexAssembly,
         D: DepthStencil,
@@ -257,7 +254,7 @@ impl<
         V: Viewport,
         C: ColorBlend,
         M: Multisample,
-    > Default for PipelineStatesBuilder<L, S, I, A, D, R, V, C, M>
+    > Default for PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     fn default() -> Self {
         Self {
@@ -268,8 +265,6 @@ impl<
 
 #[allow(dead_code)]
 impl<
-        L: AttachmentList,
-        S: Subpass<L>,
         I: VertexInput,
         A: VertexAssembly,
         D: DepthStencil,
@@ -277,31 +272,25 @@ impl<
         V: Viewport,
         C: ColorBlend,
         M: Multisample,
-    > PipelineStatesBuilder<L, S, I, A, D, R, V, C, M>
+    > PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     pub fn builder() -> Self {
         Self::default()
     }
 
-    pub fn with_vertex_input<N: VertexInput>(
-        self,
-    ) -> PipelineStatesBuilder<L, S, N, A, D, R, V, C, M> {
+    pub fn with_vertex_input<N: VertexInput>(self) -> PipelineStatesBuilder<N, A, D, R, V, C, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_assembly<N: VertexAssembly>(
-        self,
-    ) -> PipelineStatesBuilder<L, S, I, N, D, R, V, C, M> {
+    pub fn with_assembly<N: VertexAssembly>(self) -> PipelineStatesBuilder<I, N, D, R, V, C, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_depth_stencil<N: DepthStencil>(
-        self,
-    ) -> PipelineStatesBuilder<L, S, I, A, N, R, V, C, M> {
+    pub fn with_depth_stencil<N: DepthStencil>(self) -> PipelineStatesBuilder<I, A, N, R, V, C, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
@@ -309,29 +298,25 @@ impl<
 
     pub fn with_rasterization<N: Rasterization>(
         self,
-    ) -> PipelineStatesBuilder<L, S, I, A, D, N, V, C, M> {
+    ) -> PipelineStatesBuilder<I, A, D, N, V, C, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_viewport<N: Viewport>(self) -> PipelineStatesBuilder<L, S, I, A, D, R, N, C, M> {
+    pub fn with_viewport<N: Viewport>(self) -> PipelineStatesBuilder<I, A, D, R, N, C, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_color_blend<N: ColorBlend>(
-        self,
-    ) -> PipelineStatesBuilder<L, S, I, A, D, R, V, N, M> {
+    pub fn with_color_blend<N: ColorBlend>(self) -> PipelineStatesBuilder<I, A, D, R, V, N, M> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_multisample<N: Multisample>(
-        self,
-    ) -> PipelineStatesBuilder<L, S, I, A, D, R, V, C, N> {
+    pub fn with_multisample<N: Multisample>(self) -> PipelineStatesBuilder<I, A, D, R, V, C, N> {
         PipelineStatesBuilder {
             _phantom: PhantomData,
         }
@@ -339,8 +324,6 @@ impl<
 }
 
 impl<
-        L: AttachmentList,
-        S: Subpass<L>,
         I: VertexInput,
         A: VertexAssembly,
         D: DepthStencil,
@@ -348,7 +331,7 @@ impl<
         V: Viewport,
         C: ColorBlend,
         M: Multisample,
-    > PipelineStates<L, S> for PipelineStatesBuilder<L, S, I, A, D, R, V, C, M>
+    > PipelineStates for PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     type VertexInput = I;
     type VertexAssembly = A;
@@ -359,7 +342,7 @@ impl<
     type Multisample = M;
 }
 
-pub struct PipelineStatesInfo<A: AttachmentList, L: Subpass<A>, S: PipelineStates<A, L>> {
+pub struct PipelineStatesInfo<S: PipelineStates> {
     pub vertex_input: VertexInputInfo,
     pub input_assembly: vk::PipelineInputAssemblyStateCreateInfo,
     pub viewport: ViewportInfo,
@@ -367,24 +350,20 @@ pub struct PipelineStatesInfo<A: AttachmentList, L: Subpass<A>, S: PipelineState
     pub depth_stencil: vk::PipelineDepthStencilStateCreateInfo,
     pub color_blend: ColorBlendInfo,
     pub multisample: vk::PipelineMultisampleStateCreateInfo,
-    _phantom: PhantomData<(A, L, S)>,
+    _phantom: PhantomData<S>,
 }
 
-pub(super) fn get_pipeline_states_info<
-    A: AttachmentList,
-    L: Subpass<A>,
-    S: PipelineStates<A, L>,
->(
+pub(super) fn get_pipeline_states_info<A: AttachmentList, P: Subpass<A>, S: PipelineStates>(
     physical_device: &VulkanPhysicalDevice,
     extent: Extent2D,
-) -> PipelineStatesInfo<A, L, S> {
+) -> PipelineStatesInfo<S> {
     PipelineStatesInfo {
         vertex_input: S::VertexInput::get_state(),
         input_assembly: S::VertexAssembly::get_input_assembly(),
         viewport: S::Viewport::get_state(extent),
         rasterization: S::Rasterization::get_state(),
         depth_stencil: S::DepthStencil::get_state(),
-        color_blend: S::ColorBlend::get_state(),
+        color_blend: S::ColorBlend::get_state::<A>(&P::references()),
         multisample: S::Multisample::get_state(
             &physical_device.properties,
             &physical_device.attachment_properties,

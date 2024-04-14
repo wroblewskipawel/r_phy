@@ -21,40 +21,24 @@ use super::{
 pub trait GraphicspipelineConfig {
     type Attachments: AttachmentList;
     type Layout: Layout;
-    type PipelineStates: PipelineStates<Self::Attachments, Self::Subpass>;
+    type PipelineStates: PipelineStates;
     type RenderPass: RenderPassConfig<Attachments = Self::Attachments>;
     type Subpass: Subpass<Self::Attachments>;
-
-    fn builder() -> GraphicsPipelineBuilder<
-        Self::Attachments,
-        Self::Layout,
-        Self::PipelineStates,
-        Self::RenderPass,
-        Self::Subpass,
-    > {
-        GraphicsPipelineBuilder::builder()
-    }
 }
 
 pub struct GraphicsPipelineBuilder<
-    A: AttachmentList,
     L: Layout,
-    P: PipelineStates<A, S>,
-    R: RenderPassConfig<Attachments = A>,
-    S: Subpass<A>,
+    P: PipelineStates,
+    R: RenderPassConfig,
+    S: Subpass<R::Attachments>,
 > {
     _phantom: PhantomData<(L, P, R, S)>,
 }
 
-impl<
-        A: AttachmentList,
-        L: Layout,
-        P: PipelineStates<A, S>,
-        R: RenderPassConfig<Attachments = A>,
-        S: Subpass<A>,
-    > GraphicspipelineConfig for GraphicsPipelineBuilder<A, L, P, R, S>
+impl<L: Layout, P: PipelineStates, R: RenderPassConfig, S: Subpass<R::Attachments>>
+    GraphicspipelineConfig for GraphicsPipelineBuilder<L, P, R, S>
 {
-    type Attachments = A;
+    type Attachments = R::Attachments;
     type Layout = L;
     type PipelineStates = P;
     type RenderPass = R;

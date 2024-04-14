@@ -248,12 +248,13 @@ pub trait Subpass<A: AttachmentList>: 'static {
     fn references() -> References<A>;
 }
 
-pub trait SubpassList<A: AttachmentList>: 'static {
+pub trait SubpassList: 'static {
     const LEN: usize;
-    type Item: Subpass<A>;
-    type Next: SubpassList<A>;
+    type Attachments: AttachmentList;
+    type Item: Subpass<Self::Attachments>;
+    type Next: SubpassList<Attachments = Self::Attachments>;
 
-    fn try_get_subpass_index<N: Subpass<A>>() -> Option<usize> {
+    fn try_get_subpass_index<N: Subpass<Self::Attachments>>() -> Option<usize> {
         if Self::LEN > 0 {
             if TypeId::of::<Self::Item>() == TypeId::of::<N>() {
                 Some(Self::LEN - 1)
@@ -270,16 +271,19 @@ pub trait SubpassList<A: AttachmentList>: 'static {
     fn get_references() -> Vec<Option<IndexedAttachmentReference>>;
 }
 
-pub struct SubpassTerminator {}
+pub struct SubpassTerminator<A: AttachmentList> {
+    _phantom: PhantomData<A>,
+}
 
-impl<A: AttachmentList> Subpass<A> for SubpassTerminator {
+impl<A: AttachmentList> Subpass<A> for SubpassTerminator<A> {
     fn references() -> References<A> {
         unreachable!()
     }
 }
 
-impl<A: AttachmentList> SubpassList<A> for SubpassTerminator {
+impl<A: AttachmentList> SubpassList for SubpassTerminator<A> {
     const LEN: usize = 0;
+    type Attachments = A;
     type Item = Self;
     type Next = Self;
 
@@ -292,22 +296,23 @@ impl<A: AttachmentList> SubpassList<A> for SubpassTerminator {
     }
 }
 
-pub struct SubpassNode<A: AttachmentList, S: Subpass<A>, L: SubpassList<A>> {
-    _phantom: PhantomData<(S, L, A)>,
+pub struct SubpassNode<S: Subpass<L::Attachments>, L: SubpassList> {
+    _phantom: PhantomData<(S, L)>,
 }
 
-impl<A: AttachmentList, R: Subpass<A>, L: SubpassList<A>> SubpassList<A> for SubpassNode<A, R, L> {
+impl<L: SubpassList, S: Subpass<L::Attachments>> SubpassList for SubpassNode<S, L> {
     const LEN: usize = Self::Next::LEN + 1;
-    type Item = R;
+    type Attachments = L::Attachments;
+    type Item = S;
     type Next = L;
 
     fn get_description() -> SubpassDescription {
-        let SubpassInfo { description, .. } = get_subpass_info::<A, R>();
+        let SubpassInfo { description, .. } = get_subpass_info::<_, S>();
         description
     }
 
     fn get_references() -> Vec<Option<IndexedAttachmentReference>> {
-        let SubpassInfo { references, .. } = get_subpass_info::<A, R>();
+        let SubpassInfo { references, .. } = get_subpass_info::<_, S>();
         references
     }
 }
@@ -318,18 +323,18 @@ struct AttachmenState {
     reference: AttachmentReference,
 }
 
-pub struct SubpassDependencyBuilder<A: AttachmentList, L: SubpassList<A>> {
-    _phantom: PhantomData<(A, L)>,
+pub struct SubpassDependencyBuilder<L: SubpassList> {
+    _phantom: PhantomData<L>,
 }
 
-impl<A: AttachmentList, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
+impl<L: SubpassList> SubpassDependencyBuilder<L> {
     fn new() -> Self {
         Self {
             _phantom: PhantomData,
         }
     }
 
-    fn next_reference<N: SubpassList<A>>(vec: &mut Vec<Vec<Option<IndexedAttachmentReference>>>) {
+    fn next_reference<N: SubpassList>(vec: &mut Vec<Vec<Option<IndexedAttachmentReference>>>) {
         if N::LEN > 0 {
             vec.push(N::get_references());
             Self::next_reference::<N::Next>(vec)
@@ -423,22 +428,20 @@ impl<A: AttachmentList, L: SubpassList<A>> SubpassDependencyBuilder<A, L> {
     }
 }
 
-pub struct RenderPassBuilder<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> {
-    _phantom: PhantomData<(A, T, S)>,
+pub struct RenderPassBuilder<S: SubpassList, T: TransitionList<S::Attachments>> {
+    _phantom: PhantomData<(S, T)>,
 }
 
-fn write_descriptions<A: AttachmentList, N: SubpassList<A>>(
-    mut vec: Vec<SubpassDescription>,
-) -> Vec<SubpassDescription> {
+fn write_descriptions<N: SubpassList>(mut vec: Vec<SubpassDescription>) -> Vec<SubpassDescription> {
     if N::LEN > 0 {
         vec.push(N::get_description());
-        write_descriptions::<A, N::Next>(vec)
+        write_descriptions::<N::Next>(vec)
     } else {
         vec
     }
 }
 
-impl<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> RenderPassBuilder<A, T, S> {
+impl<S: SubpassList, T: TransitionList<S::Attachments>> RenderPassBuilder<S, T> {
     fn get_attachment_descriptions(
         properties: &AttachmentProperties,
     ) -> Vec<vk::AttachmentDescription> {
@@ -446,20 +449,20 @@ impl<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> RenderPassBuild
     }
 
     fn get_subpass_descriptions() -> Vec<SubpassDescription> {
-        let mut descriptions = write_descriptions::<A, S>(Vec::with_capacity(S::LEN));
+        let mut descriptions = write_descriptions::<S>(Vec::with_capacity(S::LEN));
         descriptions.reverse();
         descriptions
     }
 
     fn get_subpass_dependencies() -> Vec<vk::SubpassDependency> {
-        SubpassDependencyBuilder::<A, S>::new().build()
+        SubpassDependencyBuilder::<S>::new().build()
     }
 }
 
 pub trait RenderPassConfig: 'static {
     type Attachments: AttachmentList;
+    type Subpasses: SubpassList<Attachments = Self::Attachments>;
     type Transitions: TransitionList<Self::Attachments>;
-    type Subpasses: SubpassList<Self::Attachments>;
 
     fn try_get_subpass_index<N: Subpass<Self::Attachments>>() -> Option<usize> {
         Self::Subpasses::try_get_subpass_index::<N>()
@@ -474,10 +477,10 @@ pub trait RenderPassConfig: 'static {
     fn get_subpass_dependencies() -> Vec<vk::SubpassDependency>;
 }
 
-impl<A: AttachmentList, T: TransitionList<A>, S: SubpassList<A>> RenderPassConfig
-    for RenderPassBuilder<A, T, S>
+impl<S: SubpassList, T: TransitionList<S::Attachments>> RenderPassConfig
+    for RenderPassBuilder<S, T>
 {
-    type Attachments = A;
+    type Attachments = S::Attachments;
     type Transitions = T;
     type Subpasses = S;
 

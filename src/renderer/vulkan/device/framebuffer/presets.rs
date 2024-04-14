@@ -46,22 +46,6 @@ impl Attachment for Resolve {
     }
 }
 
-pub type AttachmentsEmpty = AttachmentTerminator;
-pub type AttachmentsColorDepthCombined = AttachmentNode<
-    ColorMultisampled,
-    AttachmentNode<DepthStencilMultisampled, AttachmentNode<Resolve, AttachmentTerminator>>,
->;
-
-pub type AttachmentsDepthPrepass = AttachmentNode<
-    ColorMultisampled,
-    AttachmentNode<
-        ColorMultisampled,
-        AttachmentNode<DepthStencilMultisampled, AttachmentNode<Resolve, AttachmentTerminator>>,
-    >,
->;
-
-// deferred.rs
-
 pub type AttachmentsGBuffer = AttachmentNode<
     ColorMultisampled, // Combined
     AttachmentNode<

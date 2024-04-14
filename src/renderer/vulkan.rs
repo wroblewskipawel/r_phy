@@ -10,19 +10,18 @@ use self::device::{
         operation::Graphics,
         BeginCommand, Persistent,
     },
-    descriptor::{DescriptorPool, GBufferDescriptorSet, TwoInputAttachmentDescriptorSet},
-    framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder, InputAttachment},
+    descriptor::{DescriptorPool, GBufferDescriptorSet},
+    framebuffer::{
+        presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
+        InputAttachment,
+    },
     material::MaterialPack,
     mesh::MeshPack,
     pipeline::{
         GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferWritePassPipeline,
-        GraphicsPipeline, GraphicsPipelineColorPass, GraphicsPipelineDepthDisplay,
-        GraphicsPipelineForwardDepthPrepass, ModelMatrix, ShaderDirectory,
+        GraphicsPipeline, ModelMatrix, ShaderDirectory,
     },
-    render_pass::{
-        ColorPassSubpass, DeferedRenderPass, DepthDisplaySubpass, DepthPrepassSubpass,
-        ForwardDepthPrepassRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass,
-    },
+    render_pass::{DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass},
     skybox::Skybox,
 };
 
@@ -57,26 +56,16 @@ struct FrameState {
 }
 
 struct DeferrredPipeline {
-    render_pass: RenderPass<DeferedRenderPass>,
-    depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline>,
-    write_pass: GraphicsPipeline<GBufferWritePassPipeline>,
-    shading_pass: GraphicsPipeline<GBufferShadingPassPipeline>,
+    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
+    depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
+    write_pass: GraphicsPipeline<GBufferWritePassPipeline<AttachmentsGBuffer>>,
+    shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
-    mesh: MeshPack,
-}
-
-struct DepthPrepassPipelie {
-    render_pass: RenderPass<ForwardDepthPrepassRenderPass>,
-    depth_prepass: GraphicsPipeline<GraphicsPipelineForwardDepthPrepass>,
-    color_pass: GraphicsPipeline<GraphicsPipelineColorPass>,
-    depth_display_pass: GraphicsPipeline<GraphicsPipelineDepthDisplay>,
-    descriptors: DescriptorPool<TwoInputAttachmentDescriptorSet>,
     mesh: MeshPack,
 }
 
 pub(super) struct VulkanRenderer {
     defered_pipeline: DeferrredPipeline,
-    depth_prepass_pipeline: DepthPrepassPipelie,
     current_frame_state: Option<FrameState>,
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
@@ -159,8 +148,8 @@ impl VulkanRenderer {
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
         let surface = VulkanSurface::create(&entry, &instance, window)?;
         let device = VulkanDevice::create(&instance, &surface)?;
-        let swapchain =
-            device.create_swapchain::<ForwardDepthPrepassRenderPass>(&instance, &surface)?;
+        let swapchain = device
+            .create_swapchain::<DeferedRenderPass<AttachmentsGBuffer>>(&instance, &surface)?;
         // TODO: Error handling should be improved - currently when shader source files are missing,
         // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
         // while error message indicating true cause of the issue is never presented to the user
@@ -168,45 +157,6 @@ impl VulkanRenderer {
         // while also some preset of preconfigured one should be available
         // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
         let skybox = device.create_skybox(&swapchain, Path::new("assets/skybox/skybox"))?;
-
-        let mut depth_prepass_pipeline = DepthPrepassPipelie {
-            render_pass: device.get_render_pass()?,
-            depth_prepass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/depth_prepass")),
-                swapchain.image_extent,
-            )?,
-            color_pass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/unlit_textured")),
-                swapchain.image_extent,
-            )?,
-            depth_display_pass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/depth_display")),
-                swapchain.image_extent,
-            )?,
-            descriptors: device
-                .create_descriptor_pool(TwoInputAttachmentDescriptorSet::builder(), 1)?,
-            mesh: device.load_mesh_pack(&[MeshBuilder::plane_subdivided(
-                0,
-                2.0 * Vector3::x(),
-                2.0 * Vector3::y(),
-                Vector3::zero(),
-                false,
-            )
-            .offset(Vector3::new(-1.0, -1.0, 0.0))
-            .build()])?,
-        };
-        let descriptor_write = depth_prepass_pipeline
-            .descriptors
-            .get_writer()
-            .write_image(&[
-                InputAttachment {
-                    image_view: swapchain.color_buffer.image_view,
-                },
-                InputAttachment {
-                    image_view: swapchain.depth_buffer.image_view,
-                },
-            ]);
-        device.write_descriptor_sets(&mut depth_prepass_pipeline.descriptors, descriptor_write);
 
         let mut defered_pipeline = DeferrredPipeline {
             render_pass: device.get_render_pass()?,
@@ -251,7 +201,7 @@ impl VulkanRenderer {
         device.write_descriptor_sets(&mut defered_pipeline.descriptors, descriptor_write);
         Ok(Self {
             defered_pipeline,
-            depth_prepass_pipeline,
+            // depth_prepass_pipeline,
             current_frame_state: None,
             materials: vec![],
             meshes: vec![],
@@ -278,17 +228,6 @@ impl Drop for VulkanRenderer {
                 .for_each(|pack| self.device.destroy_mesh_pack(pack));
             self.device.destroy_skybox(&mut self.skybox);
 
-            // depth prepass pipeline
-            self.device
-                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.depth_prepass);
-            self.device
-                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.color_pass);
-            self.device
-                .destroy_graphics_pipeline(&mut self.depth_prepass_pipeline.depth_display_pass);
-            self.device
-                .destroy_descriptor_pool(&mut self.depth_prepass_pipeline.descriptors);
-            self.device
-                .destroy_mesh_pack(&mut self.depth_prepass_pipeline.mesh);
             // defered pipeline
             self.device
                 .destroy_graphics_pipeline(&mut self.defered_pipeline.depth_prepass);
@@ -368,7 +307,7 @@ impl Renderer for VulkanRenderer {
             .begin_frame(&mut self.swapchain, &camera_matrices)?;
         let depth_prepass_command = self
             .device
-            .begin_secondary_command::<_, _, _, GBufferDepthPrepas>(
+            .begin_secondary_command::<_, _, _, GBufferDepthPrepas<_>>(
                 depth_prepass_command,
                 self.defered_pipeline.render_pass,
                 swapchain_frame.framebuffer,
@@ -385,7 +324,7 @@ impl Renderer for VulkanRenderer {
             });
         let g_write_command = self
             .device
-            .begin_secondary_command::<_, _, _, GBufferWritePass>(
+            .begin_secondary_command::<_, _, _, GBufferWritePass<_>>(
                 g_write_command,
                 self.defered_pipeline.render_pass,
                 swapchain_frame.framebuffer,
@@ -400,7 +339,7 @@ impl Renderer for VulkanRenderer {
         });
         let g_combine_command = self
             .device
-            .begin_secondary_command::<_, _, _, GBufferShadingPass>(
+            .begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
                 g_combine_command,
                 self.defered_pipeline.render_pass,
                 swapchain_frame.framebuffer,
@@ -575,7 +514,7 @@ impl Renderer for VulkanRenderer {
                 &self.defered_pipeline.write_pass,
                 self.materials[material_pack_index as usize].descriptors[material_index as usize],
             )
-            .push_constants(&self.depth_prepass_pipeline.color_pass, &model_matrix)
+            .push_constants(&self.defered_pipeline.write_pass, &model_matrix)
             .draw_mesh(mesh_ranges)
         });
         self.current_frame_state.replace(FrameState {
