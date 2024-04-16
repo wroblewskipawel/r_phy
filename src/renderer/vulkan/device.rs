@@ -1,12 +1,14 @@
 pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod descriptor;
+pub(super) mod frame;
 pub(super) mod framebuffer;
 pub(super) mod image;
 pub(super) mod material;
 pub(super) mod mesh;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
+pub(super) mod renderer;
 pub(super) mod skybox;
 pub(super) mod swapchain;
 
@@ -21,7 +23,6 @@ use std::{
     error::Error,
     ffi::CStr,
 };
-use swapchain::VulkanSwapchain;
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -171,7 +172,7 @@ impl PhysicalDeviceProperties {
     ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
         let supported_extensions =
             unsafe { instance.enumerate_device_extension_properties(physical_device)? };
-        let required_extensions = VulkanSwapchain::required_extensions();
+        let required_extensions = swapchain::required_extensions();
         let enabled_extension_names =
             required_extensions
                 .iter()

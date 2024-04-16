@@ -3,16 +3,19 @@ use crate::renderer::vulkan::device::{
         PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox,
         PipelineLayoutTextured, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
     },
-    render_pass::{DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass},
+    render_pass::{
+        DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
+        GBufferWritePass,
+    },
 };
 
 use super::GraphicsPipelineBuilder;
 
-pub type GraphicsPipelineColorDepthCombinedSkybox<A> = GraphicsPipelineBuilder<
+pub type GBufferSkyboxPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutSkybox,
     StatesSkybox,
     DeferedRenderPass<A>,
-    GBufferWritePass<A>,
+    GBufferSkyboxPass<A>,
 >;
 
 pub type GBufferDepthPrepasPipeline<A> = GraphicsPipelineBuilder<

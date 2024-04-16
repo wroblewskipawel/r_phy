@@ -2,43 +2,25 @@ mod debug;
 mod device;
 mod surface;
 
-use crate::math::types::{Matrix4, Vector3};
+use crate::math::types::Matrix4;
 
 use self::device::{
-    command::{
-        level::{Primary, Secondary},
-        operation::Graphics,
-        BeginCommand, Persistent,
-    },
-    descriptor::{DescriptorPool, GBufferDescriptorSet},
-    framebuffer::{
-        presets::AttachmentsGBuffer, AttachmentReferences, ClearColor, ClearDeptStencil, ClearNone,
-        ClearValueBuilder,
-    },
+    frame::{FrameData, FramePool},
+    framebuffer::presets::AttachmentsGBuffer,
     material::MaterialPack,
     mesh::MeshPack,
-    pipeline::{
-        GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferWritePassPipeline,
-        GraphicsPipeline, ModelMatrix, ShaderDirectory,
-    },
-    render_pass::{
-        DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferWritePass, Subpass,
-    },
-    skybox::Skybox,
+    render_pass::DeferedRenderPass,
+    renderer::deferred::DeferredRenderer,
 };
 
 use super::{
-    camera::{Camera, CameraMatrices},
-    model::{Material, MaterialHandle, Mesh, MeshBuilder, MeshHandle, Model},
+    camera::Camera,
+    model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
     Renderer,
 };
 use ash::{vk, Entry, Instance};
 use debug::VulkanDebugUtils;
-use device::{
-    render_pass::RenderPass,
-    swapchain::{SwapchainFrame, VulkanSwapchain},
-    VulkanDevice,
-};
+use device::{swapchain::VulkanSwapchain, VulkanDevice};
 use std::{
     error::Error,
     ffi::{c_char, CStr},
@@ -47,32 +29,13 @@ use std::{
 use surface::VulkanSurface;
 use winit::window::Window;
 
-struct FrameState {
-    camera_matrices: CameraMatrices,
-    primary_command: BeginCommand<Persistent, Primary, Graphics>,
-    depth_prepass_command: BeginCommand<Persistent, Secondary, Graphics>,
-    g_write_command: BeginCommand<Persistent, Secondary, Graphics>,
-    g_combine_command: BeginCommand<Persistent, Secondary, Graphics>,
-    swapchain_frame: SwapchainFrame,
-    mesh_pack_index: Option<u32>,
-}
-
-struct DeferrredPipeline {
-    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
-    depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
-    write_pass: GraphicsPipeline<GBufferWritePassPipeline<AttachmentsGBuffer>>,
-    shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
-    descriptors: DescriptorPool<GBufferDescriptorSet>,
-    mesh: MeshPack,
-}
-
 pub(super) struct VulkanRenderer {
-    defered_pipeline: DeferrredPipeline,
-    current_frame_state: Option<FrameState>,
+    current_frame: Option<FrameData<DeferredRenderer>>,
     materials: Vec<MaterialPack>,
     meshes: Vec<MeshPack>,
-    skybox: Skybox,
-    swapchain: VulkanSwapchain,
+    frames: FramePool,
+    renderer: DeferredRenderer,
+    swapchain: VulkanSwapchain<AttachmentsGBuffer>,
     device: VulkanDevice,
     surface: VulkanSurface,
     debug_utils: Option<VulkanDebugUtils>,
@@ -122,6 +85,12 @@ fn check_required_layer_support(
     Ok(supported)
 }
 
+// TODO: Error handling should be improved - currently when shader source files are missing,
+// execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
+// while error message indicating true cause of the issue is never presented to the user
+// TODO: User should be able to load custom shareds,
+// while also some preset of preconfigured one should be available
+// API for user-defined shaders should be based on PipelineLayoutBuilder type-list
 impl VulkanRenderer {
     pub fn new(window: &Window) -> Result<Self, Box<dyn Error>> {
         let entry = unsafe { Entry::load()? };
@@ -150,54 +119,26 @@ impl VulkanRenderer {
         let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
         let surface = VulkanSurface::create(&entry, &instance, window)?;
         let device = VulkanDevice::create(&instance, &surface)?;
-        let swapchain = device
-            .create_swapchain::<DeferedRenderPass<AttachmentsGBuffer>>(&instance, &surface)?;
-        // TODO: Error handling should be improved - currently when shader source files are missing,
-        // execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
-        // while error message indicating true cause of the issue is never presented to the user
-        // TODO: User should be able to load custom shareds,
-        // while also some preset of preconfigured one should be available
-        // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-        let skybox = device.create_skybox(&swapchain, Path::new("assets/skybox/skybox"))?;
+        let mut renderer = device.create_deferred_renderer()?;
+        let swapchain = device.create_swapchain::<AttachmentsGBuffer>(
+            &instance,
+            &surface,
+            |swapchain_image, extent| {
+                device.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
+                    renderer.get_framebuffer_builder(swapchain_image),
+                    extent,
+                )
+            },
+        )?;
+        device.update_deferred_renderer_input_descriptors(&mut renderer, &swapchain);
+        let frames = device.create_frame_pool::<DeferredRenderer>(&swapchain)?;
 
-        let mut defered_pipeline = DeferrredPipeline {
-            render_pass: device.get_render_pass()?,
-            depth_prepass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/depth_prepass")),
-                swapchain.image_extent,
-            )?,
-            write_pass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/gbuffer_write")),
-                swapchain.image_extent,
-            )?,
-            shading_pass: device.create_graphics_pipeline(
-                ShaderDirectory::new(Path::new("shaders/spv/gbuffer_combine")),
-                swapchain.image_extent,
-            )?,
-            descriptors: device.create_descriptor_pool(GBufferDescriptorSet::builder(), 1)?,
-            mesh: device.load_mesh_pack(&[MeshBuilder::plane_subdivided(
-                0,
-                2.0 * Vector3::y(),
-                2.0 * Vector3::x(),
-                Vector3::zero(),
-                false,
-            )
-            .offset(Vector3::new(-1.0, -1.0, 0.0))
-            .build()])?,
-        };
-
-        let descriptor_write = defered_pipeline.descriptors.get_writer().write_image(
-            &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                .get_input_attachments(&swapchain.framebuffers[0]),
-        );
-
-        device.write_descriptor_sets(&mut defered_pipeline.descriptors, descriptor_write);
         Ok(Self {
-            defered_pipeline,
-            current_frame_state: None,
+            current_frame: None,
             materials: vec![],
             meshes: vec![],
-            skybox,
+            frames,
+            renderer,
             swapchain,
             device,
             surface,
@@ -218,21 +159,8 @@ impl Drop for VulkanRenderer {
             self.meshes
                 .iter_mut()
                 .for_each(|pack| self.device.destroy_mesh_pack(pack));
-            self.device.destroy_skybox(&mut self.skybox);
-
-            // defered pipeline
-            self.device
-                .destroy_graphics_pipeline(&mut self.defered_pipeline.depth_prepass);
-            self.device
-                .destroy_graphics_pipeline(&mut self.defered_pipeline.write_pass);
-            self.device
-                .destroy_graphics_pipeline(&mut self.defered_pipeline.shading_pass);
-            self.device
-                .destroy_mesh_pack(&mut self.defered_pipeline.mesh);
-            self.device
-                .destroy_descriptor_pool(&mut self.defered_pipeline.descriptors);
-            // end destroy pipelines
-
+            self.device.destroy_deferred_renderer(&mut self.renderer);
+            self.device.destory_frame_pool(&mut self.frames);
             self.device.destroy_swapchain(&mut self.swapchain);
             self.device.destroy_render_passes();
             self.device.destroy_pipeline_layouts();
@@ -288,141 +216,20 @@ impl From<VulkanMaterialHandle> for MaterialHandle {
 impl Renderer for VulkanRenderer {
     fn begin_frame(&mut self, camera: &dyn Camera) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let (
-            primary_command,
-            depth_prepass_command,
-            g_write_command,
-            g_combine_command,
-            swapchain_frame,
-        ) = self
-            .device
-            .begin_frame(&mut self.swapchain, &camera_matrices)?;
-        let depth_prepass_command = self
-            .device
-            .begin_secondary_command::<_, _, _, GBufferDepthPrepas<_>>(
-                depth_prepass_command,
-                self.defered_pipeline.render_pass,
-                swapchain_frame.framebuffer,
-            )?;
-        let depth_prepass_command = self
-            .device
-            .record_command(depth_prepass_command, |command| {
-                command
-                    .bind_pipeline(&self.defered_pipeline.depth_prepass)
-                    .bind_descriptor_set(
-                        &self.defered_pipeline.depth_prepass,
-                        swapchain_frame.camera_descriptor,
-                    )
-            });
-        let g_write_command = self
-            .device
-            .begin_secondary_command::<_, _, _, GBufferWritePass<_>>(
-                g_write_command,
-                self.defered_pipeline.render_pass,
-                swapchain_frame.framebuffer,
-            )?;
-        let g_write_command = self.device.record_command(g_write_command, |command| {
-            command
-                .bind_pipeline(&self.defered_pipeline.write_pass)
-                .bind_descriptor_set(
-                    &self.defered_pipeline.write_pass,
-                    swapchain_frame.camera_descriptor,
-                )
-        });
-        let g_combine_command = self
-            .device
-            .begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
-                g_combine_command,
-                self.defered_pipeline.render_pass,
-                swapchain_frame.framebuffer,
-            )?;
-        let g_combine_command = self.device.record_command(g_combine_command, |command| {
-            command
-                .bind_pipeline(&self.defered_pipeline.shading_pass)
-                .bind_descriptor_set(
-                    &self.defered_pipeline.shading_pass,
-                    self.defered_pipeline.descriptors[0],
-                )
-                .bind_mesh_pack(&self.defered_pipeline.mesh)
-                .draw_mesh(self.defered_pipeline.mesh.meshes[0])
-        });
-        self.current_frame_state.replace(FrameState {
+        let frame = self.device.next_frame(
+            &mut self.frames,
+            &self.renderer,
+            &self.swapchain,
             camera_matrices,
-            primary_command,
-            depth_prepass_command,
-            g_write_command,
-            g_combine_command,
-            swapchain_frame,
-            mesh_pack_index: None,
-        });
+        )?;
+        self.current_frame.replace(frame);
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let FrameState {
-            camera_matrices,
-            primary_command,
-            depth_prepass_command,
-            g_write_command,
-            g_combine_command,
-            swapchain_frame,
-            ..
-        } = self
-            .current_frame_state
-            .take()
-            .ok_or("current_frame is None!")?;
-        let depth_prepass_command = self.device.finish_command(depth_prepass_command)?;
-        let g_write_command = self.device.record_command(g_write_command, |command| {
-            command.draw_skybox(&self.skybox, camera_matrices)
-        });
-        let g_write_command = self.device.finish_command(g_write_command)?;
-        let g_combine_command = self.device.finish_command(g_combine_command)?;
-
-        let clear_values = ClearValueBuilder::new()
-            .push(ClearNone {})
-            .push(ClearDeptStencil {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            });
-        let primary_command = self.device.record_command(primary_command, |command| {
-            command
-                .begin_render_pass(
-                    &swapchain_frame,
-                    &self.defered_pipeline.render_pass,
-                    &clear_values,
-                )
-                .write_secondary(&depth_prepass_command)
-                .next_render_pass()
-                .write_secondary(&g_write_command)
-                .next_render_pass()
-                .write_secondary(&g_combine_command)
-                .end_render_pass()
-        });
-
+        let frame = self.current_frame.take().ok_or("current_frame is None!")?;
         self.device
-            .end_frame(&mut self.swapchain, primary_command, swapchain_frame)?;
+            .end_frame(&self.renderer, frame, &self.swapchain)?;
         Ok(())
     }
 
@@ -462,62 +269,17 @@ impl Renderer for VulkanRenderer {
 
     fn draw(&mut self, model: Model, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
         let Model { mesh, material } = model;
-        let model_matrix: ModelMatrix = (*transform).into();
-        let VulkanMeshHandle {
-            mesh_pack_index,
-            mesh_index,
-        } = mesh.into();
-        let VulkanMaterialHandle {
-            material_pack_index,
-            material_index,
-        } = material.into();
-        let FrameState {
-            camera_matrices,
-            primary_command,
-            depth_prepass_command,
-            g_combine_command,
-            g_write_command,
-            swapchain_frame,
-            mesh_pack_index: current_mesh_pack_index,
-        } = self
-            .current_frame_state
-            .take()
-            .ok_or("current_frame is None!")?;
-        let meshes = &self.meshes[mesh_pack_index as usize];
-        let mesh_ranges = meshes.meshes[mesh_index as usize];
-        let depth_prepass_command = self
-            .device
-            .record_command(depth_prepass_command, |command| {
-                if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
-                    command.bind_mesh_pack(&self.meshes[mesh_pack_index as usize])
-                } else {
-                    command
-                }
-                .push_constants(&self.defered_pipeline.depth_prepass, &model_matrix)
-                .draw_mesh(mesh_ranges)
-            });
-        let g_write_command = self.device.record_command(g_write_command, |command| {
-            if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
-                command.bind_mesh_pack(&self.meshes[mesh_pack_index as usize])
-            } else {
-                command
-            }
-            .bind_descriptor_set(
-                &self.defered_pipeline.write_pass,
-                self.materials[material_pack_index as usize].descriptors[material_index as usize],
-            )
-            .push_constants(&self.defered_pipeline.write_pass, &model_matrix)
-            .draw_mesh(mesh_ranges)
-        });
-        self.current_frame_state.replace(FrameState {
-            camera_matrices,
-            primary_command,
-            depth_prepass_command,
-            g_write_command,
-            g_combine_command,
-            swapchain_frame,
-            mesh_pack_index: Some(mesh_pack_index),
-        });
+        let frame = self.current_frame.take().ok_or("current_frame is None!")?;
+        let frame = self.device.draw_mesh(
+            &self.renderer,
+            frame,
+            transform,
+            mesh.into(),
+            material.into(),
+            &self.meshes,
+            &self.materials,
+        );
+        self.current_frame.replace(frame);
         Ok(())
     }
 }

@@ -4,7 +4,10 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{math::types::Vector4, renderer::camera::CameraMatrices};
+use crate::{
+    math::types::Vector4,
+    renderer::camera::{Camera, CameraMatrices},
+};
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -19,7 +22,7 @@ use super::{
     mesh::{BufferType, MeshPack, MeshRange},
     pipeline::{GraphicsPipeline, GraphicspipelineConfig, Layout, PushConstant},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    skybox::Skybox,
+    skybox::{LayoutSkybox, Skybox},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
@@ -29,22 +32,167 @@ pub struct Transient;
 pub struct Persistent;
 
 pub mod level {
+    use std::error::Error;
+
     use ash::vk;
+
+    use crate::renderer::vulkan::device::VulkanDevice;
 
     pub trait Level {
         const LEVEL: vk::CommandBufferLevel;
+        type CommandData;
+        type PersistentAllocator;
+
+        fn buffer(command: &Self::CommandData) -> vk::CommandBuffer;
+
+        fn create_persistent_allocator(
+            device: &VulkanDevice,
+            command_pool: vk::CommandPool,
+            size: usize,
+        ) -> Result<Self::PersistentAllocator, Box<dyn Error>>;
+
+        fn destory_persistent_alocator(
+            device: &VulkanDevice,
+            allocator: &mut Self::PersistentAllocator,
+        );
+
+        fn allocate_persistent_command_buffer(
+            allocator: &mut Self::PersistentAllocator,
+        ) -> (usize, Self::CommandData);
     }
 
-    pub struct Primary {}
+    pub struct PrimaryPersistenAllocator {
+        index: usize,
+        buffers: Vec<vk::CommandBuffer>,
+        fences: Vec<vk::Fence>,
+    }
+
+    pub struct Primary {
+        pub buffer: vk::CommandBuffer,
+        pub fence: vk::Fence,
+    }
 
     impl Level for Primary {
         const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::PRIMARY;
+        type CommandData = Self;
+        type PersistentAllocator = PrimaryPersistenAllocator;
+
+        fn allocate_persistent_command_buffer(
+            allocator: &mut Self::PersistentAllocator,
+        ) -> (usize, Self::CommandData) {
+            let index = allocator.index;
+            allocator.index = (allocator.index + 1) % allocator.buffers.len();
+            (
+                index,
+                Self {
+                    buffer: allocator.buffers[index],
+                    fence: allocator.fences[index],
+                },
+            )
+        }
+
+        fn create_persistent_allocator(
+            device: &VulkanDevice,
+            command_pool: vk::CommandPool,
+            size: usize,
+        ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
+            let allocate_info = vk::CommandBufferAllocateInfo {
+                command_pool,
+                level: Self::LEVEL,
+                command_buffer_count: size as u32,
+                ..Default::default()
+            };
+            let (buffers, fences) = unsafe {
+                let buffers = device.allocate_command_buffers(&allocate_info)?;
+                let fences = (0..buffers.len())
+                    .map(|_| {
+                        device.create_fence(
+                            &vk::FenceCreateInfo {
+                                flags: vk::FenceCreateFlags::SIGNALED,
+                                ..Default::default()
+                            },
+                            None,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                (buffers, fences)
+            };
+            Ok(PrimaryPersistenAllocator {
+                buffers,
+                fences,
+                index: 0,
+            })
+        }
+
+        fn destory_persistent_alocator(
+            device: &VulkanDevice,
+            allocator: &mut Self::PersistentAllocator,
+        ) {
+            unsafe {
+                allocator
+                    .fences
+                    .iter()
+                    .for_each(|&fence| device.destroy_fence(fence, None));
+            }
+        }
+
+        fn buffer(command: &Self::CommandData) -> vk::CommandBuffer {
+            command.buffer
+        }
     }
 
-    pub struct Secondary {}
+    pub struct SecondaryPersistentAllocator {
+        index: usize,
+        buffers: Vec<vk::CommandBuffer>,
+    }
+
+    pub struct Secondary {
+        pub buffer: vk::CommandBuffer,
+    }
 
     impl Level for Secondary {
         const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::SECONDARY;
+        type CommandData = Self;
+        type PersistentAllocator = SecondaryPersistentAllocator;
+
+        fn allocate_persistent_command_buffer(
+            allocator: &mut Self::PersistentAllocator,
+        ) -> (usize, Self::CommandData) {
+            let index = allocator.index;
+            allocator.index = (allocator.index + 1) % allocator.buffers.len();
+            (
+                index,
+                Self {
+                    buffer: allocator.buffers[index],
+                },
+            )
+        }
+
+        fn create_persistent_allocator(
+            device: &VulkanDevice,
+            command_pool: vk::CommandPool,
+            size: usize,
+        ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
+            let allocate_info = vk::CommandBufferAllocateInfo {
+                command_pool,
+                level: Self::LEVEL,
+                command_buffer_count: size as u32,
+                ..Default::default()
+            };
+            let buffers = unsafe { device.allocate_command_buffers(&allocate_info)? };
+            Ok(SecondaryPersistentAllocator { buffers, index: 0 })
+        }
+
+        fn destory_persistent_alocator(
+            device: &VulkanDevice,
+            allocator: &mut Self::PersistentAllocator,
+        ) {
+            // Buffers are destroyed with the command pool
+        }
+
+        fn buffer(command: &Self::CommandData) -> vk::CommandBuffer {
+            command.buffer
+        }
     }
 }
 
@@ -102,29 +250,24 @@ pub mod operation {
 }
 
 pub(super) struct Command<T, L: Level, O: Operation> {
-    buffer: vk::CommandBuffer,
-    pub fence: vk::Fence,
-    _phantom: PhantomData<(T, L, O)>,
+    data: L::CommandData,
+    _phantom: PhantomData<(T, O)>,
 }
 
 pub(super) struct PersistentCommandPool<L: Level, O: Operation> {
-    head: usize, // Create dedicated ring buffer (wrapper? generic where T: Index) class
     command_pool: vk::CommandPool,
-    buffers: Vec<vk::CommandBuffer>,
-    fences: Vec<vk::Fence>,
+    allocator: L::PersistentAllocator,
     _phantom: PhantomData<(L, O)>,
 }
 
 impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
     pub fn next(&mut self) -> (usize, NewCommand<Persistent, L, O>) {
-        let next_command_index = self.head;
-        self.head = (self.head + 1) % self.buffers.len();
+        let (index, data) = L::allocate_persistent_command_buffer(&mut self.allocator);
         let command = Command {
-            buffer: self.buffers[next_command_index],
-            fence: self.fences[next_command_index],
+            data,
             _phantom: PhantomData,
         };
-        (next_command_index, NewCommand(command))
+        (index, NewCommand(command))
     }
 }
 
@@ -141,32 +284,10 @@ impl VulkanDevice {
                 None,
             )?
         };
-        let allocate_info = vk::CommandBufferAllocateInfo {
-            command_pool,
-            level: L::LEVEL,
-            command_buffer_count: size as u32,
-            ..Default::default()
-        };
-        let (buffers, fences) = unsafe {
-            let buffers = self.device.allocate_command_buffers(&allocate_info)?;
-            let fences = (0..buffers.len())
-                .map(|_| {
-                    self.device.create_fence(
-                        &vk::FenceCreateInfo {
-                            flags: vk::FenceCreateFlags::SIGNALED,
-                            ..Default::default()
-                        },
-                        None,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (buffers, fences)
-        };
+        let allocator = L::create_persistent_allocator(self, command_pool, size)?;
         Ok(PersistentCommandPool {
             command_pool,
-            buffers,
-            fences,
-            head: 0,
+            allocator,
             _phantom: PhantomData,
         })
     }
@@ -175,14 +296,11 @@ impl VulkanDevice {
         &self,
         command_pool: &mut PersistentCommandPool<L, O>,
     ) {
+        L::destory_persistent_alocator(self, &mut command_pool.allocator);
         unsafe {
-            command_pool
-                .fences
-                .iter()
-                .for_each(|&fence| self.device.destroy_fence(fence, None));
             self.device
-                .destroy_command_pool(command_pool.command_pool, None)
-        };
+                .destroy_command_pool(command_pool.command_pool, None);
+        }
     }
 }
 
@@ -195,21 +313,6 @@ impl<'a, T, L: Level, O: Operation> From<&'a NewCommand<T, L, O>> for &'a Comman
 }
 
 impl VulkanDevice {
-    pub(super) fn begin_primary_command<T, O: Operation>(
-        &self,
-        command: NewCommand<T, Primary, O>,
-    ) -> Result<BeginCommand<T, Primary, O>, Box<dyn Error>> {
-        let NewCommand(command) = command;
-        unsafe {
-            self.device.begin_command_buffer(
-                command.buffer,
-                &vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )?;
-        }
-        Ok(BeginCommand(command))
-    }
-
     pub fn begin_secondary_command<
         T,
         O: Operation,
@@ -231,7 +334,7 @@ impl VulkanDevice {
         let NewCommand(command) = command;
         unsafe {
             self.device.begin_command_buffer(
-                command.buffer,
+                Secondary::buffer(&command.data),
                 &vk::CommandBufferBeginInfo::builder()
                     .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
                     .inheritance_info(&vk::CommandBufferInheritanceInfo {
@@ -245,17 +348,17 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub(super) fn begin_persistent_command<L: Level, O: Operation>(
+    pub(super) fn begin_primary_command<T, O: Operation>(
         &self,
-        command: NewCommand<Persistent, L, O>,
-    ) -> Result<BeginCommand<Persistent, L, O>, Box<dyn Error>> {
+        command: NewCommand<T, Primary, O>,
+    ) -> Result<BeginCommand<T, Primary, O>, Box<dyn Error>> {
         let NewCommand(command) = command;
         unsafe {
             self.device
-                .wait_for_fences(&[command.fence], true, u64::MAX)?;
-            self.device.reset_fences(&[command.fence])?;
+                .wait_for_fences(&[command.data.fence], true, u64::MAX)?;
+            self.device.reset_fences(&[command.data.fence])?;
             self.device.begin_command_buffer(
-                command.buffer,
+                command.data.buffer,
                 &vk::CommandBufferBeginInfo::builder()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
@@ -284,9 +387,9 @@ impl VulkanDevice {
     ) -> Result<FinishedCommand<T, L, O>, Box<dyn Error>> {
         let BeginCommand(command) = command;
         unsafe {
-            self.device.end_command_buffer(command.buffer)?;
+            self.device.end_command_buffer(L::buffer(&command.data))?;
         }
-        Ok(FinishedCommand(command, self))
+        Ok(FinishedCommand(command))
     }
 }
 
@@ -316,7 +419,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_next_subpass(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
             );
         }
@@ -324,9 +427,14 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     }
 
     pub fn write_secondary(self, secondary: &FinishedCommand<T, Secondary, O>) -> Self {
-        let FinishedCommand(secondary, _) = secondary;
+        let FinishedCommand(secondary) = secondary;
         let RecordingCommand(command, device) = self;
-        unsafe { device.cmd_execute_commands(command.buffer, &[secondary.buffer]) }
+        unsafe {
+            device.cmd_execute_commands(
+                L::buffer(&command.data),
+                &[Secondary::buffer(&secondary.data)],
+            )
+        }
         RecordingCommand(command, device)
     }
 
@@ -340,7 +448,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let src = src.into();
         let dst = dst.into();
         unsafe {
-            device.cmd_copy_buffer(command.buffer, src.buffer, dst.buffer, ranges);
+            device.cmd_copy_buffer(L::buffer(&command.data), src.buffer, dst.buffer, ranges);
         }
         RecordingCommand(command, device)
     }
@@ -362,7 +470,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         );
         unsafe {
             device.cmd_pipeline_barrier(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::DependencyFlags::BY_REGION,
@@ -439,7 +547,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_pipeline_barrier(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::DependencyFlags::BY_REGION,
@@ -464,7 +572,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                 }],
             );
             device.cmd_pipeline_barrier(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::DependencyFlags::BY_REGION,
@@ -489,7 +597,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                 }],
             );
             device.cmd_blit_image(
-                command.buffer,
+                L::buffer(&command.data),
                 image,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 image,
@@ -541,7 +649,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let dst = dst.into();
         unsafe {
             device.cmd_copy_buffer_to_image(
-                command.buffer,
+                L::buffer(&command.data),
                 src.buffer,
                 dst.image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -569,7 +677,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
 
     pub fn begin_render_pass<C: RenderPassConfig>(
         self,
-        frame: &SwapchainFrame,
+        frame: &SwapchainFrame<C::Attachments>,
         render_pass: &RenderPass<C>,
         clear_values: &Clear<C::Attachments>,
     ) -> Self {
@@ -577,7 +685,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let clear_values = clear_values.get_clear_values();
         unsafe {
             device.cmd_begin_render_pass(
-                command.buffer,
+                L::buffer(&command.data),
                 &vk::RenderPassBeginInfo {
                     render_pass: render_pass.handle,
                     framebuffer: frame.framebuffer.framebuffer,
@@ -595,7 +703,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     pub fn end_render_pass(self) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
-            device.cmd_end_render_pass(command.buffer);
+            device.cmd_end_render_pass(L::buffer(&command.data));
         }
         RecordingCommand(command, device)
     }
@@ -604,7 +712,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::PipelineBindPoint::GRAPHICS,
                 pipeline.handle,
             );
@@ -616,13 +724,13 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_index_buffer(
-                command.buffer,
+                L::buffer(&command.data),
                 pack.buffer.buffer.buffer,
                 pack.buffer_ranges[BufferType::Index].beg as vk::DeviceSize,
                 vk::IndexType::UINT32,
             );
             device.cmd_bind_vertex_buffers(
-                command.buffer,
+                L::buffer(&command.data),
                 0,
                 &[pack.buffer.buffer.buffer],
                 &[pack.buffer_ranges[BufferType::Vertex].beg as vk::DeviceSize],
@@ -631,7 +739,11 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn draw_skybox(self, skybox: &Skybox, mut camera_matrices: CameraMatrices) -> Self {
+    pub fn draw_skybox<C: GraphicspipelineConfig<Layout = LayoutSkybox>>(
+        self,
+        skybox: &Skybox<C>,
+        mut camera_matrices: CameraMatrices,
+    ) -> Self {
         camera_matrices.view[3] = Vector4::w();
         self.bind_pipeline(&skybox.pipeline)
             .bind_descriptor_set(&skybox.pipeline, skybox.descriptor[0])
@@ -655,7 +767,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_push_constants(
-                command.buffer,
+                L::buffer(&command.data),
                 pipeline.layout.layout,
                 range.stage_flags,
                 range.offset,
@@ -680,7 +792,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_descriptor_sets(
-                command.buffer,
+                L::buffer(&command.data),
                 vk::PipelineBindPoint::GRAPHICS,
                 pipeline.layout.layout,
                 set_index,
@@ -695,7 +807,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_draw_indexed(
-                command.buffer,
+                L::buffer(&command.data),
                 mesh_ranges.indices.len as u32,
                 1,
                 mesh_ranges.indices.first as u32,
@@ -712,33 +824,28 @@ pub struct SubmitSemaphoreState<'a> {
     pub masks: &'a [vk::PipelineStageFlags],
 }
 
-pub(in crate::renderer::vulkan) struct FinishedCommand<'a, T, L: Level, O: Operation>(
-    Command<T, L, O>,
-    &'a VulkanDevice,
-);
+pub(in crate::renderer::vulkan) struct FinishedCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
-impl<'a, T, L: Level, O: Operation> From<&'a FinishedCommand<'a, T, L, O>>
-    for &'a Command<T, L, O>
-{
+impl<'a, T, L: Level, O: Operation> From<&'a FinishedCommand<T, L, O>> for &'a Command<T, L, O> {
     fn from(value: &'a FinishedCommand<T, L, O>) -> Self {
         &value.0
     }
 }
 
-impl<'a, T, L: Level, O: Operation> FinishedCommand<'a, T, L, O> {
-    // Make wait and submit optional
-    pub fn submit(
-        self,
+impl VulkanDevice {
+    pub fn submit_command<'a, T, O: Operation>(
+        &'a self,
+        command: FinishedCommand<T, Primary, O>,
         wait: SubmitSemaphoreState,
         signal: &[vk::Semaphore],
-    ) -> Result<SubmitedCommand<'a, T, L, O>, Box<dyn Error>> {
-        let FinishedCommand(command, device) = self;
+    ) -> Result<SubmitedCommand<'a, T, Primary, O>, Box<dyn Error>> {
+        let FinishedCommand(command) = command;
         unsafe {
-            device.queue_submit(
-                O::get_queue(device),
+            self.device.queue_submit(
+                O::get_queue(self),
                 &[vk::SubmitInfo {
                     command_buffer_count: 1,
-                    p_command_buffers: [command.buffer].as_ptr(),
+                    p_command_buffers: [command.data.buffer].as_ptr(),
                     wait_semaphore_count: wait.semaphores.len() as _,
                     p_wait_semaphores: wait.semaphores.as_ptr(),
                     p_wait_dst_stage_mask: wait.masks.as_ptr(),
@@ -746,10 +853,10 @@ impl<'a, T, L: Level, O: Operation> FinishedCommand<'a, T, L, O> {
                     p_signal_semaphores: signal.as_ptr(),
                     ..Default::default()
                 }],
-                command.fence,
+                command.data.fence,
             )?;
         }
-        Ok(SubmitedCommand(command, device))
+        Ok(SubmitedCommand(command, self))
     }
 }
 pub(in crate::renderer::vulkan) struct SubmitedCommand<'a, T, L: Level, O: Operation>(
@@ -765,18 +872,18 @@ impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
     }
 }
 
-impl<'a, L: Level, O: Operation> SubmitedCommand<'a, Transient, L, O> {
+impl<'a, O: Operation> SubmitedCommand<'a, Transient, Primary, O> {
     pub fn wait(self) -> Result<Self, Box<dyn Error>> {
         let SubmitedCommand(command, device) = self;
         unsafe {
-            device.wait_for_fences(&[command.fence], true, u64::MAX)?;
+            device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
         }
         Ok(Self(command, device))
     }
 }
 
-impl<'a, L: Level, O: Operation> SubmitedCommand<'a, Persistent, L, O> {
-    pub fn _reset(self) -> NewCommand<Persistent, L, O> {
+impl<'a, O: Operation> SubmitedCommand<'a, Persistent, Primary, O> {
+    pub fn _reset(self) -> NewCommand<Persistent, Primary, O> {
         let SubmitedCommand(command, _) = self;
         NewCommand(command)
     }
@@ -784,8 +891,8 @@ impl<'a, L: Level, O: Operation> SubmitedCommand<'a, Persistent, L, O> {
     pub fn _wait(self) -> Result<Self, Box<dyn Error>> {
         let SubmitedCommand(command, device) = self;
         unsafe {
-            device.wait_for_fences(&[command.fence], true, u64::MAX)?;
-            device.reset_fences(&[command.fence])?;
+            device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
+            device.reset_fences(&[command.data.fence])?;
         }
         Ok(Self(command, device))
     }
@@ -829,14 +936,14 @@ impl TransientCommandPools {
 }
 
 impl VulkanDevice {
-    pub(super) fn allocate_transient_command<L: Level, O: Operation>(
+    pub(super) fn allocate_transient_command<O: Operation>(
         &self,
-    ) -> Result<NewCommand<Transient, L, O>, Box<dyn Error>> {
+    ) -> Result<NewCommand<Transient, Primary, O>, Box<dyn Error>> {
         let &buffer = unsafe {
             self.device
                 .allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
-                        .level(L::LEVEL)
+                        .level(Primary::LEVEL)
                         .command_pool(O::get_transient_command_pool(self))
                         .command_buffer_count(1),
                 )?
@@ -844,20 +951,27 @@ impl VulkanDevice {
                 .unwrap()
         };
         let fence = unsafe {
-            self.device
-                .create_fence(&vk::FenceCreateInfo::builder(), None)?
+            self.device.create_fence(
+                &vk::FenceCreateInfo {
+                    flags: vk::FenceCreateFlags::SIGNALED,
+                    ..Default::default()
+                },
+                None,
+            )?
         };
         Ok(NewCommand(Command {
-            buffer,
-            fence,
+            data: Primary { buffer, fence },
             _phantom: PhantomData,
         }))
     }
-    pub(super) fn free_command<'a, T: 'static, L: 'static + Level, O: 'static + Operation>(
+    pub(super) fn free_command<'a, T: 'static, O: 'static + Operation>(
         &self,
-        command: impl Into<&'a Command<T, L, O>>,
+        command: impl Into<&'a Command<T, Primary, O>>,
     ) {
-        let &Command { buffer, fence, .. } = command.into();
+        let &Command {
+            data: Primary { buffer, fence },
+            ..
+        } = command.into();
         unsafe {
             self.device
                 .free_command_buffers(O::get_transient_command_pool(self), &[buffer]);

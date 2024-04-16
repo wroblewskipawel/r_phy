@@ -179,7 +179,9 @@ impl From<shape::Sphere> for Mesh {
             ((value.diameter * UNIT_SPHERE_SUBDIV as f32) as usize).max(UNIT_SPHERE_SUBDIV);
         let mut mesh = MeshBuilder::box_subdivided(num_subdiv, Vector3::new(1.0, 1.0, 1.0), false);
         for vert in &mut mesh.vertices {
-            vert.pos = 0.5 * value.diameter * vert.pos.norm();
+            let dir = vert.pos.norm();
+            vert.norm = dir;
+            vert.pos = 0.5 * value.diameter * dir;
             vert.uv = value.diameter * vert.uv;
         }
         mesh.build()

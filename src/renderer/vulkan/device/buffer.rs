@@ -323,7 +323,7 @@ impl<'a> StagingBuffer<'a> {
     ) -> Result<(), Box<dyn Error>> {
         let command = self
             .device
-            .allocate_transient_command::<level::Primary, operation::Transfer>()?;
+            .allocate_transient_command::<operation::Transfer>()?;
         let command = self.device.begin_primary_command(command)?;
         let command = self.device.record_command(command, |command| {
             command.copy_buffer(
@@ -338,8 +338,8 @@ impl<'a> StagingBuffer<'a> {
         });
         let command = self
             .device
-            .finish_command(command)?
-            .submit(
+            .submit_command(
+                self.device.finish_command(command)?,
                 SubmitSemaphoreState {
                     semaphores: &[],
                     masks: &[],
@@ -366,7 +366,7 @@ impl<'a> StagingBuffer<'a> {
         let dst_old_layout = dst.layout;
         let command = self.device.begin_primary_command(
             self.device
-                .allocate_transient_command::<level::Primary, operation::Graphics>()?,
+                .allocate_transient_command::<operation::Graphics>()?,
         )?;
         let command = self.device.record_command(command, |command| {
             command
@@ -389,10 +389,11 @@ impl<'a> StagingBuffer<'a> {
                     dst_mip_levels,
                 )
         });
+
         let command = self
             .device
-            .finish_command(command)?
-            .submit(
+            .submit_command(
+                self.device.finish_command(command)?,
                 SubmitSemaphoreState {
                     semaphores: &[],
                     masks: &[],

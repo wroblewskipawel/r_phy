@@ -140,13 +140,22 @@ impl IndexMut<usize> for Matrix2 {
     }
 }
 
-impl From<Matrix2> for Matrix3 {
+impl From<Matrix3> for Matrix2 {
     #[inline]
-    fn from(value: Matrix2) -> Self {
+    fn from(value: Matrix3) -> Self {
         Self {
             i: value.i.into(),
             j: value.j.into(),
-            k: Vector3::z(),
+        }
+    }
+}
+
+impl From<Matrix4> for Matrix2 {
+    #[inline]
+    fn from(value: Matrix4) -> Self {
+        Self {
+            i: value.i.into(),
+            j: value.j.into(),
         }
     }
 }
@@ -379,6 +388,28 @@ impl IndexMut<usize> for Matrix3 {
                 .add(index)
                 .as_mut()
                 .unwrap_unchecked()
+        }
+    }
+}
+
+impl From<Matrix2> for Matrix3 {
+    #[inline]
+    fn from(value: Matrix2) -> Self {
+        Self {
+            i: value.i.into(),
+            j: value.j.into(),
+            k: Vector3::z(),
+        }
+    }
+}
+
+impl From<Matrix4> for Matrix3 {
+    #[inline]
+    fn from(value: Matrix4) -> Self {
+        Self {
+            i: value.i.into(),
+            j: value.j.into(),
+            k: value.k.into(),
         }
     }
 }
@@ -644,6 +675,18 @@ impl IndexMut<usize> for Matrix4 {
                 .add(index)
                 .as_mut()
                 .unwrap_unchecked()
+        }
+    }
+}
+
+impl From<Matrix2> for Matrix4 {
+    #[inline]
+    fn from(value: Matrix2) -> Self {
+        Self {
+            i: value.i.into(),
+            j: value.j.into(),
+            k: Vector4::z(),
+            l: Vector4::w(),
         }
     }
 }

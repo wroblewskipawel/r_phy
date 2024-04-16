@@ -97,6 +97,26 @@ impl IndexMut<usize> for Vector2 {
     }
 }
 
+impl From<Vector3> for Vector2 {
+    #[inline]
+    fn from(value: Vector3) -> Self {
+        Vector2 {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
+
+impl From<Vector4> for Vector2 {
+    #[inline]
+    fn from(value: Vector4) -> Self {
+        Vector2 {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
+
 impl Vector2 {
     #[inline]
     pub const fn new(x: f32, y: f32) -> Self {
@@ -269,6 +289,17 @@ impl From<Vector2> for Vector3 {
             x: value.x,
             y: value.y,
             z: 0.0,
+        }
+    }
+}
+
+impl From<Vector4> for Vector3 {
+    #[inline]
+    fn from(value: Vector4) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: value.z,
         }
     }
 }
@@ -469,6 +500,18 @@ impl IndexMut<usize> for Vector4 {
                 .add(index)
                 .as_mut()
                 .unwrap_unchecked()
+        }
+    }
+}
+
+impl From<Vector2> for Vector4 {
+    #[inline]
+    fn from(value: Vector2) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: 0.0,
+            w: 0.0,
         }
     }
 }

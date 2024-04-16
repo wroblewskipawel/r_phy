@@ -150,10 +150,40 @@ impl Subpass<AttachmentsGBuffer> for GBufferShadingPass<AttachmentsGBuffer> {
     }
 }
 
+pub struct GBufferSkyboxPass<A: AttachmentList> {
+    _phantom: std::marker::PhantomData<A>,
+}
+
+impl Subpass<AttachmentsGBuffer> for GBufferSkyboxPass<AttachmentsGBuffer> {
+    fn references() -> References<AttachmentsGBuffer> {
+        AttachmentReferenceBuilder::new()
+            .push(Some(AttachmentReference {
+                target: AttachmentTarget::Color,
+                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            }))
+            .push(None)
+            .push(None)
+            .push(None)
+            .push(Some(AttachmentReference {
+                target: AttachmentTarget::DepthStencil,
+                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            }))
+            .push(None)
+    }
+}
+
 pub type DeferedRenderPass<A> = RenderPassBuilder<
     SubpassNode<
         GBufferShadingPass<A>,
-        SubpassNode<GBufferWritePass<A>, SubpassNode<GBufferDepthPrepas<A>, SubpassTerminator<A>>>,
+        SubpassNode<
+            GBufferWritePass<A>,
+            SubpassNode<
+                GBufferSkyboxPass<A>,
+                SubpassNode<GBufferDepthPrepas<A>, SubpassTerminator<A>>,
+            >,
+        >,
     >,
     DeferedRenderPassTransitions<A>,
 >;

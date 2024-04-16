@@ -1,91 +1,88 @@
-use ash::{extensions::khr::Swapchain, vk, Instance};
+use ash::{
+    extensions::khr::Swapchain,
+    vk::{self, Extent2D, SurfaceFormatKHR},
+    Instance,
+};
 use std::{error::Error, ffi::CStr};
 
-use crate::renderer::{
-    camera::CameraMatrices,
-    vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface},
-};
+use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
 
 use super::{
-    buffer::UniformBuffer,
     command::{
-        level::{Primary, Secondary},
-        operation::Graphics,
-        BeginCommand, NewCommand, Persistent, PersistentCommandPool, SubmitSemaphoreState,
+        level::Primary, operation::Graphics, FinishedCommand, Persistent, SubmitSemaphoreState,
     },
-    descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
-    framebuffer::{
-        presets::{AttachmentsGBuffer, ColorMultisampled, DepthStencilMultisampled, Resolve},
-        AttachmentsBuilder, Framebuffer, FramebufferHandle,
-    },
-    image::VulkanImage2D,
-    render_pass::{DeferedRenderPass, RenderPassConfig},
+    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
     VulkanDevice,
 };
-
-pub struct FrameSync {
+#[derive(Debug, Clone, Copy)]
+pub struct SwapchainImageSync {
     draw_ready: vk::Semaphore,
     draw_finished: vk::Semaphore,
 }
 
-pub struct SwapchainFrame {
-    pub framebuffer: FramebufferHandle<AttachmentsGBuffer>,
+pub struct SwapchainFrame<A: AttachmentList> {
+    pub framebuffer: FramebufferHandle<A>,
     pub render_area: vk::Rect2D,
-    pub camera_descriptor: Descriptor<CameraDescriptorSet>,
-    image_index: usize,
-    sync: FrameSync,
+    image_index: u32,
+    image_sync: SwapchainImageSync,
 }
 
-pub struct GBufer {
-    pub combined: VulkanImage2D,
-    pub albedo: VulkanImage2D,
-    pub normal: VulkanImage2D,
-    pub position: VulkanImage2D,
-    pub depth: VulkanImage2D,
+struct SwapchainImage {
+    _image: vk::Image,
+    view: vk::ImageView,
 }
 
-struct SwapchainSync {
-    draw_ready: Vec<vk::Semaphore>,
-    draw_finished: Vec<vk::Semaphore>,
-}
-
-impl SwapchainSync {
-    fn get_frame(&self, index: usize) -> FrameSync {
-        FrameSync {
-            draw_ready: self.draw_ready[index],
-            draw_finished: self.draw_finished[index],
-        }
-    }
-}
-
-pub struct VulkanSwapchain {
-    pub image_extent: vk::Extent2D,
-    command_pool_primary: PersistentCommandPool<Primary, Graphics>,
-    command_pool_secondary: PersistentCommandPool<Secondary, Graphics>,
-    camera_uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
-    camera_descriptors: DescriptorPool<CameraDescriptorSet>,
-    sync: SwapchainSync,
-    pub g_buffer: GBufer,
-    _images: Vec<vk::Image>,
-    image_views: Vec<vk::ImageView>,
-    pub framebuffers: Vec<Framebuffer<AttachmentsGBuffer>>,
+pub struct VulkanSwapchain<A: AttachmentList> {
+    pub num_images: usize,
+    pub extent: vk::Extent2D,
+    pub framebuffers: Vec<Framebuffer<A>>, // This shouldn't be pub
+    images: Vec<SwapchainImage>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
 }
 
-impl VulkanSwapchain {
-    pub const fn required_extensions() -> &'static [&'static CStr; 1] {
-        const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[Swapchain::name()];
-        REQUIRED_DEVICE_EXTENSIONS
-    }
+pub const fn required_extensions() -> &'static [&'static CStr; 1] {
+    const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[Swapchain::name()];
+    REQUIRED_DEVICE_EXTENSIONS
 }
 
 impl VulkanDevice {
-    pub fn create_swapchain<C: RenderPassConfig>(
+    pub fn create_swapchain_image_sync<A: AttachmentList>(
+        &self,
+        swapchain: &VulkanSwapchain<A>,
+    ) -> Result<Vec<SwapchainImageSync>, Box<dyn Error>> {
+        unsafe {
+            swapchain
+                .images
+                .iter()
+                .map(|_| {
+                    let create_info = vk::SemaphoreCreateInfo::default();
+                    let draw_ready = self.device.create_semaphore(&create_info, None)?;
+                    let draw_finished = self.device.create_semaphore(&create_info, None)?;
+                    Ok(SwapchainImageSync {
+                        draw_ready,
+                        draw_finished,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    pub fn destroy_swapchain_image_sync(&self, sync: &mut Vec<SwapchainImageSync>) {
+        unsafe {
+            sync.iter_mut().for_each(|sync| {
+                self.device.destroy_semaphore(sync.draw_ready, None);
+                self.device.destroy_semaphore(sync.draw_finished, None);
+            });
+        }
+    }
+
+    pub fn create_swapchain<A: AttachmentList>(
         &self,
         instance: &Instance,
         surface: &VulkanSurface,
-    ) -> Result<VulkanSwapchain, Box<dyn Error>> {
+        framebuffer_builder: impl Fn(vk::ImageView, Extent2D) -> Result<Framebuffer<A>, Box<dyn Error>>,
+    ) -> Result<VulkanSwapchain<A>, Box<dyn Error>> {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
                 vk::SurfaceCapabilitiesKHR {
@@ -115,242 +112,123 @@ impl VulkanDevice {
             .surface(surface.into());
         let loader = Swapchain::new(instance, &self.device);
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
-        let images = unsafe { loader.get_swapchain_images(handle)? };
-        let image_views = images
-            .iter()
-            .map(|&image| unsafe {
-                self.device.create_image_view(
-                    &vk::ImageViewCreateInfo::builder()
-                        .image(image)
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(surface_format.format)
-                        .components(vk::ComponentMapping::default())
-                        .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        }),
-                    None,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let g_buffer = GBufer {
-            albedo: self.create_color_attachment_image()?,
-            normal: self.create_color_attachment_image()?,
-            position: self.create_color_attachment_image()?,
-            combined: self.create_color_attachment_image()?,
-            depth: self.create_depth_stencil_attachment_image()?,
+        let images = unsafe {
+            loader
+                .get_swapchain_images(handle)?
+                .into_iter()
+                .map(|image| self.create_swapchain_image(image, surface_format))
+                .collect::<Result<Vec<_>, _>>()?
         };
-        let framebuffers = image_views
+        let framebuffers = images
             .iter()
-            .map(|&image_view| {
-                self.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
-                    AttachmentsBuilder::new()
-                        .push::<Resolve>(image_view)
-                        .push::<DepthStencilMultisampled>(g_buffer.depth.image_view)
-                        .push::<ColorMultisampled>(g_buffer.position.image_view)
-                        .push::<ColorMultisampled>(g_buffer.normal.image_view)
-                        .push::<ColorMultisampled>(g_buffer.albedo.image_view)
-                        .push::<ColorMultisampled>(g_buffer.combined.image_view),
-                    image_extent,
-                )
-            })
+            .map(|image| framebuffer_builder(image.view, image_extent))
             .collect::<Result<Vec<_>, _>>()?;
-        let sync = self.create_swapchain_sync(images.len())?;
-        let command_pool_primary = self.create_persistent_command_pool(images.len())?;
-        let command_pool_secondary = self.create_persistent_command_pool(3 * images.len())?;
-        let camera_uniform_buffer = self.create_uniform_buffer(images.len())?;
-        let mut camera_descriptors =
-            self.create_descriptor_pool(CameraDescriptorSet::builder(), images.len())?;
-        let descriptor_write = camera_descriptors
-            .get_writer()
-            .write_buffer(&camera_uniform_buffer);
-        self.write_descriptor_sets(&mut camera_descriptors, descriptor_write);
         Ok(VulkanSwapchain {
-            image_extent,
-            command_pool_primary,
-            command_pool_secondary,
-            camera_descriptors,
-            camera_uniform_buffer,
-            sync,
-            g_buffer,
-            _images: images,
-            image_views,
+            num_images: images.len(),
+            extent: image_extent,
+            images: images,
             framebuffers,
             loader,
             handle,
         })
     }
 
-    pub fn destroy_swapchain(&self, swapchain: &mut VulkanSwapchain) {
-        swapchain
-            .framebuffers
-            .iter_mut()
-            .for_each(|framebuffer| self.destroy_framebuffer(framebuffer));
+    fn create_swapchain_image(
+        &self,
+        image: vk::Image,
+        surface_format: SurfaceFormatKHR,
+    ) -> Result<SwapchainImage, Box<dyn Error>> {
         unsafe {
-            swapchain
-                .image_views
-                .iter()
-                .for_each(|&image_view| self.device.destroy_image_view(image_view, None));
-            swapchain.loader.destroy_swapchain(swapchain.handle, None);
-            // Add the following lines to the destroy_swapchain method
-            self.destroy_image(&mut swapchain.g_buffer.albedo);
-            self.destroy_image(&mut swapchain.g_buffer.normal);
-            self.destroy_image(&mut swapchain.g_buffer.position);
-            self.destroy_image(&mut swapchain.g_buffer.depth);
-            self.destroy_image(&mut swapchain.g_buffer.combined);
-            // End of the added lines
-            self.destroy_swapchain_sync(&mut swapchain.sync);
-            self.destroy_persistent_command_pool(&mut swapchain.command_pool_primary);
-            self.destroy_persistent_command_pool(&mut swapchain.command_pool_secondary);
-            self.destroy_uniform_buffer(&mut swapchain.camera_uniform_buffer);
-            self.destroy_descriptor_pool(&mut swapchain.camera_descriptors);
+            let view = self.device.create_image_view(
+                &vk::ImageViewCreateInfo::builder()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(surface_format.format)
+                    .components(vk::ComponentMapping::default())
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    }),
+                None,
+            )?;
+
+            Ok(SwapchainImage {
+                _image: image,
+                view,
+            })
         }
     }
 
-    fn create_swapchain_sync(&self, num_images: usize) -> Result<SwapchainSync, Box<dyn Error>> {
-        let draw_ready = (0..num_images)
-            .map(|_| unsafe {
-                self.device.create_semaphore(
-                    &vk::SemaphoreCreateInfo {
-                        ..Default::default()
-                    },
-                    None,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let draw_finished = (0..num_images)
-            .map(|_| unsafe {
-                self.device.create_semaphore(
-                    &vk::SemaphoreCreateInfo {
-                        ..Default::default()
-                    },
-                    None,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(SwapchainSync {
-            draw_ready,
-            draw_finished,
+    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut VulkanSwapchain<A>) {
+        swapchain.framebuffers.iter_mut().for_each(|framebuffer| {
+            self.destroy_framebuffer(framebuffer);
+        });
+        unsafe {
+            swapchain
+                .images
+                .iter_mut()
+                .for_each(|image| self.device.destroy_image_view(image.view, None));
+            swapchain.loader.destroy_swapchain(swapchain.handle, None);
+        }
+    }
+
+    pub fn get_frame<A: AttachmentList>(
+        &self,
+        swapchain: &VulkanSwapchain<A>,
+        image_sync: SwapchainImageSync,
+    ) -> Result<SwapchainFrame<A>, Box<dyn Error>> {
+        let (image_index, _) = unsafe {
+            swapchain.loader.acquire_next_image(
+                swapchain.handle,
+                u64::MAX,
+                image_sync.draw_ready,
+                vk::Fence::null(),
+            )?
+        };
+        let framebuffer = (&swapchain.framebuffers[image_index as usize]).into();
+        let render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: swapchain.extent,
+        };
+        Ok(SwapchainFrame {
+            framebuffer,
+            render_area,
+            image_index,
+            image_sync,
         })
     }
 
-    fn destroy_swapchain_sync(&self, sync: &mut SwapchainSync) {
-        unsafe {
-            sync.draw_ready
-                .iter()
-                .for_each(|&semaphore| self.device.destroy_semaphore(semaphore, None));
-            sync.draw_finished
-                .iter()
-                .for_each(|&semaphore| self.device.destroy_semaphore(semaphore, None));
-        }
-    }
-
-    fn get_next_frame_data(
+    pub fn present_frame<A: AttachmentList>(
         &self,
-        swapchain: &mut VulkanSwapchain,
-    ) -> (
-        NewCommand<Persistent, Primary, Graphics>,
-        NewCommand<Persistent, Secondary, Graphics>,
-        NewCommand<Persistent, Secondary, Graphics>,
-        NewCommand<Persistent, Secondary, Graphics>,
-        FrameSync,
-    ) {
-        let (frame_index, primary_command) = swapchain.command_pool_primary.next();
-        let (_, depth_display_command) = swapchain.command_pool_secondary.next();
-        let (_, depth_prepass_command) = swapchain.command_pool_secondary.next();
-        let (_, color_pass_command) = swapchain.command_pool_secondary.next();
-        (
-            primary_command,
-            depth_prepass_command,
-            depth_display_command,
-            color_pass_command,
-            swapchain.sync.get_frame(frame_index),
-        )
-    }
-
-    pub fn begin_frame(
-        &self,
-        swapchain: &mut VulkanSwapchain,
-        camera: &CameraMatrices,
-    ) -> Result<
-        (
-            BeginCommand<Persistent, Primary, Graphics>,
-            NewCommand<Persistent, Secondary, Graphics>,
-            NewCommand<Persistent, Secondary, Graphics>,
-            NewCommand<Persistent, Secondary, Graphics>,
-            SwapchainFrame,
-        ),
-        Box<dyn Error>,
-    > {
-        let (
-            primary_command,
-            depth_prepass_command,
-            color_pass_command,
-            depth_display_command,
-            sync,
-        ) = self.get_next_frame_data(swapchain);
-        let primary_command = self.begin_persistent_command(primary_command)?;
-        let image_index = unsafe {
-            swapchain
-                .loader
-                .acquire_next_image(
-                    swapchain.handle,
-                    u64::MAX,
-                    sync.draw_ready,
-                    vk::Fence::null(),
-                )
-                .map(|(image_index, _)| image_index as usize)?
-        };
-        let framebuffer = (&swapchain.framebuffers[image_index]).into();
-        let camera_descriptor = swapchain.camera_descriptors[image_index];
-        let render_area = vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: swapchain.image_extent,
-        };
-        swapchain.camera_uniform_buffer[image_index] = *camera;
-        Ok((
-            primary_command,
-            depth_prepass_command,
-            color_pass_command,
-            depth_display_command,
-            SwapchainFrame {
-                framebuffer,
-                camera_descriptor,
-                render_area,
-                image_index,
-                sync,
-            },
-        ))
-    }
-
-    pub fn end_frame(
-        &self,
-        swapchain: &mut VulkanSwapchain,
-        command: BeginCommand<Persistent, Primary, Graphics>,
-        frame: SwapchainFrame,
+        swapchain: &VulkanSwapchain<A>,
+        command: FinishedCommand<Persistent, Primary, Graphics>,
+        frame: SwapchainFrame<A>,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {
-            image_index, sync, ..
+            image_index,
+            image_sync,
+            ..
         } = frame;
         unsafe {
-            self.finish_command(command)?.submit(
+            self.submit_command(
+                command,
                 SubmitSemaphoreState {
-                    semaphores: &[sync.draw_ready],
+                    semaphores: &[image_sync.draw_ready],
                     masks: &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
                 },
-                &[sync.draw_finished],
+                &[image_sync.draw_finished],
             )?;
             swapchain.loader.queue_present(
                 self.device_queues.graphics,
                 &vk::PresentInfoKHR {
                     wait_semaphore_count: 1,
-                    p_wait_semaphores: [sync.draw_finished].as_ptr(),
+                    p_wait_semaphores: [image_sync.draw_finished].as_ptr(),
                     swapchain_count: 1,
                     p_swapchains: [swapchain.handle].as_ptr(),
-                    p_image_indices: [image_index as u32].as_ptr(),
+                    p_image_indices: [image_index].as_ptr(),
                     ..Default::default()
                 },
             )?;
