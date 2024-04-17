@@ -295,7 +295,7 @@ struct DeviceQueues {
     transfer: vk::Queue,
 }
 
-pub(super) struct VulkanDevice {
+pub struct VulkanDevice {
     physical_device: VulkanPhysicalDevice,
     command_pools: TransientCommandPools,
     device_queues: DeviceQueues,

@@ -68,7 +68,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn destroy_swapchain_image_sync(&self, sync: &mut Vec<SwapchainImageSync>) {
+    pub fn destroy_swapchain_image_sync(&self, sync: &mut [SwapchainImageSync]) {
         unsafe {
             sync.iter_mut().for_each(|sync| {
                 self.device.destroy_semaphore(sync.draw_ready, None);
@@ -126,7 +126,7 @@ impl VulkanDevice {
         Ok(VulkanSwapchain {
             num_images: images.len(),
             extent: image_extent,
-            images: images,
+            images,
             framebuffers,
             loader,
             handle,

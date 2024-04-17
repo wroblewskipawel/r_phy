@@ -4,10 +4,7 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{
-    math::types::Vector4,
-    renderer::camera::{Camera, CameraMatrices},
-};
+use crate::{math::types::Vector4, renderer::camera::CameraMatrices};
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -184,8 +181,8 @@ pub mod level {
         }
 
         fn destory_persistent_alocator(
-            device: &VulkanDevice,
-            allocator: &mut Self::PersistentAllocator,
+            _device: &VulkanDevice,
+            _allocator: &mut Self::PersistentAllocator,
         ) {
             // Buffers are destroyed with the command pool
         }
@@ -201,14 +198,14 @@ pub mod operation {
 
     use crate::renderer::vulkan::device::VulkanDevice;
 
-    pub(in crate::renderer::vulkan) struct Graphics;
-    pub(in crate::renderer::vulkan) struct Transfer;
-    pub(in crate::renderer::vulkan) struct Compute;
+    pub struct Graphics;
+    pub struct Transfer;
+    pub struct Compute;
 
     // Lots of pub(in path) syntax in this module
     // some of it contents could be moved to separate module
     // placed higher in the source tree
-    pub(in crate::renderer::vulkan) trait Operation {
+    pub trait Operation {
         fn get_queue(device: &VulkanDevice) -> vk::Queue;
         fn get_queue_family_index(device: &VulkanDevice) -> u32;
         fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool;
@@ -249,12 +246,12 @@ pub mod operation {
     }
 }
 
-pub(super) struct Command<T, L: Level, O: Operation> {
+pub struct Command<T, L: Level, O: Operation> {
     data: L::CommandData,
     _phantom: PhantomData<(T, O)>,
 }
 
-pub(super) struct PersistentCommandPool<L: Level, O: Operation> {
+pub struct PersistentCommandPool<L: Level, O: Operation> {
     command_pool: vk::CommandPool,
     allocator: L::PersistentAllocator,
     _phantom: PhantomData<(L, O)>,
@@ -272,7 +269,7 @@ impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
 }
 
 impl VulkanDevice {
-    pub(super) fn create_persistent_command_pool<L: Level, O: Operation>(
+    pub fn create_persistent_command_pool<L: Level, O: Operation>(
         &self,
         size: usize,
     ) -> Result<PersistentCommandPool<L, O>, Box<dyn Error>> {
@@ -292,7 +289,7 @@ impl VulkanDevice {
         })
     }
 
-    pub(super) fn destroy_persistent_command_pool<L: Level, O: Operation>(
+    pub fn destroy_persistent_command_pool<L: Level, O: Operation>(
         &self,
         command_pool: &mut PersistentCommandPool<L, O>,
     ) {
@@ -304,7 +301,7 @@ impl VulkanDevice {
     }
 }
 
-pub(in crate::renderer::vulkan) struct NewCommand<T, L: Level, O: Operation>(Command<T, L, O>);
+pub struct NewCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
 impl<'a, T, L: Level, O: Operation> From<&'a NewCommand<T, L, O>> for &'a Command<T, L, O> {
     fn from(value: &'a NewCommand<T, L, O>) -> Self {
@@ -348,7 +345,7 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub(super) fn begin_primary_command<T, O: Operation>(
+    pub fn begin_primary_command<T, O: Operation>(
         &self,
         command: NewCommand<T, Primary, O>,
     ) -> Result<BeginCommand<T, Primary, O>, Box<dyn Error>> {
@@ -366,7 +363,7 @@ impl VulkanDevice {
         Ok(BeginCommand(command))
     }
 
-    pub(in crate::renderer::vulkan) fn record_command<
+    pub fn record_command<
         T,
         L: Level,
         O: Operation,
@@ -393,10 +390,7 @@ impl VulkanDevice {
     }
 }
 
-pub(in crate::renderer::vulkan) struct RecordingCommand<'a, T, L: Level, O: Operation>(
-    Command<T, L, O>,
-    &'a VulkanDevice,
-);
+pub struct RecordingCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a VulkanDevice);
 
 impl<'a, T, L: Level, O: Operation> From<&'a RecordingCommand<'a, T, L, O>>
     for &'a Command<T, L, O>
@@ -406,7 +400,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a RecordingCommand<'a, T, L, O>>
     }
 }
 
-pub(in crate::renderer::vulkan) struct BeginCommand<T, L: Level, O: Operation>(Command<T, L, O>);
+pub struct BeginCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
 impl<'a, T, L: Level, O: Operation> From<&'a BeginCommand<T, L, O>> for &'a Command<T, L, O> {
     fn from(value: &'a BeginCommand<T, L, O>) -> Self {
@@ -824,7 +818,7 @@ pub struct SubmitSemaphoreState<'a> {
     pub masks: &'a [vk::PipelineStageFlags],
 }
 
-pub(in crate::renderer::vulkan) struct FinishedCommand<T, L: Level, O: Operation>(Command<T, L, O>);
+pub struct FinishedCommand<T, L: Level, O: Operation>(Command<T, L, O>);
 
 impl<'a, T, L: Level, O: Operation> From<&'a FinishedCommand<T, L, O>> for &'a Command<T, L, O> {
     fn from(value: &'a FinishedCommand<T, L, O>) -> Self {
@@ -859,10 +853,7 @@ impl VulkanDevice {
         Ok(SubmitedCommand(command, self))
     }
 }
-pub(in crate::renderer::vulkan) struct SubmitedCommand<'a, T, L: Level, O: Operation>(
-    Command<T, L, O>,
-    &'a VulkanDevice,
-);
+pub struct SubmitedCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a VulkanDevice);
 
 impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
     for &'a Command<T, L, O>
@@ -898,16 +889,13 @@ impl<'a, O: Operation> SubmitedCommand<'a, Persistent, Primary, O> {
     }
 }
 
-pub struct TransientCommandPools {
+pub(super) struct TransientCommandPools {
     transfer: vk::CommandPool,
     graphics: vk::CommandPool,
 }
 
 impl TransientCommandPools {
-    pub(super) fn create(
-        device: &Device,
-        queue_families: QueueFamilies,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn create(device: &Device, queue_families: QueueFamilies) -> Result<Self, Box<dyn Error>> {
         let transfer = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -936,7 +924,7 @@ impl TransientCommandPools {
 }
 
 impl VulkanDevice {
-    pub(super) fn allocate_transient_command<O: Operation>(
+    pub fn allocate_transient_command<O: Operation>(
         &self,
     ) -> Result<NewCommand<Transient, Primary, O>, Box<dyn Error>> {
         let &buffer = unsafe {
@@ -964,7 +952,7 @@ impl VulkanDevice {
             _phantom: PhantomData,
         }))
     }
-    pub(super) fn free_command<'a, T: 'static, O: 'static + Operation>(
+    pub fn free_command<'a, T: 'static, O: 'static + Operation>(
         &self,
         command: impl Into<&'a Command<T, Primary, O>>,
     ) {

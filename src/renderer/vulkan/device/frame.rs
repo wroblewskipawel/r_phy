@@ -1,3 +1,8 @@
+// Temporary allow for too_many_arguments
+// handling render commands will be significantly revamped in the future
+// which makes it not worth the effort to refactor this code
+#![allow(clippy::too_many_arguments)]
+
 use std::error::Error;
 
 use crate::{

@@ -113,6 +113,12 @@ pub struct ClearValueBuilder<C: ClearValueList> {
     clear_values: C,
 }
 
+impl Default for ClearValueBuilder<ClearValueTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClearValueBuilder<ClearValueTerminator> {
     pub fn new() -> Self {
         Self {
@@ -244,6 +250,12 @@ impl<N: AttachmentReferenceList> AttachmentReferenceList for AttachmentReference
 
 pub struct AttachmentReferenceBuilder<A: AttachmentList> {
     pub references: A::ReferenceListType,
+}
+
+impl Default for AttachmentReferenceBuilder<AttachmentTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AttachmentReferenceBuilder<AttachmentTerminator> {
@@ -535,6 +547,12 @@ impl<A: Attachment, N: AttachmentList> AttachmentList for AttachmentNode<A, N> {
 
 pub struct AttachmentsBuilder<A: AttachmentList> {
     attachments: A,
+}
+
+impl Default for AttachmentsBuilder<AttachmentTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AttachmentsBuilder<AttachmentTerminator> {

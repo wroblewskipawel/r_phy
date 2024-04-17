@@ -13,7 +13,6 @@ use std::{
 
 use super::{
     command::{
-        level,
         operation::{self, Operation},
         SubmitSemaphoreState,
     },
@@ -272,6 +271,12 @@ impl VulkanDevice {
 
 pub struct StagingBufferBuilder {
     range: ByteRange,
+}
+
+impl Default for StagingBufferBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StagingBufferBuilder {

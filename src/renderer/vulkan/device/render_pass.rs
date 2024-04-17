@@ -186,7 +186,7 @@ impl SubpassDescription {
                 std::ptr::null()
             },
             preserve_attachment_count: preserve.len() as u32,
-            p_preserve_attachments: if preserve.len() != 0 {
+            p_preserve_attachments: if !preserve.is_empty() {
                 preserve.as_ptr()
             } else {
                 std::ptr::null()

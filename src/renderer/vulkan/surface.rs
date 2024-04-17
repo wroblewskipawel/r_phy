@@ -14,7 +14,7 @@ use winit::{
     window::Window,
 };
 
-pub(super) struct VulkanSurface {
+pub struct VulkanSurface {
     handle: vk::SurfaceKHR,
     loader: Surface,
 }

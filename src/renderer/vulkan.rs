@@ -24,7 +24,6 @@ use device::{swapchain::VulkanSwapchain, VulkanDevice};
 use std::{
     error::Error,
     ffi::{c_char, CStr},
-    path::Path,
 };
 use surface::VulkanSurface;
 use winit::window::Window;
@@ -173,7 +172,7 @@ impl Drop for VulkanRenderer {
     }
 }
 
-struct VulkanMeshHandle {
+pub struct VulkanMeshHandle {
     mesh_pack_index: u32,
     mesh_index: u32,
 }
@@ -193,7 +192,7 @@ impl From<VulkanMeshHandle> for MeshHandle {
     }
 }
 
-struct VulkanMaterialHandle {
+pub struct VulkanMaterialHandle {
     material_pack_index: u32,
     material_index: u32,
 }

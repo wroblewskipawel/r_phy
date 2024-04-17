@@ -244,7 +244,7 @@ impl Frame for DeferredRenderer {
             });
         let primary_command = device.record_command(primary_command, |command| {
             command
-                .begin_render_pass(&swapchain_frame, &self.render_pass, &clear_values)
+                .begin_render_pass(swapchain_frame, &self.render_pass, &clear_values)
                 .write_secondary(&depth_prepass)
                 .next_render_pass()
                 .write_secondary(&skybox_pass)
@@ -345,7 +345,7 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destroy_g_buffer(&self, g_buffer: &mut GBuffer) {
+    fn destroy_g_buffer(&self, g_buffer: &mut GBuffer) {
         self.destroy_image(&mut g_buffer.combined);
         self.destroy_image(&mut g_buffer.albedo);
         self.destroy_image(&mut g_buffer.normal);

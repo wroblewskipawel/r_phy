@@ -104,7 +104,7 @@ impl ModuleLoader for ShaderDirectory {
                         .then_some(device.load_shader_module(&entry.path()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            device: &device,
+            device,
         };
         Ok(modules)
     }

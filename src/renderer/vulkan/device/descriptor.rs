@@ -293,7 +293,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         buffer: &UniformBuffer<U, O>,
     ) -> Self {
         let writes = T::get_descriptor_writes::<U>();
-        if writes.len() == 0 {
+        if writes.is_empty() {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
                 type_name::<U>(),
@@ -302,9 +302,9 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         }
         let descriptor_count = writes
             .iter()
-            .map(|write| write.descriptor_count)
-            .fold(0, |acc, f| acc + f);
-        let num_uniforms = self.num_sets * descriptor_count as usize;
+            .map(|write| write.descriptor_count as usize)
+            .sum::<usize>();
+        let num_uniforms = self.num_sets * descriptor_count;
         debug_assert_eq!(
             num_uniforms, buffer.size,
             "UniformBuffer object not large enough for DescriptorPool write!"
@@ -316,23 +316,23 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
                 offset: (size_of::<U>() * index) as vk::DeviceSize,
                 range: size_of::<U>() as vk::DeviceSize,
             }));
-        self.writes.extend(
-            (0..self.num_sets)
-                .map(|set_index| {
-                    writes
-                        .iter()
-                        .enumerate()
-                        .map(|(write_index, &write)| SetWrite::Buffer {
-                            set_index,
-                            buffer_write_index: buffer_write_base_index
-                                + set_index * descriptor_count as usize
-                                + write_index as usize,
-                            write,
-                        })
-                        .collect::<Vec<_>>()
+        self.writes.extend((0..self.num_sets).flat_map(|set_index| {
+            let mut buffer_set_write_offset = 0;
+            writes
+                .iter()
+                .map(|&write| {
+                    let descriptor_write = SetWrite::Buffer {
+                        set_index,
+                        buffer_write_index: buffer_write_base_index
+                            + set_index * descriptor_count
+                            + buffer_set_write_offset,
+                        write,
+                    };
+                    buffer_set_write_offset += write.descriptor_count as usize;
+                    descriptor_write
                 })
-                .flatten(),
-        );
+                .collect::<Vec<_>>()
+        }));
         self
     }
 
@@ -342,7 +342,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         &'a I: Into<vk::DescriptorImageInfo>,
     {
         let writes = T::get_descriptor_writes::<I>();
-        if writes.len() == 0 {
+        if writes.is_empty() {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
                 type_name::<I>(),
@@ -351,9 +351,9 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         }
         let descciptor_count = writes
             .iter()
-            .map(|write| write.descriptor_count)
-            .fold(0, |acc, f| acc + f);
-        let num_uniforms = self.num_sets * descciptor_count as usize;
+            .map(|write| write.descriptor_count as usize)
+            .sum::<usize>();
+        let num_uniforms = self.num_sets * descciptor_count;
         debug_assert_eq!(
             num_uniforms,
             images.len(),
@@ -362,24 +362,23 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         let iamge_write_base_index = self.image_writes.len();
         self.image_writes
             .extend(images.iter().map(|image| image.into()));
-        self.writes.extend(
-            (0..self.num_sets)
-                .map(|set_index| {
-                    writes
-                        .iter()
-                        .enumerate()
-                        .map(|(write_index, &write)| SetWrite::Image {
-                            set_index,
-                            image_write_index: iamge_write_base_index
-                            // following code is errorous, works currently because write.descriptor_count is always 1
-                                + set_index * descciptor_count as usize
-                                + write_index as usize,
-                            write,
-                        })
-                        .collect::<Vec<_>>()
+        self.writes.extend((0..self.num_sets).flat_map(|set_index| {
+            let mut image_set_write_offset = 0;
+            writes
+                .iter()
+                .map(|&write| {
+                    let descriptor_write = SetWrite::Image {
+                        set_index,
+                        image_write_index: iamge_write_base_index
+                            + set_index * descciptor_count
+                            + image_set_write_offset,
+                        write,
+                    };
+                    image_set_write_offset += write.descriptor_count as usize;
+                    descriptor_write
                 })
-                .flatten(),
-        );
+                .collect::<Vec<_>>()
+        }));
         self
     }
 }
