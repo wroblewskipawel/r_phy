@@ -1,5 +1,8 @@
 use bytemuck::{Pod, Zeroable};
-use std::ops::{Add, Index, IndexMut, Mul, Neg, Sub};
+use std::{
+    error::Error,
+    ops::{Add, Index, IndexMut, Mul, Neg, Sub},
+};
 
 use super::{Vector2, Vector3, Vector4};
 
@@ -161,6 +164,14 @@ impl From<Matrix4> for Matrix2 {
 }
 
 impl Matrix2 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            i: Vector2::try_from_le_bytes(&bytes[0..8])?,
+            j: Vector2::try_from_le_bytes(&bytes[8..16])?,
+        })
+    }
+
     #[inline]
     pub fn new(i: Vector2, j: Vector2) -> Self {
         Self { i, j }
@@ -415,6 +426,15 @@ impl From<Matrix4> for Matrix3 {
 }
 
 impl Matrix3 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            i: Vector3::try_from_le_bytes(&bytes[0..12])?,
+            j: Vector3::try_from_le_bytes(&bytes[12..24])?,
+            k: Vector3::try_from_le_bytes(&bytes[24..36])?,
+        })
+    }
+
     #[inline]
     pub fn new(i: Vector3, j: Vector3, k: Vector3) -> Self {
         Self { i, j, k }
@@ -704,6 +724,16 @@ impl From<Matrix3> for Matrix4 {
 }
 
 impl Matrix4 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            i: Vector4::try_from_le_bytes(&bytes[0..16])?,
+            j: Vector4::try_from_le_bytes(&bytes[16..32])?,
+            k: Vector4::try_from_le_bytes(&bytes[32..48])?,
+            l: Vector4::try_from_le_bytes(&bytes[48..64])?,
+        })
+    }
+
     #[inline]
     pub fn new(i: Vector4, j: Vector4, k: Vector4, l: Vector4) -> Self {
         Self { i, j, k, l }

@@ -1,6 +1,9 @@
 use super::EPS;
-use bytemuck::{Pod, Zeroable};
-use std::ops::{Add, Div, Index, IndexMut, Mul, Neg, Sub};
+use bytemuck::{checked::try_cast_slice, Pod, PodCastError, Zeroable};
+use std::{
+    error::Error,
+    ops::{Add, Div, Index, IndexMut, Mul, Neg, Sub},
+};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]
@@ -118,6 +121,14 @@ impl From<Vector4> for Vector2 {
 }
 
 impl Vector2 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
+            y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
+        })
+    }
+
     #[inline]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
@@ -305,6 +316,15 @@ impl From<Vector4> for Vector3 {
 }
 
 impl Vector3 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
+            y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
+            z: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[8..12])?),
+        })
+    }
+
     #[inline]
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
@@ -529,6 +549,16 @@ impl From<Vector3> for Vector4 {
 }
 
 impl Vector4 {
+    #[inline]
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
+            y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
+            z: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[8..12])?),
+            w: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[12..16])?),
+        })
+    }
+
     #[inline]
     pub const fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self { x, y, z, w }

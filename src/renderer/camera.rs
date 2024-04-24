@@ -9,8 +9,6 @@ use crate::{
     math::types::{Matrix4, Vector3},
 };
 
-use self::first_person::FirstPersonCamera;
-
 pub const UP: Vector3 = Vector3::z();
 
 #[repr(C)]
@@ -20,29 +18,41 @@ pub struct CameraMatrices {
     pub proj: Matrix4,
 }
 
-pub trait Camera {
+pub trait Camera: 'static {
     fn get_position(&self) -> Vector3;
     fn get_matrices(&self) -> CameraMatrices;
     fn update(&mut self, elapsed_time: f32);
     fn set_active(&mut self, active: bool);
 }
 
-pub enum CameraType {
-    FirstPerson,
+pub trait CameraBuilder: 'static {
+    type Camera: Camera;
+    fn build(self, input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>>;
 }
 
-impl CameraType {
-    pub fn create(
-        self,
-        proj: Matrix4,
-        input_handler: &mut InputHandler,
-    ) -> Rc<RefCell<dyn Camera>> {
-        match self {
-            Self::FirstPerson => {
-                let camera = Rc::new(RefCell::new(FirstPersonCamera::new(proj)));
-                FirstPersonCamera::register_callbacks(camera.clone(), input_handler);
-                camera
-            }
-        }
+pub struct CameraNone;
+
+impl Camera for CameraNone {
+    fn get_position(&self) -> Vector3 {
+        unimplemented!()
+    }
+
+    fn get_matrices(&self) -> CameraMatrices {
+        unimplemented!()
+    }
+
+    fn update(&mut self, _elapsed_time: f32) {
+        unimplemented!()
+    }
+
+    fn set_active(&mut self, _active: bool) {
+        unimplemented!()
+    }
+}
+
+impl CameraBuilder for CameraNone {
+    type Camera = CameraNone;
+    fn build(self, _input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>> {
+        panic!("Camera Type not provided!")
     }
 }

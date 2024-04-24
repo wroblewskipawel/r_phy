@@ -12,7 +12,7 @@ use crate::{
     renderer::camera::UP,
 };
 
-use super::{Camera, CameraMatrices};
+use super::{Camera, CameraBuilder, CameraMatrices};
 
 impl Camera for FirstPersonCamera {
     fn get_position(&self) -> Vector3 {
@@ -38,6 +38,26 @@ impl Camera for FirstPersonCamera {
 
     fn set_active(&mut self, active: bool) {
         self.active = active;
+    }
+}
+
+pub struct FirstPersonCameraBuilder {
+    proj: Matrix4,
+}
+
+impl FirstPersonCameraBuilder {
+    pub fn new(proj: Matrix4) -> Self {
+        Self { proj }
+    }
+}
+
+impl CameraBuilder for FirstPersonCameraBuilder {
+    type Camera = FirstPersonCamera;
+
+    fn build(self, input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>> {
+        let camera = Rc::new(RefCell::new(FirstPersonCamera::new(self.proj)));
+        FirstPersonCamera::register_callbacks(camera.clone(), input_handler);
+        camera
     }
 }
 

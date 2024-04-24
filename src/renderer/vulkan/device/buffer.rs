@@ -99,6 +99,7 @@ impl<T: Pod> Range<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Buffer {
     pub size: usize,
     pub buffer: vk::Buffer,
@@ -234,6 +235,7 @@ impl VulkanDevice {
     }
 }
 
+#[derive(Debug)]
 pub struct DeviceLocalBuffer {
     pub buffer: Buffer,
 }

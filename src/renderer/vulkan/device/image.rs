@@ -1,7 +1,10 @@
+use crate::renderer::model::Image;
+
 use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
 use png::{self, BitDepth, ColorType, Transformations};
 use std::fs::File;
+use std::io::Read;
 use std::usize;
 use std::{borrow::Borrow, error::Error, path::Path};
 use strum::IntoEnumIterator;
@@ -18,25 +21,43 @@ struct VulkanImageInfo {
     mip_levels: u32,
     memory_properties: vk::MemoryPropertyFlags,
 }
-struct PngImageReader {
-    reader: png::Reader<File>,
+
+struct PngImageReader<'a, R: Read> {
+    reader: png::Reader<R>,
+    phantom: std::marker::PhantomData<&'a R>,
 }
 
-impl PngImageReader {
-    fn get_max_mip_level(extent: vk::Extent2D) -> u32 {
-        u32::max(extent.width, extent.height).ilog2() + 1
-    }
-
-    fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
+impl PngImageReader<'_, File> {
+    fn from_file(path: &Path) -> Result<Self, Box<dyn Error>> {
         let mut decoder = png::Decoder::new(File::open(path)?);
         decoder.set_transformations(
             Transformations::EXPAND | Transformations::ALPHA | Transformations::STRIP_16,
         );
         Ok(Self {
             reader: decoder.read_info()?,
+            phantom: std::marker::PhantomData,
         })
     }
+}
 
+impl<'a> PngImageReader<'a, &'a [u8]> {
+    fn from_buffer(image_data: &'a [u8]) -> Result<Self, Box<dyn Error>> {
+        let mut decoder = png::Decoder::new(image_data);
+        decoder.set_transformations(
+            Transformations::EXPAND | Transformations::ALPHA | Transformations::STRIP_16,
+        );
+        Ok(Self {
+            reader: decoder.read_info()?,
+            phantom: std::marker::PhantomData,
+        })
+    }
+}
+
+fn get_max_mip_level(extent: vk::Extent2D) -> u32 {
+    u32::max(extent.width, extent.height).ilog2() + 1
+}
+
+impl<'a, R: Read> PngImageReader<'a, R> {
     fn read(mut self, dst: &mut [u8]) -> Result<(), Box<dyn Error>> {
         self.reader.next_frame(dst)?;
         Ok(())
@@ -56,7 +77,7 @@ impl PngImageReader {
                 color_type, bit_depth
             ))?,
         };
-        let mip_levels = Self::get_max_mip_level(extent);
+        let mip_levels = get_max_mip_level(extent);
         Ok(VulkanImageInfo {
             extent,
             format,
@@ -105,7 +126,7 @@ impl ImageCubeFace {
 }
 
 struct ImageCubeReader {
-    faces: Vec<(ImageCubeFace, PngImageReader)>,
+    faces: Vec<(ImageCubeFace, PngImageReader<'static, File>)>,
 }
 
 impl ImageCubeReader {
@@ -114,7 +135,12 @@ impl ImageCubeReader {
             .read_dir()?
             .filter_map(|entry| entry.map(|entry| entry.path()).ok())
             .filter(|path| path.is_file())
-            .map(|path| Ok((ImageCubeFace::get(&path)?, PngImageReader::prepare(&path)?)))
+            .map(|path| {
+                Ok((
+                    ImageCubeFace::get(&path)?,
+                    PngImageReader::from_file(&path)?,
+                ))
+            })
             .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
         if let Some(req) =
             ImageCubeFace::iter().find(|req| !faces.iter().any(|(face, _)| req == face))
@@ -140,7 +166,7 @@ impl ImageCubeReader {
         reader.required_buffer_size()
     }
 
-    fn iter(self) -> impl Iterator<Item = (ImageCubeFace, PngImageReader)> {
+    fn iter(self) -> impl Iterator<Item = (ImageCubeFace, PngImageReader<'static, File>)> {
         let Self { faces } = self;
         faces.into_iter()
     }
@@ -290,8 +316,17 @@ impl From<&Texture2D> for vk::DescriptorImageInfo {
 }
 
 impl VulkanDevice {
-    pub fn load_texture(&self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
-        let image_reader = PngImageReader::prepare(path)?;
+    pub fn load_texture(&self, image: &Image) -> Result<Texture2D, Box<dyn Error>> {
+        match image {
+            Image::File(path) => self.load_texture_impl(PngImageReader::from_file(&path)?),
+            Image::Buffer(data) => self.load_texture_impl(PngImageReader::from_buffer(&data)?),
+        }
+    }
+
+    fn load_texture_impl<R: Read>(
+        &self,
+        image_reader: PngImageReader<R>,
+    ) -> Result<Texture2D, Box<dyn Error>> {
         let mut image = self.create_image(image_reader.info()?)?;
 
         let mut builder = StagingBufferBuilder::new();

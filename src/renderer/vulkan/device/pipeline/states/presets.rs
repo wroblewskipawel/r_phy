@@ -1,13 +1,11 @@
 use std::mem::size_of;
 
 use ash::vk;
+use bytemuck::offset_of;
 
-use crate::{
-    math::types::Vector3,
-    renderer::{
-        model::Vertex,
-        vulkan::device::{AttachmentProperties, PhysicalDeviceProperties},
-    },
+use crate::renderer::{
+    model::CommonVertex,
+    vulkan::device::{AttachmentProperties, PhysicalDeviceProperties},
 };
 
 use super::{
@@ -16,11 +14,11 @@ use super::{
     VertexBindingTerminator, Viewport, ViewportInfo,
 };
 
-impl VertexBinding for Vertex {
+impl VertexBinding for CommonVertex {
     fn get_binding_description(binding: u32) -> vk::VertexInputBindingDescription {
         vk::VertexInputBindingDescription {
             binding,
-            stride: size_of::<Vertex>() as u32,
+            stride: size_of::<CommonVertex>() as u32,
             input_rate: vk::VertexInputRate::VERTEX,
         }
     }
@@ -31,25 +29,31 @@ impl VertexBinding for Vertex {
                 binding,
                 location: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: 0,
+                offset: offset_of!(CommonVertex, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding,
                 location: 1,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: size_of::<Vector3>() as u32,
+                offset: offset_of!(CommonVertex, color) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding,
                 location: 2,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: (size_of::<Vector3>() * 2) as u32,
+                offset: offset_of!(CommonVertex, norm) as u32,
             },
             vk::VertexInputAttributeDescription {
                 binding,
                 location: 3,
                 format: vk::Format::R32G32_SFLOAT,
-                offset: (size_of::<Vector3>() * 3) as u32,
+                offset: offset_of!(CommonVertex, uv) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding,
+                location: 4,
+                format: vk::Format::R32G32B32A32_SFLOAT,
+                offset: offset_of!(CommonVertex, tan) as u32,
             },
         ]
     }
@@ -270,7 +274,8 @@ impl Multisample for Multisampled {
     }
 }
 
-pub type MeshVertexInput = VertexBindingBuilder<VertexBindingNode<Vertex, VertexBindingTerminator>>;
+pub type MeshVertexInput =
+    VertexBindingBuilder<VertexBindingNode<CommonVertex, VertexBindingTerminator>>;
 
 pub type StatesSkybox = PipelineStatesBuilder<
     MeshVertexInput,

@@ -7,8 +7,10 @@ use crate::{
     math::types::{Matrix3, Matrix4},
     renderer::{
         camera::CameraMatrices,
-        vulkan::device::descriptor::{
-            CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet,
+        model::UnlitMaterial,
+        vulkan::device::{
+            descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
+            resources::VulkanMaterial,
         },
     },
 };
@@ -69,9 +71,9 @@ impl PushConstant for CameraMatrices {
     }
 }
 
-pub type PipelineLayoutTextured = PipelineLayoutBuilder<
+pub type PipelineLayoutMaterial<M> = PipelineLayoutBuilder<
     DescriptorLayoutNode<
-        TextureDescriptorSet,
+        <M as VulkanMaterial>::DescriptorLayout,
         DescriptorLayoutNode<CameraDescriptorSet, DescriptorLayoutTerminator>,
     >,
     PushConstantNode<ModelNormalMatrix, PushConstantTerminator>,

@@ -226,10 +226,24 @@ pub struct DescriptorSetLayout<T: DescriptorLayout> {
     _phantom: PhantomData<T>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorRaw {
+    pub set: vk::DescriptorSet,
+}
+
 #[derive(Debug)]
 pub struct Descriptor<T: DescriptorLayout> {
     pub set: vk::DescriptorSet,
     _phantom: PhantomData<T>,
+}
+
+impl<T: DescriptorLayout> From<DescriptorRaw> for Descriptor<T> {
+    fn from(raw: DescriptorRaw) -> Self {
+        Self {
+            set: raw.set,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<T: DescriptorLayout> Clone for Descriptor<T> {
@@ -240,17 +254,29 @@ impl<T: DescriptorLayout> Clone for Descriptor<T> {
 
 impl<T: DescriptorLayout> Copy for Descriptor<T> {}
 
-pub struct DescriptorPool<T: DescriptorLayout> {
+pub struct DescriptorPoolRaw {
     pub count: usize,
     pool: vk::DescriptorPool,
-    sets: Vec<Descriptor<T>>,
+    sets: Vec<DescriptorRaw>,
 }
 
-impl<T: DescriptorLayout> Index<usize> for DescriptorPool<T> {
-    type Output = Descriptor<T>;
+pub struct DescriptorPool<'a, T: DescriptorLayout> {
+    pub raw: &'a DescriptorPoolRaw,
+    _phantom: PhantomData<T>,
+}
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.sets[index]
+impl<'a, T: DescriptorLayout> From<&'a DescriptorPoolRaw> for DescriptorPool<'a, T> {
+    fn from(raw: &'a DescriptorPoolRaw) -> Self {
+        Self {
+            raw,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: DescriptorLayout> DescriptorPool<'a, T> {
+    pub fn get(&self, index: usize) -> Descriptor<T> {
+        self.raw.sets[index].into()
     }
 }
 
@@ -275,19 +301,51 @@ pub struct DescriptorSetWriter<T: DescriptorLayout> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: DescriptorLayout> DescriptorPool<T> {
-    pub fn get_writer(&self) -> DescriptorSetWriter<T> {
+impl<T: DescriptorLayout> DescriptorSetWriter<T> {
+    // # TODO: num_sets could be determined at the time of descriptor pool creation
+    pub fn new(num_sets: usize) -> DescriptorSetWriter<T> {
         DescriptorSetWriter {
-            num_sets: self.sets.len(),
+            num_sets,
             writes: vec![],
             bufer_writes: vec![],
             image_writes: vec![],
             _phantom: PhantomData,
         }
     }
-}
 
-impl<T: DescriptorLayout> DescriptorSetWriter<T> {
+    // TODO: sets Vec of incorrect length could be passed here
+    fn get_descriptor_writes(&self, sets: &Vec<DescriptorRaw>) -> Vec<vk::WriteDescriptorSet> {
+        let DescriptorSetWriter {
+            writes,
+            bufer_writes,
+            image_writes,
+            ..
+        } = self;
+        writes
+            .into_iter()
+            .map(|write| match write {
+                SetWrite::Buffer {
+                    set_index,
+                    buffer_write_index,
+                    write,
+                } => vk::WriteDescriptorSet {
+                    dst_set: sets[*set_index].set,
+                    p_buffer_info: &bufer_writes[*buffer_write_index],
+                    ..*write
+                },
+                SetWrite::Image {
+                    set_index,
+                    image_write_index,
+                    write,
+                } => vk::WriteDescriptorSet {
+                    dst_set: sets[*set_index].set,
+                    p_image_info: &image_writes[*image_write_index],
+                    ..*write
+                },
+            })
+            .collect::<Vec<_>>()
+    }
+
     pub(super) fn write_buffer<U: Pod + DescriptorBinding, O: Operation>(
         mut self,
         buffer: &UniformBuffer<U, O>,
@@ -336,12 +394,12 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         self
     }
 
-    pub fn write_image<'a, I>(mut self, images: &'a [I]) -> Self
+    pub fn write_images<'a, B, I>(mut self, images: &'a [I]) -> Self
     where
-        I: DescriptorBinding,
+        B: DescriptorBinding,
         &'a I: Into<vk::DescriptorImageInfo>,
     {
-        let writes = T::get_descriptor_writes::<I>();
+        let writes = T::get_descriptor_writes::<B>();
         if writes.is_empty() {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
@@ -413,13 +471,12 @@ impl VulkanDevice {
 
     pub fn create_descriptor_pool<T: DescriptorLayout>(
         &self,
-        _builder: T,
-        num_sets: usize,
-    ) -> Result<DescriptorPool<T>, Box<dyn Error>> {
-        let pool_sizes = T::get_descriptor_pool_sizes(num_sets as u32);
+        writer: DescriptorSetWriter<T>,
+    ) -> Result<DescriptorPoolRaw, Box<dyn Error>> {
+        let pool_sizes = T::get_descriptor_pool_sizes(writer.num_sets as u32);
         let pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .max_sets(num_sets as u32);
+            .max_sets(writer.num_sets as u32);
         let pool = unsafe {
             self.device
                 .create_descriptor_pool(&pool_create_info, None)?
@@ -430,57 +487,22 @@ impl VulkanDevice {
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::builder()
                         .descriptor_pool(pool)
-                        .set_layouts(&vec![layout.layout; num_sets]),
+                        .set_layouts(&vec![layout.layout; writer.num_sets]),
                 )?
                 .into_iter()
-                .map(|set| Descriptor {
-                    set,
-                    _phantom: PhantomData,
-                })
+                .map(|set| DescriptorRaw { set })
                 .collect::<Vec<_>>()
         };
-        Ok(DescriptorPool {
+        let writes = writer.get_descriptor_writes(&sets);
+        unsafe {
+            self.device
+                .update_descriptor_sets(&writes, &[])
+        }
+        Ok(DescriptorPoolRaw {
             count: sets.len(),
             pool,
             sets,
         })
-    }
-
-    pub fn write_descriptor_sets<T: DescriptorLayout>(
-        &self,
-        pool: &mut DescriptorPool<T>,
-        writer: DescriptorSetWriter<T>,
-    ) {
-        let DescriptorSetWriter {
-            writes,
-            bufer_writes,
-            image_writes,
-            ..
-        } = writer;
-        let writes = writes
-            .into_iter()
-            .map(|write| match write {
-                SetWrite::Buffer {
-                    set_index,
-                    buffer_write_index,
-                    write,
-                } => vk::WriteDescriptorSet {
-                    dst_set: pool.sets[set_index].set,
-                    p_buffer_info: &bufer_writes[buffer_write_index],
-                    ..write
-                },
-                SetWrite::Image {
-                    set_index,
-                    image_write_index,
-                    write,
-                } => vk::WriteDescriptorSet {
-                    dst_set: pool.sets[set_index].set,
-                    p_image_info: &image_writes[image_write_index],
-                    ..write
-                },
-            })
-            .collect::<Vec<_>>();
-        unsafe { self.device.update_descriptor_sets(&writes, &[]) }
     }
 
     pub fn destroy_descriptor_set_layouts(&self) {
@@ -493,7 +515,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn destroy_descriptor_pool<T: DescriptorLayout>(&self, pool: &mut DescriptorPool<T>) {
+    pub fn destroy_descriptor_pool(&self, pool: &mut DescriptorPoolRaw) {
         unsafe {
             self.device.destroy_descriptor_pool(pool.pool, None);
         };

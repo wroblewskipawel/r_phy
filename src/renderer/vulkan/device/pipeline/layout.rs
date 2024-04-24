@@ -297,6 +297,28 @@ impl<T: DescriptorLayoutList, P: PushConstantList> Layout for PipelineLayoutBuil
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct PipelineLayoutRaw {
+    pub layout: vk::PipelineLayout,
+}
+
+impl<L: Layout> From<PipelineLayout<L>> for PipelineLayoutRaw {
+    fn from(layout: PipelineLayout<L>) -> Self {
+        Self {
+            layout: layout.layout,
+        }
+    }
+}
+
+impl<L: Layout> From<PipelineLayoutRaw> for PipelineLayout<L> {
+    fn from(layout: PipelineLayoutRaw) -> Self {
+        Self {
+            layout: layout.layout,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct PipelineLayout<L: Layout> {
     pub layout: vk::PipelineLayout,
     _phantom: PhantomData<L>,

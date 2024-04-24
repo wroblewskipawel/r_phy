@@ -9,7 +9,7 @@ use crate::{
     math::types::Matrix4,
     renderer::{
         camera::CameraMatrices,
-        vulkan::{VulkanMaterialHandle, VulkanMeshHandle},
+        model::{Material, Vertex},
     },
 };
 
@@ -20,10 +20,11 @@ use super::{
         operation::Graphics,
         BeginCommand, FinishedCommand, Persistent, PersistentCommandPool,
     },
-    descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool},
+    descriptor::{
+        CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorPoolRaw, DescriptorSetWriter,
+    },
     framebuffer::AttachmentList,
-    material::MaterialPack,
-    mesh::MeshPack,
+    resources::{MaterialPackList, MeshPackList, VulkanMaterialHandle, VulkanMeshHandle},
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
 };
@@ -42,15 +43,15 @@ pub trait Frame {
         camera_matrices: &CameraMatrices,
     ) -> Result<Self::State, Box<dyn Error>>;
 
-    fn draw_mesh(
+    fn draw_mesh<V: Vertex, M: Material>(
         &self,
         state: Self::State,
         device: &VulkanDevice,
         model: &Matrix4,
-        mesh: VulkanMeshHandle,
-        material: VulkanMaterialHandle,
-        mesh_packs: &[MeshPack],
-        material_packs: &[MaterialPack],
+        mesh: VulkanMeshHandle<V>,
+        material: VulkanMaterialHandle<M>,
+        mesh_packs: &impl MeshPackList,
+        material_packs: &impl MaterialPackList,
     ) -> Self::State;
 
     fn end(
@@ -63,8 +64,14 @@ pub trait Frame {
 }
 
 struct CameraUniform {
-    descriptors: DescriptorPool<CameraDescriptorSet>,
+    descriptors: DescriptorPoolRaw,
     uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
+}
+
+impl CameraUniform {
+    pub fn descriptors(&self) -> DescriptorPool<CameraDescriptorSet> {
+        (&self.descriptors).into()
+    }
 }
 
 pub struct FrameData<C: Frame> {
@@ -83,11 +90,11 @@ pub struct FramePool {
 
 impl VulkanDevice {
     fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
-        let mut descriptors =
-            self.create_descriptor_pool(CameraDescriptorSet::builder(), num_images)?;
         let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics>(num_images)?;
-        let descriptor_write = descriptors.get_writer().write_buffer(&uniform_buffer);
-        self.write_descriptor_sets(&mut descriptors, descriptor_write);
+        let descriptors = self.create_descriptor_pool(
+            DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
+                .write_buffer(&uniform_buffer),
+        )?;
         Ok(CameraUniform {
             descriptors,
             uniform_buffer,
@@ -134,7 +141,7 @@ impl VulkanDevice {
         let (index, primary_command) = pool.primary_commands.next();
         let primary_command = self.begin_primary_command(primary_command)?;
         let swapchain_frame = self.get_frame(swapchain, pool.image_sync[index])?;
-        let camera_descriptor = pool.camera_uniform.descriptors[index];
+        let camera_descriptor = pool.camera_uniform.descriptors().get(index);
         pool.camera_uniform.uniform_buffer[index] = camera;
         let commands = renderer.begin(
             self,
@@ -151,15 +158,15 @@ impl VulkanDevice {
         })
     }
 
-    pub fn draw_mesh<C: Frame>(
+    pub fn draw_mesh<C: Frame, V: Vertex, M: Material>(
         &self,
         renderer: &C,
         frame: FrameData<C>,
         model: &Matrix4,
-        mesh: VulkanMeshHandle,
-        material: VulkanMaterialHandle,
-        mesh_packs: &[MeshPack],
-        material_packs: &[MaterialPack],
+        mesh: VulkanMeshHandle<V>,
+        material: VulkanMaterialHandle<M>,
+        mesh_packs: &impl MeshPackList,
+        material_packs: &impl MaterialPackList,
     ) -> FrameData<C> {
         let FrameData {
             swapchain_frame,

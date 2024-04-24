@@ -4,13 +4,12 @@ pub(super) mod descriptor;
 pub(super) mod frame;
 pub(super) mod framebuffer;
 pub(super) mod image;
-pub(super) mod material;
-pub(super) mod mesh;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod renderer;
 pub(super) mod skybox;
 pub(super) mod swapchain;
+pub(super) mod resources;
 
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};

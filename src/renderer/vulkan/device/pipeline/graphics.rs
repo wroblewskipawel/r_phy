@@ -15,7 +15,7 @@ use crate::renderer::vulkan::device::{
 use super::{
     get_pipeline_states_info,
     layout::{Layout, PipelineLayout},
-    ModuleLoader, PipelineStates,
+    ModuleLoader, PipelineLayoutRaw, PipelineStates,
 };
 
 pub trait GraphicspipelineConfig {
@@ -43,6 +43,30 @@ impl<L: Layout, P: PipelineStates, R: RenderPassConfig, S: Subpass<R::Attachment
     type PipelineStates = P;
     type RenderPass = R;
     type Subpass = S;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GraphicsPipelineRaw {
+    pub handle: vk::Pipeline,
+    pub layout: PipelineLayoutRaw,
+}
+
+impl<C: GraphicspipelineConfig> From<GraphicsPipeline<C>> for GraphicsPipelineRaw {
+    fn from(pipeline: GraphicsPipeline<C>) -> Self {
+        GraphicsPipelineRaw {
+            handle: pipeline.handle,
+            layout: pipeline.layout.into(),
+        }
+    }
+}
+
+impl<C: GraphicspipelineConfig> From<GraphicsPipelineRaw> for GraphicsPipeline<C> {
+    fn from(pipeline: GraphicsPipelineRaw) -> Self {
+        GraphicsPipeline {
+            handle: pipeline.handle,
+            layout: pipeline.layout.into(),
+        }
+    }
 }
 
 pub struct GraphicsPipeline<C: GraphicspipelineConfig> {
@@ -100,6 +124,12 @@ impl VulkanDevice {
         &self,
         pipeline: &mut GraphicsPipeline<C>,
     ) {
+        unsafe {
+            self.device.destroy_pipeline(pipeline.handle, None);
+        }
+    }
+
+    pub fn destroy_graphics_pipeline_raw(&self, pipeline: &mut GraphicsPipelineRaw) {
         unsafe {
             self.device.destroy_pipeline(pipeline.handle, None);
         }

@@ -1,87 +1,95 @@
+mod core;
 mod debug;
 mod device;
 mod surface;
 
-use crate::math::types::Matrix4;
-
 use self::device::{
     frame::{FrameData, FramePool},
     framebuffer::presets::AttachmentsGBuffer,
-    material::MaterialPack,
-    mesh::MeshPack,
     render_pass::DeferedRenderPass,
     renderer::deferred::DeferredRenderer,
+    resources::{
+        MaterialPackList, MaterialPackListBuilder, MaterialPacks, MeshPackList,
+        MeshPackListBuilder, MeshPacks,
+    },
 };
+use crate::math::types::Matrix4;
+use core::Context;
 
 use super::{
     camera::Camera,
-    model::{Material, MaterialHandle, Mesh, MeshHandle, Model},
-    Renderer,
+    model::{
+        Drawable, Material, MaterialHandle, MaterialTypeNode, MaterialTypeTerminator, Materials,
+        Mesh, MeshHandle, MeshNode, MeshTerminator, Meshes, Vertex,
+    },
+    Renderer, RendererBuilder,
 };
-use ash::{vk, Entry, Instance};
-use debug::VulkanDebugUtils;
-use device::{swapchain::VulkanSwapchain, VulkanDevice};
-use std::{
-    error::Error,
-    ffi::{c_char, CStr},
-};
-use surface::VulkanSurface;
+use device::{renderer::deferred::GBuffer, swapchain::VulkanSwapchain};
+use std::{any::TypeId, collections::HashMap, error::Error, path::PathBuf};
 use winit::window::Window;
 
-pub(super) struct VulkanRenderer {
-    current_frame: Option<FrameData<DeferredRenderer>>,
-    materials: Vec<MaterialPack>,
-    meshes: Vec<MeshPack>,
+pub struct VulkanRendererBuilder<M: MaterialPackListBuilder, V: MeshPackListBuilder> {
+    materials: Materials<M>,
+    meshes: Meshes<V>,
+}
+
+impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator> {
+    pub fn new() -> Self {
+        Self {
+            materials: Materials::new(),
+            meshes: Meshes::new(),
+        }
+    }
+}
+
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder> VulkanRendererBuilder<M, V> {
+    pub fn with_materials<N: Material>(
+        self,
+        materials: Vec<N>,
+        shader_path: PathBuf,
+    ) -> VulkanRendererBuilder<MaterialTypeNode<N, M>, V> {
+        VulkanRendererBuilder {
+            materials: self.materials.push(materials, shader_path),
+            meshes: self.meshes,
+        }
+    }
+
+    pub fn with_meshes<N: Vertex>(
+        self,
+        meshes: Vec<Mesh<N>>,
+    ) -> VulkanRendererBuilder<M, MeshNode<N, V>> {
+        VulkanRendererBuilder {
+            materials: self.materials,
+            meshes: self.meshes.push(meshes),
+        }
+    }
+}
+
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder> RendererBuilder
+    for VulkanRendererBuilder<M, V>
+{
+    type Renderer = VulkanRenderer<M::Pack, V::Pack>;
+
+    fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
+        let renderer = VulkanRenderer::new(
+            window,
+            &*self.materials,
+            &*self.meshes,
+            &self.materials.shaders,
+        )?;
+        Ok(renderer)
+    }
+}
+
+pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList> {
+    current_frame: Option<FrameData<DeferredRenderer<M>>>,
+    materials: MaterialPacks<M>,
+    meshes: MeshPacks<V>,
     frames: FramePool,
-    renderer: DeferredRenderer,
+    g_buffer: GBuffer,
+    renderer: DeferredRenderer<M>,
     swapchain: VulkanSwapchain<AttachmentsGBuffer>,
-    device: VulkanDevice,
-    surface: VulkanSurface,
-    debug_utils: Option<VulkanDebugUtils>,
-    instance: Instance,
-    _entry: Entry,
-}
-
-fn check_required_extension_support(
-    entry: &Entry,
-    mut extension_names: impl Iterator<Item = &'static CStr>,
-) -> Result<Vec<*const c_char>, Box<dyn Error>> {
-    let supported_extensions = entry.enumerate_instance_extension_properties(None)?;
-    let supported = extension_names.try_fold(Vec::new(), |mut supported, req| {
-        supported_extensions
-            .iter()
-            .any(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == req)
-            .then(|| {
-                supported.push(req.as_ptr());
-                supported
-            })
-            .ok_or(format!(
-                "Required extension {} not supported!",
-                req.to_string_lossy()
-            ))
-    })?;
-    Ok(supported)
-}
-
-fn check_required_layer_support(
-    entry: &Entry,
-    mut layer_names: impl Iterator<Item = &'static CStr>,
-) -> Result<Vec<*const c_char>, Box<dyn Error>> {
-    let supported_layers = entry.enumerate_instance_layer_properties()?;
-    let supported = layer_names.try_fold(Vec::new(), |mut supported, req| {
-        supported_layers
-            .iter()
-            .any(|sup| unsafe { CStr::from_ptr(&sup.layer_name as *const _) } == req)
-            .then(|| {
-                supported.push(req.as_ptr());
-                supported
-            })
-            .ok_or(format!(
-                "Required layer {} not supported!",
-                req.to_string_lossy()
-            ))
-    })?;
-    Ok(supported)
+    context: Context,
 }
 
 // TODO: Error handling should be improved - currently when shader source files are missing,
@@ -90,132 +98,64 @@ fn check_required_layer_support(
 // TODO: User should be able to load custom shareds,
 // while also some preset of preconfigured one should be available
 // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-impl VulkanRenderer {
-    pub fn new(window: &Window) -> Result<Self, Box<dyn Error>> {
-        let entry = unsafe { Entry::load()? };
-        let enabled_layer_names = check_required_layer_support(
-            &entry,
-            VulkanDebugUtils::required_layers().iter().copied(),
-        )?;
-        let enabled_extension_names = check_required_extension_support(
-            &entry,
-            VulkanDebugUtils::required_extensions()
-                .iter()
-                .chain(VulkanSurface::required_extensions())
-                .copied(),
-        )?;
-        let application_info = vk::ApplicationInfo {
-            api_version: vk::API_VERSION_1_1,
-            ..Default::default()
-        };
-        let mut debug_messenger_info = VulkanDebugUtils::create_info();
-        let create_info = vk::InstanceCreateInfo::builder()
-            .application_info(&application_info)
-            .enabled_layer_names(&enabled_layer_names)
-            .enabled_extension_names(&enabled_extension_names)
-            .push_next(&mut debug_messenger_info);
-        let instance = unsafe { entry.create_instance(&create_info, None)? };
-        let debug_utils = VulkanDebugUtils::build(&entry, &instance)?;
-        let surface = VulkanSurface::create(&entry, &instance, window)?;
-        let device = VulkanDevice::create(&instance, &surface)?;
-        let mut renderer = device.create_deferred_renderer()?;
-        let swapchain = device.create_swapchain::<AttachmentsGBuffer>(
-            &instance,
-            &surface,
+impl<M: MaterialPackList, V: MeshPackList> VulkanRenderer<M, V> {
+    pub fn new(
+        window: &Window,
+        materials: &impl MaterialPackListBuilder<Pack = M>,
+        meshes: &impl MeshPackListBuilder<Pack = V>,
+        shaders: &HashMap<TypeId, PathBuf>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let context = Context::build(window)?;
+        // TODO: Here GBuffer creation is moved out of the DeferredRenderer for simplicity sake,
+        //       nonetheless it should be moved back (DeferredRendere should own all of its required resources)
+        let g_buffer = context.create_g_buffer()?;
+        let swapchain = context.create_swapchain::<AttachmentsGBuffer>(
+            (&context).into(),
+            (&context).into(),
             |swapchain_image, extent| {
-                device.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
-                    renderer.get_framebuffer_builder(swapchain_image),
+                context.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
+                    g_buffer.get_framebuffer_builder(swapchain_image),
                     extent,
                 )
             },
         )?;
-        device.update_deferred_renderer_input_descriptors(&mut renderer, &swapchain);
-        let frames = device.create_frame_pool::<DeferredRenderer>(&swapchain)?;
-
+        let renderer = context.create_deferred_renderer(&swapchain, shaders)?;
+        // TODO: Why frame pool is not typed with DeferredRenderer<M> (FramePool<DeferredRenderer<M>>)?
+        let frames = context.create_frame_pool::<DeferredRenderer<M>>(&swapchain)?;
+        let materials = context.load_materials(materials)?;
+        let meshes = context.load_meshes(meshes)?;
         Ok(Self {
             current_frame: None,
-            materials: vec![],
-            meshes: vec![],
+            materials,
+            meshes,
             frames,
+            g_buffer,
             renderer,
             swapchain,
-            device,
-            surface,
-            debug_utils: Some(debug_utils),
-            instance,
-            _entry: entry,
+            context,
         })
     }
 }
 
-impl Drop for VulkanRenderer {
+impl<M: MaterialPackList, V: MeshPackList> Drop for VulkanRenderer<M, V> {
     fn drop(&mut self) {
-        let _ = self.device.wait_idle();
-        unsafe {
-            self.materials
-                .iter_mut()
-                .for_each(|pack| self.device.destroy_material_pack(pack));
-            self.meshes
-                .iter_mut()
-                .for_each(|pack| self.device.destroy_mesh_pack(pack));
-            self.device.destroy_deferred_renderer(&mut self.renderer);
-            self.device.destory_frame_pool(&mut self.frames);
-            self.device.destroy_swapchain(&mut self.swapchain);
-            self.device.destroy_render_passes();
-            self.device.destroy_pipeline_layouts();
-            self.device.destroy_descriptor_set_layouts();
-            self.device.destroy();
-            self.surface.destroy();
-            drop(self.debug_utils.take());
-            self.instance.destroy_instance(None);
-        }
+        let _ = self.context.wait_idle();
+        self.context.destroy_materials(&mut self.materials);
+        self.context.destroy_meshes(&mut self.meshes);
+        self.context.destroy_deferred_renderer(&mut self.renderer);
+        self.context.destroy_g_buffer(&mut self.g_buffer);
+        self.context.destory_frame_pool(&mut self.frames);
+        self.context.destroy_swapchain(&mut self.swapchain);
     }
 }
 
-pub struct VulkanMeshHandle {
-    mesh_pack_index: u32,
-    mesh_index: u32,
-}
+impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
+    type Materials = M;
+    type Meshes = V;
 
-impl From<MeshHandle> for VulkanMeshHandle {
-    fn from(value: MeshHandle) -> Self {
-        Self {
-            mesh_pack_index: ((0xFFFFFFF0000000 & value.0) >> 32) as u32,
-            mesh_index: (0x00000000FFFFFFFF & value.0) as u32,
-        }
-    }
-}
-
-impl From<VulkanMeshHandle> for MeshHandle {
-    fn from(value: VulkanMeshHandle) -> Self {
-        Self(((value.mesh_pack_index as u64) << 32) + value.mesh_index as u64)
-    }
-}
-
-pub struct VulkanMaterialHandle {
-    material_pack_index: u32,
-    material_index: u32,
-}
-
-impl From<MaterialHandle> for VulkanMaterialHandle {
-    fn from(value: MaterialHandle) -> Self {
-        Self {
-            material_pack_index: ((0xFFFFFFF0000000 & value.0) >> 32) as u32,
-            material_index: (0x00000000FFFFFFFF & value.0) as u32,
-        }
-    }
-}
-
-impl From<VulkanMaterialHandle> for MaterialHandle {
-    fn from(value: VulkanMaterialHandle) -> Self {
-        Self(((value.material_pack_index as u64) << 32) + value.material_index as u64)
-    }
-}
-
-impl Renderer for VulkanRenderer {
-    fn begin_frame(&mut self, camera: &dyn Camera) -> Result<(), Box<dyn Error>> {
+    fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let frame = self.device.next_frame(
+        let frame = self.context.next_frame(
             &mut self.frames,
             &self.renderer,
             &self.swapchain,
@@ -227,58 +167,37 @@ impl Renderer for VulkanRenderer {
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
         let frame = self.current_frame.take().ok_or("current_frame is None!")?;
-        self.device
+        self.context
             .end_frame(&self.renderer, frame, &self.swapchain)?;
         Ok(())
     }
 
-    fn load_meshes(&mut self, meshes: &[Mesh]) -> Result<Vec<MeshHandle>, Box<dyn Error>> {
-        let mesh_pack_index = self.meshes.len() as u32;
-        self.meshes.push(self.device.load_mesh_pack(meshes)?);
-        let pack = self.meshes.last().unwrap();
-        Ok((0..pack.meshes.len() as u32)
-            .map(|mesh_index| {
-                VulkanMeshHandle {
-                    mesh_pack_index,
-                    mesh_index,
-                }
-                .into()
-            })
-            .collect())
-    }
-
-    fn load_materials(
+    fn draw<D: Drawable>(
         &mut self,
-        materials: &[Material],
-    ) -> Result<Vec<super::model::MaterialHandle>, Box<dyn Error>> {
-        let material_pack_index = self.materials.len() as u32;
-        self.materials
-            .push(self.device.load_material_pack(materials)?);
-        let pack = self.materials.last().unwrap();
-        Ok((0..pack.descriptors.count as u32)
-            .map(|material_index| {
-                VulkanMaterialHandle {
-                    material_pack_index,
-                    material_index,
-                }
-                .into()
-            })
-            .collect())
-    }
-
-    fn draw(&mut self, model: Model, transform: &Matrix4) -> Result<(), Box<dyn Error>> {
-        let Model { mesh, material } = model;
+        drawable: &D,
+        transform: &Matrix4,
+    ) -> Result<(), Box<dyn Error>> {
+        let material = drawable.material();
+        let mesh = drawable.mesh();
         let frame = self.current_frame.take().ok_or("current_frame is None!")?;
-        let frame = self.device.draw_mesh(
+        let frame = self.context.draw_mesh(
             &self.renderer,
             frame,
             transform,
             mesh.into(),
             material.into(),
-            &self.meshes,
-            &self.materials,
+            &self.meshes.packs,
+            &self.materials.packs,
         );
         self.current_frame.replace(frame);
         Ok(())
+    }
+
+    fn get_mesh_handles<T: Vertex>(&self) -> Option<Vec<MeshHandle<T>>> {
+        Some(self.meshes.packs.try_get()?.get_handles())
+    }
+
+    fn get_material_handles<T: Material>(&self) -> Option<Vec<MaterialHandle<T>>> {
+        Some(self.materials.packs.try_get()?.get_handles())
     }
 }

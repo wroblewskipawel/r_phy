@@ -80,17 +80,17 @@ pub trait ModuleLoader {
     fn load(self, device: &VulkanDevice) -> Result<Modules, Box<dyn Error>>;
 }
 
-pub struct ShaderDirectory {
-    path: &'static Path,
+pub struct ShaderDirectory<'a> {
+    path: &'a Path,
 }
 
-impl ShaderDirectory {
-    pub fn new(path: &'static Path) -> Self {
+impl<'a> ShaderDirectory<'a> {
+    pub fn new(path: &'a Path) -> Self {
         Self { path }
     }
 }
 
-impl ModuleLoader for ShaderDirectory {
+impl<'a> ModuleLoader for ShaderDirectory<'a> {
     fn load(self, device: &VulkanDevice) -> Result<Modules, Box<dyn Error>> {
         let modules = Modules {
             modules: self

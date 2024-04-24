@@ -6,7 +6,7 @@ use ash::vk::{self, Extent2D};
 
 use crate::renderer::vulkan::device::{AttachmentProperties, VulkanDevice};
 
-use super::render_pass::RenderPassConfig;
+use super::{image::VulkanImage2D, render_pass::RenderPassConfig};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -154,6 +154,14 @@ pub enum AttachmentTarget {
 
 pub struct InputAttachment {
     pub image_view: vk::ImageView,
+}
+
+impl From<VulkanImage2D> for InputAttachment {
+    fn from(image: VulkanImage2D) -> Self {
+        Self {
+            image_view: image.image_view,
+        }
+    }
 }
 
 impl From<&InputAttachment> for vk::DescriptorImageInfo {

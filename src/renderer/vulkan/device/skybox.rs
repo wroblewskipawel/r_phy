@@ -1,16 +1,19 @@
 use std::error::Error;
 use std::path::Path;
 
-use crate::{physics::shape, renderer::camera::CameraMatrices};
+use crate::{
+    physics::shape,
+    renderer::{camera::CameraMatrices, model::CommonVertex},
+};
 
 use super::{
-    descriptor::{DescriptorPool, TextureDescriptorSet},
+    descriptor::{DescriptorPool, DescriptorPoolRaw, DescriptorSetWriter, TextureDescriptorSet},
     image::Texture2D,
-    mesh::MeshPack,
     pipeline::{
         DescriptorLayoutNode, DescriptorLayoutTerminator, GraphicsPipeline, GraphicspipelineConfig,
         ModuleLoader, PipelineLayoutBuilder, PushConstantNode, PushConstantTerminator,
     },
+    resources::{MeshPack, MeshPackRaw},
     VulkanDevice,
 };
 
@@ -21,9 +24,19 @@ pub type LayoutSkybox = PipelineLayoutBuilder<
 
 pub struct Skybox<L: GraphicspipelineConfig<Layout = LayoutSkybox>> {
     texture: Texture2D,
-    pub mesh_pack: MeshPack,
-    pub descriptor: DescriptorPool<TextureDescriptorSet>,
+    pub mesh_pack: MeshPackRaw,
+    descriptor: DescriptorPoolRaw,
     pub pipeline: GraphicsPipeline<L>,
+}
+
+impl<L: GraphicspipelineConfig<Layout = LayoutSkybox>> Skybox<L> {
+    pub fn get_mesh_pack<'a>(&'a self) -> MeshPack<'a, CommonVertex> {
+        (&self.mesh_pack).into()
+    }
+
+    pub fn get_descriptors<'a>(&'a self) -> DescriptorPool<'a, TextureDescriptorSet> {
+        (&self.descriptor).into()
+    }
 }
 
 impl VulkanDevice {
@@ -33,14 +46,13 @@ impl VulkanDevice {
         modules: impl ModuleLoader,
     ) -> Result<Skybox<L>, Box<dyn Error>> {
         let texture = self.load_cubemap(path)?;
-        let mut descriptor = self.create_descriptor_pool(TextureDescriptorSet::builder(), 1)?;
-        let descriptor_write = descriptor
-            .get_writer()
-            .write_image(std::slice::from_ref(&texture));
-        self.write_descriptor_sets(&mut descriptor, descriptor_write);
+        let descriptor = self.create_descriptor_pool(
+            DescriptorSetWriter::<TextureDescriptorSet>::new(1)
+                .write_images::<Texture2D, _>(std::slice::from_ref(&texture)),
+        )?;
         let image_extent = self.physical_device.surface_properties.get_current_extent();
         let pipeline = self.create_graphics_pipeline(modules, image_extent)?;
-        let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()])?;
+        let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()], usize::MAX)?;
         Ok(Skybox {
             texture,
             mesh_pack,
