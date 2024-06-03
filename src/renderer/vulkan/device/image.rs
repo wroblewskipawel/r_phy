@@ -318,8 +318,8 @@ impl From<&Texture2D> for vk::DescriptorImageInfo {
 impl VulkanDevice {
     pub fn load_texture(&self, image: &Image) -> Result<Texture2D, Box<dyn Error>> {
         match image {
-            Image::File(path) => self.load_texture_impl(PngImageReader::from_file(&path)?),
-            Image::Buffer(data) => self.load_texture_impl(PngImageReader::from_buffer(&data)?),
+            Image::File(path) => self.load_texture_impl(PngImageReader::from_file(path)?),
+            Image::Buffer(data) => self.load_texture_impl(PngImageReader::from_buffer(data)?),
         }
     }
 

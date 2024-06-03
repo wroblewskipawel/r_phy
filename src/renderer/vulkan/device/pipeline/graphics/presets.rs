@@ -1,7 +1,7 @@
 use crate::renderer::vulkan::device::{
     pipeline::{
-        PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox,
-        PipelineLayoutMaterial, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
+        PipelineLayoutGBuffer, PipelineLayoutMaterial, PipelineLayoutNoMaterial,
+        PipelineLayoutSkybox, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
     },
     render_pass::{
         DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,

@@ -7,7 +7,6 @@ use crate::{
     math::types::{Matrix3, Matrix4},
     renderer::{
         camera::CameraMatrices,
-        model::UnlitMaterial,
         vulkan::device::{
             descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
             resources::VulkanMaterial,

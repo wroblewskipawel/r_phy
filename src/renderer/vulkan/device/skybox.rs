@@ -13,7 +13,7 @@ use super::{
         DescriptorLayoutNode, DescriptorLayoutTerminator, GraphicsPipeline, GraphicsPipelineConfig,
         ModuleLoader, PipelineLayoutBuilder, PushConstantNode, PushConstantTerminator,
     },
-    resources::{MeshPack, MeshPackRef, MeshPackTypeErased},
+    resources::MeshPack,
     VulkanDevice,
 };
 

@@ -83,12 +83,10 @@ pub struct FramePool {
 impl VulkanDevice {
     fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
         let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics>(num_images)?;
-        let descriptors = self
-            .create_descriptor_pool(
-                DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
-                    .write_buffer(&uniform_buffer),
-            )?
-            .into();
+        let descriptors = self.create_descriptor_pool(
+            DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
+                .write_buffer(&uniform_buffer),
+        )?;
         Ok(CameraUniform {
             descriptors,
             uniform_buffer,

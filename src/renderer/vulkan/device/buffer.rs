@@ -503,7 +503,7 @@ impl VulkanDevice {
     }
 }
 
-pub(super) struct UniformBuffer<U: Pod, O: Operation> {
+pub struct UniformBuffer<U: Pod, O: Operation> {
     buffer: PersistentBuffer,
     pub size: usize,
     _phantom: PhantomData<(U, O)>,

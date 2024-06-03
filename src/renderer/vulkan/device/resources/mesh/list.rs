@@ -10,12 +10,12 @@ use super::{MeshPackRef, MeshPackTypeErased};
 pub trait MeshPackList: MeshList {
     fn destroy(&mut self, device: &VulkanDevice);
 
-    fn try_get<'a, V: Vertex>(&'a self) -> Option<MeshPackRef<'a, V>>;
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
 }
 
 impl MeshPackList for MeshTerminator {
     fn destroy(&mut self, _device: &VulkanDevice) {}
-    fn try_get<'a, V: Vertex>(&'a self) -> Option<MeshPackRef<'a, V>> {
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
         None
     }
 }
@@ -38,7 +38,7 @@ impl<V: Vertex, N: MeshPackList> MeshPackList for MeshPackNode<V, N> {
         self.next.destroy(device);
     }
 
-    fn try_get<'a, T: Vertex>(&'a self) -> Option<MeshPackRef<'a, T>> {
+    fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
         if let Ok(mesh_pack_ref) = (&self.mesh_pack).try_into() {
             Some(mesh_pack_ref)
         } else {

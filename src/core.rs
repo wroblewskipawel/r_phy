@@ -93,6 +93,12 @@ pub struct LoopBuilder<R: RendererBuilder, C: CameraBuilder> {
     window: Option<WindowBuilder>,
 }
 
+impl Default for LoopBuilder<RendererNone, CameraNone> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoopBuilder<RendererNone, CameraNone> {
     pub fn new() -> Self {
         Self {

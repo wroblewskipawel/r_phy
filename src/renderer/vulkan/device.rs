@@ -7,9 +7,9 @@ pub(super) mod image;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod renderer;
+pub(super) mod resources;
 pub(super) mod skybox;
 pub(super) mod swapchain;
-pub(super) mod resources;
 
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};

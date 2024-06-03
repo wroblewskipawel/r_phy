@@ -127,7 +127,7 @@ impl DocumentReader {
         for (semantic, accessor) in primitive.attributes() {
             reader = reader.with_attribute(semantic, self.get_accessor(accessor)?)?;
         }
-        Ok(reader.build()?.read()?)
+        reader.build()?.read()
     }
 
     fn get_mesh(&self, mesh: gltf::Mesh) -> Result<Mesh<CommonVertex>, Box<dyn Error>> {
@@ -213,7 +213,7 @@ impl DocumentReader {
             builder = builder.with_emissive(self.get_image(emissive.texture().source(), base)?);
         };
 
-        Ok(builder.build()?)
+        builder.build()
     }
 }
 
@@ -235,7 +235,7 @@ impl<'a> PrimitiveReader<'a> {
         }
         let mut vertices = Vec::new();
         // TODO: Refactior following code to dont have to check for missing vertex data
-        while let Some(pos) = self.pos.next() {
+        for pos in self.pos.by_ref() {
             let normal = self
                 .norm
                 .next()
@@ -321,7 +321,7 @@ impl Mesh<CommonVertex> {
                 .materials()
                 .next()
                 .ok_or("No material found")?,
-            &base,
+            base,
         )?;
         Ok((mesh, material))
     }

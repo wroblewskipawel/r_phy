@@ -286,6 +286,12 @@ pub struct Meshes<L: MeshList> {
     list: L,
 }
 
+impl Default for Meshes<MeshTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Meshes<MeshTerminator> {
     pub fn new() -> Self {
         Self {

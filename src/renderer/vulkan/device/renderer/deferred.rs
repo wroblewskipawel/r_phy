@@ -93,8 +93,8 @@ impl VulkanDevice {
             self.begin_secondary_command::<_, _, _, S>(command, render_pass, framebuffer)?,
             |command| {
                 command
-                    .bind_pipeline(&pipeline)
-                    .bind_descriptor_set(&pipeline, camera_descriptor)
+                    .bind_pipeline(pipeline)
+                    .bind_descriptor_set(pipeline, camera_descriptor)
             },
         );
         Ok(StatefulCommand {
@@ -199,10 +199,17 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
         camera_matrices: &CameraMatrices,
     ) -> Result<Self::State, Box<dyn Error>> {
         // TODO: Refactor!!!
-        let depth_prepass = (|StatefulCommand {
-                                  command,
-                                  mesh_pack_index,
-                              }| {
+        let depth_prepass = {
+            let StatefulCommand {
+                command,
+                mesh_pack_index,
+            } = device.create_stateful_command::<GBufferDepthPrepas<AttachmentsGBuffer>, _>(
+                pool,
+                self.render_pass,
+                swapchain_frame.framebuffer,
+                &self.depth_prepass,
+                camera_descriptor,
+            )?;
             let command = device.record_command(command, |command| {
                 command
                     .bind_pipeline(&self.depth_prepass)
@@ -212,15 +219,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
                 command,
                 mesh_pack_index,
             }
-        })(
-            device.create_stateful_command::<GBufferDepthPrepas<AttachmentsGBuffer>, _>(
-                pool,
-                self.render_pass,
-                swapchain_frame.framebuffer,
-                &self.depth_prepass,
-                camera_descriptor,
-            )?,
-        );
+        };
         let write_pass = device.create_write_pass_material_commands::<M>(
             camera_descriptor,
             swapchain_frame,
@@ -287,10 +286,11 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
         let mesh_ranges = meshes.get(mesh_index as usize);
         let materials = material_packs.try_get::<T>().unwrap();
         let material = materials.get_descriptor(material_index as usize);
-        let depth_prepass = (|StatefulCommand {
-                                  command,
-                                  mesh_pack_index: current_mesh_pack_index,
-                              }| {
+        let depth_prepass = {
+            let StatefulCommand {
+                command,
+                mesh_pack_index: current_mesh_pack_index,
+            } = depth_prepass;
             let command = device.record_command(command, |command| {
                 if !current_mesh_pack_index.is_some_and(|index| index == mesh_pack_index) {
                     command.bind_mesh_pack(meshes)
@@ -304,7 +304,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
                 command,
                 mesh_pack_index: Some(mesh_pack_index),
             }
-        })(depth_prepass);
+        };
         let write_pass_pipeline = self
             .write_pass
             .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, T>>()

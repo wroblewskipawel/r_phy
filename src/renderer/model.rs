@@ -23,10 +23,7 @@ pub struct Model<M: Material, V: Vertex> {
 
 impl<M: Material, V: Vertex> Clone for Model<M, V> {
     fn clone(&self) -> Self {
-        Self {
-            mesh: self.mesh,
-            material: self.material,
-        }
+        *self
     }
 }
 

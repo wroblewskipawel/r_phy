@@ -13,12 +13,12 @@ use super::{MaterialPackRef, MaterialPackTypeErased, VulkanMaterial};
 pub trait MaterialPackList: MaterialTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
 
-    fn try_get<'a, M: VulkanMaterial>(&'a self) -> Option<MaterialPackRef<'a, M>>;
+    fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>>;
 }
 
 impl MaterialPackList for MaterialTypeTerminator {
     fn destroy(&mut self, _device: &VulkanDevice) {}
-    fn try_get<'a, M: VulkanMaterial>(&'a self) -> Option<MaterialPackRef<'a, M>> {
+    fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>> {
         None
     }
 }
@@ -41,7 +41,7 @@ impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for MaterialPackNo
         self.next.destroy(device);
     }
 
-    fn try_get<'a, T: VulkanMaterial>(&'a self) -> Option<MaterialPackRef<'a, T>> {
+    fn try_get<T: VulkanMaterial>(&self) -> Option<MaterialPackRef<T>> {
         if let Ok(material_pack_ref) = (&self.pack).try_into() {
             Some(material_pack_ref)
         } else {

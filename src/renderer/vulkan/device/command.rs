@@ -21,7 +21,7 @@ use super::{
     image::VulkanImage2D,
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout, PushConstant},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{BufferType, MeshPackData, MeshPackTypeErased, MeshRange},
+    resources::{BufferType, MeshPackData, MeshRange},
     skybox::{LayoutSkybox, Skybox},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,

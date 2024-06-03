@@ -1,12 +1,12 @@
+mod list;
 mod presets;
 mod type_erased;
 mod type_safe;
-mod list;
 
+pub use list::*;
 pub use presets::*;
 pub use type_erased::*;
 pub use type_safe::*;
-pub use list::*;
 
 use std::marker::PhantomData;
 

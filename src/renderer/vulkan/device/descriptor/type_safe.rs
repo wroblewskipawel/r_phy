@@ -81,8 +81,6 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         }
     }
 
-    // TODO: sets Vec of incorrect length could be passed here
-
     pub fn write_buffer<U: Pod + DescriptorBinding, O: Operation>(
         mut self,
         buffer: &UniformBuffer<U, O>,
@@ -179,6 +177,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
 }
 
 impl VulkanDevice {
+    // TODO: sets Vec of incorrect length could be passed here
     fn write_descriptors<T: DescriptorLayout>(
         &self,
         writer: DescriptorSetWriter<T>,

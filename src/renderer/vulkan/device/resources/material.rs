@@ -63,7 +63,7 @@ pub trait MaterialPackData {
 }
 
 impl VulkanDevice {
-    pub fn destroy_material_pack<'a>(&self, pack: &mut impl MaterialPackData) {
+    pub fn destroy_material_pack(&self, pack: &mut impl MaterialPackData) {
         pack.get_textures()
             .iter_mut()
             .for_each(|texture| self.destroy_texture(texture));

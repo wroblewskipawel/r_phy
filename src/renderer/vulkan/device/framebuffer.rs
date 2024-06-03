@@ -406,6 +406,12 @@ pub struct AttachmentTransitionBuilder<A: AttachmentTransitionList> {
     transitions: A,
 }
 
+impl Default for AttachmentTransitionBuilder<AttachmentTransitionTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AttachmentTransitionBuilder<AttachmentTransitionTerminator> {
     pub fn new() -> Self {
         Self {

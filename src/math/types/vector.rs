@@ -1,5 +1,5 @@
 use super::EPS;
-use bytemuck::{checked::try_cast_slice, Pod, PodCastError, Zeroable};
+use bytemuck::{Pod, Zeroable};
 use std::{
     error::Error,
     ops::{Add, Div, Index, IndexMut, Mul, Neg, Sub},

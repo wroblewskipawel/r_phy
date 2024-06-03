@@ -33,6 +33,12 @@ pub struct VulkanRendererBuilder<M: MaterialPackListBuilder, V: MeshPackListBuil
     meshes: Meshes<V>,
 }
 
+impl Default for VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator> {
     pub fn new() -> Self {
         Self {

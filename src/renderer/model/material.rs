@@ -1,4 +1,6 @@
-use std::{any::TypeId, collections::HashMap, error::Error, marker::PhantomData, ops::Deref, path::PathBuf};
+use std::{
+    any::TypeId, collections::HashMap, error::Error, marker::PhantomData, ops::Deref, path::PathBuf,
+};
 
 pub trait Material: 'static {
     const NUM_IMAGES: usize;
@@ -214,6 +216,12 @@ pub struct Materials<N: MaterialTypeList> {
     pub shaders: HashMap<TypeId, PathBuf>,
 }
 
+impl Default for Materials<MaterialTypeTerminator> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Materials<MaterialTypeTerminator> {
     pub fn new() -> Self {
         Self {
@@ -224,7 +232,11 @@ impl Materials<MaterialTypeTerminator> {
 }
 
 impl<N: MaterialTypeList> Materials<N> {
-    pub fn push<M: Material>(mut self, materials: Vec<M>, shader_path: PathBuf) -> Materials<MaterialTypeNode<M, N>> {
+    pub fn push<M: Material>(
+        mut self,
+        materials: Vec<M>,
+        shader_path: PathBuf,
+    ) -> Materials<MaterialTypeNode<M, N>> {
         self.shaders.insert(TypeId::of::<M>(), shader_path);
         Materials {
             list: MaterialTypeNode {

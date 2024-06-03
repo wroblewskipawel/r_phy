@@ -10,7 +10,7 @@ use crate::math::types::Matrix4;
 
 use self::{
     camera::Camera,
-    model::{Drawable, MaterialTypeList, MaterialTypeTerminator, MeshList, MeshTerminator, Model},
+    model::{Drawable, MaterialTypeList, MaterialTypeTerminator, MeshList, MeshTerminator},
 };
 
 pub trait Renderer: 'static {
