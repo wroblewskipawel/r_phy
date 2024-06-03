@@ -1,24 +1,23 @@
 mod presets;
+mod type_erased;
+mod type_safe;
+mod list;
 
 pub use presets::*;
+pub use type_erased::*;
+pub use type_safe::*;
+pub use list::*;
 
-use std::{any::type_name, error::Error, marker::PhantomData};
-
-use ash::vk::{self, Extent2D};
+use std::marker::PhantomData;
 
 use crate::renderer::vulkan::device::{
     framebuffer::AttachmentList,
     render_pass::{RenderPassConfig, Subpass},
-    VulkanDevice,
 };
 
-use super::{
-    get_pipeline_states_info,
-    layout::{Layout, PipelineLayout},
-    ModuleLoader, PipelineLayoutRaw, PipelineStates,
-};
+use super::{layout::Layout, PipelineStates};
 
-pub trait GraphicspipelineConfig {
+pub trait GraphicsPipelineConfig: 'static {
     type Attachments: AttachmentList;
     type Layout: Layout;
     type PipelineStates: PipelineStates;
@@ -36,102 +35,11 @@ pub struct GraphicsPipelineBuilder<
 }
 
 impl<L: Layout, P: PipelineStates, R: RenderPassConfig, S: Subpass<R::Attachments>>
-    GraphicspipelineConfig for GraphicsPipelineBuilder<L, P, R, S>
+    GraphicsPipelineConfig for GraphicsPipelineBuilder<L, P, R, S>
 {
     type Attachments = R::Attachments;
     type Layout = L;
     type PipelineStates = P;
     type RenderPass = R;
     type Subpass = S;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct GraphicsPipelineRaw {
-    pub handle: vk::Pipeline,
-    pub layout: PipelineLayoutRaw,
-}
-
-impl<C: GraphicspipelineConfig> From<GraphicsPipeline<C>> for GraphicsPipelineRaw {
-    fn from(pipeline: GraphicsPipeline<C>) -> Self {
-        GraphicsPipelineRaw {
-            handle: pipeline.handle,
-            layout: pipeline.layout.into(),
-        }
-    }
-}
-
-impl<C: GraphicspipelineConfig> From<GraphicsPipelineRaw> for GraphicsPipeline<C> {
-    fn from(pipeline: GraphicsPipelineRaw) -> Self {
-        GraphicsPipeline {
-            handle: pipeline.handle,
-            layout: pipeline.layout.into(),
-        }
-    }
-}
-
-pub struct GraphicsPipeline<C: GraphicspipelineConfig> {
-    pub handle: vk::Pipeline,
-    pub layout: PipelineLayout<C::Layout>,
-}
-
-impl VulkanDevice {
-    pub fn create_graphics_pipeline<C: GraphicspipelineConfig>(
-        &self,
-        modules: impl ModuleLoader,
-        extent: Extent2D,
-    ) -> Result<GraphicsPipeline<C>, Box<dyn Error>> {
-        let layout = self.get_pipeline_layout::<C::Layout>()?;
-        let render_pass = self.get_render_pass::<C::RenderPass>()?;
-        let states = get_pipeline_states_info::<C::Attachments, C::Subpass, C::PipelineStates>(
-            &self.physical_device,
-            extent,
-        );
-        let modules = modules.load(self)?;
-        let stages = modules.get_stages_info();
-        let subpass = C::RenderPass::try_get_subpass_index::<C::Subpass>().unwrap_or_else(|| {
-            panic!(
-                "Subpass {} not present in RenderPass {}!",
-                type_name::<C::Subpass>(),
-                type_name::<C::RenderPass>(),
-            )
-        }) as u32;
-        let create_infos = [vk::GraphicsPipelineCreateInfo {
-            subpass,
-            layout: layout.layout,
-            render_pass: render_pass.handle,
-            p_vertex_input_state: &states.vertex_input.create_info,
-            p_input_assembly_state: &states.input_assembly,
-            p_viewport_state: &states.viewport.create_info,
-            p_rasterization_state: &states.rasterization,
-            p_depth_stencil_state: &states.depth_stencil,
-            p_color_blend_state: &states.color_blend.create_info,
-            p_multisample_state: &states.multisample,
-            stage_count: stages.stages.len() as u32,
-            p_stages: stages.stages.as_ptr(),
-            ..Default::default()
-        }];
-        let &handle = unsafe {
-            self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &create_infos, None)
-                .map_err(|(_, err)| err)?
-                .first()
-                .unwrap()
-        };
-        Ok(GraphicsPipeline { handle, layout })
-    }
-
-    pub fn destroy_graphics_pipeline<C: GraphicspipelineConfig>(
-        &self,
-        pipeline: &mut GraphicsPipeline<C>,
-    ) {
-        unsafe {
-            self.device.destroy_pipeline(pipeline.handle, None);
-        }
-    }
-
-    pub fn destroy_graphics_pipeline_raw(&self, pipeline: &mut GraphicsPipelineRaw) {
-        unsafe {
-            self.device.destroy_pipeline(pipeline.handle, None);
-        }
-    }
 }

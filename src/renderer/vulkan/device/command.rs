@@ -19,9 +19,9 @@ use super::{
     descriptor::{Descriptor, DescriptorLayout},
     framebuffer::{Clear, FramebufferHandle},
     image::VulkanImage2D,
-    pipeline::{GraphicsPipeline, GraphicspipelineConfig, Layout, PushConstant},
+    pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout, PushConstant},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{BufferType, MeshPackRaw, MeshRange},
+    resources::{BufferType, MeshPackData, MeshPackTypeErased, MeshRange},
     skybox::{LayoutSkybox, Skybox},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
@@ -705,7 +705,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<C: GraphicspipelineConfig>(self, pipeline: &GraphicsPipeline<C>) -> Self {
+    pub fn bind_pipeline<C: GraphicsPipelineConfig>(self, pipeline: &GraphicsPipeline<C>) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
@@ -717,7 +717,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_mesh_pack<'b>(self, pack: impl Into<&'b MeshPackRaw>) -> Self {
+    pub fn bind_mesh_pack<'b>(self, pack: impl Into<&'b MeshPackData>) -> Self {
         let pack = pack.into();
         let RecordingCommand(command, device) = self;
         unsafe {
@@ -737,22 +737,20 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn draw_skybox<C: GraphicspipelineConfig<Layout = LayoutSkybox>>(
+    pub fn draw_skybox<C: GraphicsPipelineConfig<Layout = LayoutSkybox>>(
         self,
         skybox: &Skybox<C>,
         mut camera_matrices: CameraMatrices,
     ) -> Self {
         camera_matrices.view[3] = Vector4::w();
-        let descriptors = skybox.get_descriptors();
-        let mesh_pack = skybox.get_mesh_pack();
         self.bind_pipeline(&skybox.pipeline)
-            .bind_descriptor_set(&skybox.pipeline, descriptors.get(0))
+            .bind_descriptor_set(&skybox.pipeline, skybox.descriptor[0])
             .bind_mesh_pack(&skybox.mesh_pack)
             .push_constants(&skybox.pipeline, &camera_matrices)
-            .draw_mesh(mesh_pack.get(0))
+            .draw_mesh(skybox.mesh_pack[0])
     }
 
-    pub fn push_constants<C: GraphicspipelineConfig, P: PushConstant + Pod>(
+    pub fn push_constants<C: GraphicsPipelineConfig, P: PushConstant + Pod>(
         self,
         pipeline: &GraphicsPipeline<C>,
         data: &P,
@@ -777,7 +775,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_descriptor_set<C: GraphicspipelineConfig, D: DescriptorLayout>(
+    pub fn bind_descriptor_set<C: GraphicsPipelineConfig, D: DescriptorLayout>(
         self,
         pipeline: &GraphicsPipeline<C>,
         descriptor: Descriptor<D>,

@@ -7,13 +7,13 @@ use crate::{
 };
 
 use super::{
-    descriptor::{DescriptorPool, DescriptorPoolRaw, DescriptorSetWriter, TextureDescriptorSet},
+    descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
     image::Texture2D,
     pipeline::{
-        DescriptorLayoutNode, DescriptorLayoutTerminator, GraphicsPipeline, GraphicspipelineConfig,
+        DescriptorLayoutNode, DescriptorLayoutTerminator, GraphicsPipeline, GraphicsPipelineConfig,
         ModuleLoader, PipelineLayoutBuilder, PushConstantNode, PushConstantTerminator,
     },
-    resources::{MeshPack, MeshPackRaw},
+    resources::{MeshPack, MeshPackRef, MeshPackTypeErased},
     VulkanDevice,
 };
 
@@ -22,25 +22,15 @@ pub type LayoutSkybox = PipelineLayoutBuilder<
     PushConstantNode<CameraMatrices, PushConstantTerminator>,
 >;
 
-pub struct Skybox<L: GraphicspipelineConfig<Layout = LayoutSkybox>> {
+pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
     texture: Texture2D,
-    pub mesh_pack: MeshPackRaw,
-    descriptor: DescriptorPoolRaw,
+    pub mesh_pack: MeshPack<CommonVertex>,
+    pub descriptor: DescriptorPool<TextureDescriptorSet>,
     pub pipeline: GraphicsPipeline<L>,
 }
 
-impl<L: GraphicspipelineConfig<Layout = LayoutSkybox>> Skybox<L> {
-    pub fn get_mesh_pack<'a>(&'a self) -> MeshPack<'a, CommonVertex> {
-        (&self.mesh_pack).into()
-    }
-
-    pub fn get_descriptors<'a>(&'a self) -> DescriptorPool<'a, TextureDescriptorSet> {
-        (&self.descriptor).into()
-    }
-}
-
 impl VulkanDevice {
-    pub fn create_skybox<L: GraphicspipelineConfig<Layout = LayoutSkybox>>(
+    pub fn create_skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>>(
         &self,
         path: &Path,
         modules: impl ModuleLoader,
@@ -61,13 +51,13 @@ impl VulkanDevice {
         })
     }
 
-    pub fn destroy_skybox<L: GraphicspipelineConfig<Layout = LayoutSkybox>>(
+    pub fn destroy_skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>>(
         &self,
         skybox: &mut Skybox<L>,
     ) {
         self.destroy_descriptor_pool(&mut skybox.descriptor);
         self.destroy_texture(&mut skybox.texture);
-        self.destroy_graphics_pipeline(&mut skybox.pipeline);
+        self.destroy_pipeline(&mut skybox.pipeline);
         self.destroy_mesh_pack(&mut skybox.mesh_pack);
     }
 }

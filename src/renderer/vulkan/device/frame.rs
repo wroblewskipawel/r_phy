@@ -20,9 +20,7 @@ use super::{
         operation::Graphics,
         BeginCommand, FinishedCommand, Persistent, PersistentCommandPool,
     },
-    descriptor::{
-        CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorPoolRaw, DescriptorSetWriter,
-    },
+    descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
     resources::{MaterialPackList, MeshPackList, VulkanMaterialHandle, VulkanMeshHandle},
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
@@ -64,14 +62,8 @@ pub trait Frame {
 }
 
 struct CameraUniform {
-    descriptors: DescriptorPoolRaw,
+    descriptors: DescriptorPool<CameraDescriptorSet>,
     uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
-}
-
-impl CameraUniform {
-    pub fn descriptors(&self) -> DescriptorPool<CameraDescriptorSet> {
-        (&self.descriptors).into()
-    }
 }
 
 pub struct FrameData<C: Frame> {
@@ -91,10 +83,12 @@ pub struct FramePool {
 impl VulkanDevice {
     fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
         let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics>(num_images)?;
-        let descriptors = self.create_descriptor_pool(
-            DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
-                .write_buffer(&uniform_buffer),
-        )?;
+        let descriptors = self
+            .create_descriptor_pool(
+                DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
+                    .write_buffer(&uniform_buffer),
+            )?
+            .into();
         Ok(CameraUniform {
             descriptors,
             uniform_buffer,
@@ -141,7 +135,7 @@ impl VulkanDevice {
         let (index, primary_command) = pool.primary_commands.next();
         let primary_command = self.begin_primary_command(primary_command)?;
         let swapchain_frame = self.get_frame(swapchain, pool.image_sync[index])?;
-        let camera_descriptor = pool.camera_uniform.descriptors().get(index);
+        let camera_descriptor = pool.camera_uniform.descriptors[index];
         pool.camera_uniform.uniform_buffer[index] = camera;
         let commands = renderer.begin(
             self,

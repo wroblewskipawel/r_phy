@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ash::vk::{self, CommandPool};
+use ash::vk;
 
 use crate::{
     math::types::{Matrix4, Vector3},
@@ -20,29 +20,28 @@ use crate::{
                 BeginCommand, FinishedCommand, Persistent, PersistentCommandPool,
             },
             descriptor::{
-                CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorPoolRaw,
-                DescriptorSetWriter, GBufferDescriptorSet,
+                CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter,
+                GBufferDescriptorSet,
             },
             frame::Frame,
             framebuffer::{
-                presets::AttachmentsGBuffer, AttachmentList, AttachmentReferences,
-                AttachmentsBuilder, Builder, ClearColor, ClearDeptStencil, ClearNone,
-                ClearValueBuilder, FramebufferHandle, InputAttachment,
+                presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
+                ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder, FramebufferHandle,
+                InputAttachment,
             },
             image::VulkanImage2D,
             pipeline::{
-                self, GBufferDepthPrepasPipeline, GBufferShadingPassPipeline,
-                GBufferSkyboxPipeline, GBufferWritePassPipeline, GraphicsPipeline,
-                GraphicsPipelineRaw, GraphicspipelineConfig, ModelMatrix, ModelNormalMatrix,
+                GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
+                GBufferWritePassPipeline, GraphicsPipeline, GraphicsPipelineConfig,
+                GraphicsPipelineTypeList, ModelMatrix, ModelNormalMatrix, PipelineList,
                 ShaderDirectory,
             },
             render_pass::{
-                self, DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
+                DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
                 GBufferWritePass, RenderPass, Subpass,
             },
             resources::{
-                MaterialPackList, MeshPack, MeshPackList, MeshPackRaw, VulkanMaterialHandle,
-                VulkanMeshHandle,
+                MaterialPackList, MeshPack, MeshPackList, VulkanMaterialHandle, VulkanMeshHandle,
             },
             skybox::Skybox,
             swapchain::{self, SwapchainFrame},
@@ -50,6 +49,12 @@ use crate::{
         },
     },
 };
+
+impl<T: MaterialTypeList> GraphicsPipelineTypeList for T {
+    const LEN: usize = T::LEN;
+    type Pipeline = GBufferWritePassPipeline<AttachmentsGBuffer, T::Item>;
+    type Next = T::Next;
+}
 
 pub struct GBuffer {
     pub combined: VulkanImage2D,
@@ -59,88 +64,23 @@ pub struct GBuffer {
     pub depth: VulkanImage2D,
 }
 
-struct MaterialWritePassPipelines<M: MaterialTypeList> {
-    pipelines: HashMap<TypeId, GraphicsPipelineRaw>,
-    _phantom: PhantomData<M>,
-}
-
-impl<M: MaterialTypeList> MaterialWritePassPipelines<M> {
-    fn get_pipeline<T: Material>(
-        &self,
-    ) -> Option<GraphicsPipeline<GBufferWritePassPipeline<AttachmentsGBuffer, T>>> {
-        let pipeline = *self.pipelines.get(&TypeId::of::<T>())?;
-        Some(pipeline.into())
-    }
-}
-
-impl VulkanDevice {
-    fn create_material_pipeline<N: MaterialTypeList>(
-        &self,
-        mut pipelines: HashMap<TypeId, GraphicsPipelineRaw>,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<HashMap<TypeId, GraphicsPipelineRaw>, Box<dyn Error>> {
-        if N::LEN > 0 {
-            let shader_path = shaders.get(&TypeId::of::<N::Item>()).unwrap();
-            let pipeline = self
-                .create_graphics_pipeline::<GBufferWritePassPipeline<AttachmentsGBuffer, N::Item>>(
-                    ShaderDirectory::new(shader_path),
-                    self.physical_device.surface_properties.get_current_extent(),
-                )?;
-            pipelines.insert(TypeId::of::<N::Item>(), pipeline.into());
-            self.create_material_pipeline::<N::Next>(pipelines, shaders)
-        } else {
-            Ok(pipelines)
-        }
-    }
-
-    fn create_material_write_pass_pipelines<M: MaterialTypeList>(
-        &self,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<MaterialWritePassPipelines<M>, Box<dyn Error>> {
-        Ok(MaterialWritePassPipelines {
-            pipelines: self.create_material_pipeline::<M>(HashMap::new(), shaders)?,
-            _phantom: PhantomData,
-        })
-    }
-
-    fn destroy_material_write_pass_pipelines<M: MaterialTypeList>(
-        &self,
-        pipelines: &mut MaterialWritePassPipelines<M>,
-    ) {
-        pipelines
-            .pipelines
-            .values_mut()
-            .for_each(|pipeline| self.destroy_graphics_pipeline_raw(pipeline));
-    }
-}
-
 pub struct DeferredRenderer<M: MaterialTypeList> {
     render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
     depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
-    write_pass: MaterialWritePassPipelines<M>,
+    write_pass: PipelineList,
     shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
-    descriptors: DescriptorPoolRaw,
+    descriptors: DescriptorPool<GBufferDescriptorSet>,
     skybox: Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>,
-    mesh: MeshPackRaw,
+    mesh: MeshPack<CommonVertex>,
+    _phantom: PhantomData<M>,
 }
-
-impl<M: MaterialTypeList> DeferredRenderer<M> {
-    fn meshes<'a>(&'a self) -> MeshPack<'a, CommonVertex> {
-        (&self.mesh).into()
-    }
-
-    fn descriptors<'a>(&'a self) -> DescriptorPool<'a, GBufferDescriptorSet> {
-        (&self.descriptors).into()
-    }
-}
-
 struct StatefulCommand {
     command: BeginCommand<Persistent, Secondary, Graphics>,
     mesh_pack_index: Option<u32>,
 }
 
 impl VulkanDevice {
-    fn create_stateful_command<S: Subpass<AttachmentsGBuffer>, C: GraphicspipelineConfig>(
+    fn create_stateful_command<S: Subpass<AttachmentsGBuffer>, C: GraphicsPipelineConfig>(
         &self,
         pool: &mut PersistentCommandPool<Secondary, Graphics>,
         render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
@@ -164,31 +104,32 @@ impl VulkanDevice {
     }
 }
 
-struct WritePassMaterialCommands<M: MaterialTypeList> {
+struct WritePassMaterialCommands {
     commands: HashMap<TypeId, Option<StatefulCommand>>,
-    _phantom: PhantomData<M>,
 }
 
-impl<M: MaterialTypeList> WritePassMaterialCommands<M> {
-    fn record<T: Material, F: FnOnce(StatefulCommand) -> StatefulCommand>(&mut self, f: F) {
+impl WritePassMaterialCommands {
+    fn record<M: Material, F: FnOnce(StatefulCommand) -> StatefulCommand>(&mut self, f: F) {
         self.commands
-            .entry(TypeId::of::<T>())
+            .entry(TypeId::of::<M>())
             .and_modify(|command| *command = Some(f(command.take().unwrap())));
     }
 }
 
 impl VulkanDevice {
-    fn create_write_pass_material_commands_inner<T: MaterialTypeList, N: MaterialTypeList>(
+    fn prepare_write_pass_command<N: MaterialTypeList>(
         &self,
         mut commands: HashMap<TypeId, Option<StatefulCommand>>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
         render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
         pool: &mut PersistentCommandPool<Secondary, Graphics>,
-        pipelines: &MaterialWritePassPipelines<T>,
+        pipelines: &PipelineList,
     ) -> Result<HashMap<TypeId, Option<StatefulCommand>>, Box<dyn Error>> {
         if N::LEN > 0 {
-            let pipeline = pipelines.get_pipeline::<N::Item>().unwrap();
+            let pipeline = pipelines
+                .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, N::Item>>()
+                .unwrap();
             commands.insert(
                 TypeId::of::<N::Item>(),
                 Some(
@@ -201,7 +142,7 @@ impl VulkanDevice {
                     )?,
                 ),
             );
-            self.create_write_pass_material_commands_inner::<T, N::Next>(
+            self.prepare_write_pass_command::<N::Next>(
                 commands,
                 camera_descriptor,
                 swapchain_frame,
@@ -220,10 +161,10 @@ impl VulkanDevice {
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
         render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
         pool: &mut PersistentCommandPool<Secondary, Graphics>,
-        pipelines: &MaterialWritePassPipelines<M>,
-    ) -> Result<WritePassMaterialCommands<M>, Box<dyn Error>> {
+        pipelines: &PipelineList,
+    ) -> Result<WritePassMaterialCommands, Box<dyn Error>> {
         Ok(WritePassMaterialCommands {
-            commands: self.create_write_pass_material_commands_inner::<M, M>(
+            commands: self.prepare_write_pass_command::<M>(
                 HashMap::new(),
                 camera_descriptor,
                 swapchain_frame,
@@ -231,7 +172,6 @@ impl VulkanDevice {
                 pool,
                 pipelines,
             )?,
-            _phantom: PhantomData,
         })
     }
 }
@@ -239,9 +179,10 @@ impl VulkanDevice {
 pub struct DeferredRendererFrameState<M: MaterialTypeList> {
     // TODO: These Command wrappers doesn't need to containt fence
     depth_prepass: StatefulCommand,
-    write_pass: WritePassMaterialCommands<M>,
+    write_pass: WritePassMaterialCommands,
     shading_pass: BeginCommand<Persistent, Secondary, Graphics>,
     skybox_pass: BeginCommand<Persistent, Secondary, Graphics>,
+    _phantom: PhantomData<M>,
 }
 
 impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
@@ -280,7 +221,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
                 camera_descriptor,
             )?,
         );
-        let write_pass = device.create_write_pass_material_commands(
+        let write_pass = device.create_write_pass_material_commands::<M>(
             camera_descriptor,
             swapchain_frame,
             self.render_pass,
@@ -296,9 +237,9 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
         let shading_pass = device.record_command(shading_pass, |command| {
             command
                 .bind_pipeline(&self.shading_pass)
-                .bind_descriptor_set(&self.shading_pass, self.descriptors().get(0))
+                .bind_descriptor_set(&self.shading_pass, self.descriptors[0])
                 .bind_mesh_pack(&self.mesh)
-                .draw_mesh(self.meshes().get(0))
+                .draw_mesh(self.mesh[0])
         });
         let (_, skybox_pass) = pool.next();
         let skybox_pass = device.begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
@@ -314,6 +255,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
             write_pass,
             shading_pass,
             skybox_pass,
+            _phantom: PhantomData,
         })
     }
 
@@ -338,6 +280,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
             mut write_pass,
             shading_pass,
             skybox_pass,
+            ..
         } = state;
 
         let meshes = mesh_packs.try_get::<V>().unwrap();
@@ -362,7 +305,10 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
                 mesh_pack_index: Some(mesh_pack_index),
             }
         })(depth_prepass);
-        let write_pass_pipeline = self.write_pass.get_pipeline::<T>().unwrap();
+        let write_pass_pipeline = self
+            .write_pass
+            .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, T>>()
+            .unwrap();
         write_pass.record::<T, _>(
             |StatefulCommand {
                  command,
@@ -389,6 +335,7 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
             write_pass,
             shading_pass,
             skybox_pass,
+            _phantom: PhantomData,
         }
     }
 
@@ -479,6 +426,21 @@ impl GBuffer {
     }
 }
 
+fn adapt_shader_source_map<M: MaterialTypeList>(
+    mut adapted: HashMap<TypeId, PathBuf>,
+    shaders: &HashMap<TypeId, PathBuf>,
+) -> HashMap<TypeId, PathBuf> {
+    if M::LEN > 0 {
+        adapted.insert(
+            TypeId::of::<GBufferWritePassPipeline<AttachmentsGBuffer, M::Item>>(),
+            shaders.get(&TypeId::of::<M::Item>()).unwrap().clone(),
+        );
+        adapt_shader_source_map::<M::Next>(adapted, shaders)
+    } else {
+        adapted
+    }
+}
+
 impl VulkanDevice {
     pub fn create_deferred_renderer<M: MaterialTypeList>(
         &self,
@@ -491,7 +453,8 @@ impl VulkanDevice {
             ShaderDirectory::new(Path::new("shaders/spv/deferred/depth_prepass")),
             image_extent,
         )?;
-        let write_pass = self.create_material_write_pass_pipelines(shaders)?;
+        let write_pass =
+            self.create_pipeline_list::<M>(&adapt_shader_source_map::<M>(HashMap::new(), shaders))?;
         let shading_pass = self.create_graphics_pipeline(
             ShaderDirectory::new(Path::new("shaders/spv/deferred/gbuffer_combine")),
             image_extent,
@@ -527,6 +490,7 @@ impl VulkanDevice {
             descriptors,
             mesh,
             skybox,
+            _phantom: PhantomData,
         })
     }
 
@@ -534,9 +498,9 @@ impl VulkanDevice {
         &self,
         renderer: &mut DeferredRenderer<M>,
     ) {
-        self.destroy_graphics_pipeline(&mut renderer.depth_prepass);
-        self.destroy_material_write_pass_pipelines(&mut renderer.write_pass);
-        self.destroy_graphics_pipeline(&mut renderer.shading_pass);
+        self.destroy_pipeline(&mut renderer.depth_prepass);
+        self.destory_pipeline_list(&mut renderer.write_pass);
+        self.destroy_pipeline(&mut renderer.shading_pass);
         self.destroy_descriptor_pool(&mut renderer.descriptors);
         self.destroy_mesh_pack(&mut renderer.mesh);
         self.destroy_skybox(&mut renderer.skybox);
