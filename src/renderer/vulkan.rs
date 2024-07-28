@@ -4,9 +4,6 @@ mod device;
 mod surface;
 
 use self::device::{
-    frame::{FrameData, FramePool},
-    framebuffer::presets::AttachmentsGBuffer,
-    render_pass::DeferedRenderPass,
     renderer::deferred::DeferredRenderer,
     resources::{
         MaterialPackList, MaterialPackListBuilder, MaterialPacks, MeshPackList,
@@ -24,7 +21,7 @@ use super::{
     },
     Renderer, RendererBuilder,
 };
-use device::{renderer::deferred::GBuffer, swapchain::VulkanSwapchain};
+use device::frame::Frame;
 use std::{any::TypeId, collections::HashMap, error::Error, path::PathBuf};
 use winit::window::Window;
 
@@ -88,13 +85,9 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder> RendererBuilder
 }
 
 pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList> {
-    current_frame: Option<FrameData<DeferredRenderer<M>>>,
     materials: MaterialPacks<M>,
     meshes: MeshPacks<V>,
-    frames: FramePool,
-    g_buffer: GBuffer,
     renderer: DeferredRenderer<M>,
-    swapchain: VulkanSwapchain<AttachmentsGBuffer>,
     context: Context,
 }
 
@@ -112,32 +105,13 @@ impl<M: MaterialPackList, V: MeshPackList> VulkanRenderer<M, V> {
         shaders: &HashMap<TypeId, PathBuf>,
     ) -> Result<Self, Box<dyn Error>> {
         let context = Context::build(window)?;
-        // TODO: Here GBuffer creation is moved out of the DeferredRenderer for simplicity sake,
-        //       nonetheless it should be moved back (DeferredRendere should own all of its required resources)
-        let g_buffer = context.create_g_buffer()?;
-        let swapchain = context.create_swapchain::<AttachmentsGBuffer>(
-            (&context).into(),
-            (&context).into(),
-            |swapchain_image, extent| {
-                context.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
-                    g_buffer.get_framebuffer_builder(swapchain_image),
-                    extent,
-                )
-            },
-        )?;
-        let renderer = context.create_deferred_renderer(&swapchain, shaders)?;
-        // TODO: Why frame pool is not typed with DeferredRenderer<M> (FramePool<DeferredRenderer<M>>)?
-        let frames = context.create_frame_pool::<DeferredRenderer<M>>(&swapchain)?;
+        let renderer = context.create_deferred_renderer(shaders)?;
         let materials = context.load_materials(materials)?;
         let meshes = context.load_meshes(meshes)?;
         Ok(Self {
-            current_frame: None,
             materials,
             meshes,
-            frames,
-            g_buffer,
             renderer,
-            swapchain,
             context,
         })
     }
@@ -149,9 +123,6 @@ impl<M: MaterialPackList, V: MeshPackList> Drop for VulkanRenderer<M, V> {
         self.context.destroy_materials(&mut self.materials);
         self.context.destroy_meshes(&mut self.meshes);
         self.context.destroy_deferred_renderer(&mut self.renderer);
-        self.context.destroy_g_buffer(&mut self.g_buffer);
-        self.context.destory_frame_pool(&mut self.frames);
-        self.context.destroy_swapchain(&mut self.swapchain);
     }
 }
 
@@ -161,20 +132,12 @@ impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let frame = self.context.next_frame(
-            &mut self.frames,
-            &self.renderer,
-            &self.swapchain,
-            camera_matrices,
-        )?;
-        self.current_frame.replace(frame);
+        self.renderer.begin_frame(&self.context, &camera_matrices)?;
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let frame = self.current_frame.take().ok_or("current_frame is None!")?;
-        self.context
-            .end_frame(&self.renderer, frame, &self.swapchain)?;
+        self.renderer.end_frame(&self.context)?;
         Ok(())
     }
 
@@ -183,19 +146,12 @@ impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
-        let material = drawable.material();
-        let mesh = drawable.mesh();
-        let frame = self.current_frame.take().ok_or("current_frame is None!")?;
-        let frame = self.context.draw_mesh(
-            &self.renderer,
-            frame,
+        self.renderer.draw(
+            drawable,
             transform,
-            mesh.into(),
-            material.into(),
-            &self.meshes.packs,
             &self.materials.packs,
+            &self.meshes.packs,
         );
-        self.current_frame.replace(frame);
         Ok(())
     }
 

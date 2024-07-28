@@ -99,7 +99,9 @@ impl<T: Pod> Range<T> {
     }
 }
 
-#[derive(Debug)]
+// TODO: This soud not be Clone and Copy - buffer is not copied, only the handle
+// This is temporary workaround to allow for simple DrawGraph implementation purpose
+#[derive(Debug, Clone, Copy)]
 pub struct Buffer {
     pub size: usize,
     pub buffer: vk::Buffer,
@@ -235,7 +237,7 @@ impl VulkanDevice {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeviceLocalBuffer {
     pub buffer: Buffer,
 }

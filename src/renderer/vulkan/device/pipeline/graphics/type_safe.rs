@@ -1,9 +1,13 @@
 use std::{any::type_name, error::Error};
 
 use ash::vk::{self, Extent2D};
+use bytemuck::Pod;
 
 use crate::renderer::vulkan::device::{
-    pipeline::{get_pipeline_states_info, ModuleLoader, PipelineLayout},
+    pipeline::{
+        get_pipeline_states_info, Layout, ModuleLoader, PipelineBindData, PipelineLayout,
+        PushConstant, PushConstantDataRef,
+    },
     render_pass::RenderPassConfig,
     VulkanDevice,
 };
@@ -13,6 +17,15 @@ use super::GraphicsPipelineConfig;
 pub struct GraphicsPipeline<C: GraphicsPipelineConfig> {
     pub handle: vk::Pipeline,
     pub layout: PipelineLayout<C::Layout>,
+}
+
+impl<C: GraphicsPipelineConfig> From<&GraphicsPipeline<C>> for PipelineBindData {
+    fn from(value: &GraphicsPipeline<C>) -> Self {
+        PipelineBindData {
+            bind_point: vk::PipelineBindPoint::GRAPHICS,
+            pipeline: value.handle,
+        }
+    }
 }
 
 impl<C: GraphicsPipelineConfig> From<&mut GraphicsPipeline<C>> for vk::Pipeline {
@@ -65,5 +78,25 @@ impl VulkanDevice {
                 .unwrap()
         };
         Ok(GraphicsPipeline { handle, layout })
+    }
+}
+
+impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
+    pub fn get_push_range<'a, P: PushConstant + Pod>(
+        &self,
+        push_constant_data: &'a P,
+    ) -> PushConstantDataRef<'a, P> {
+        PushConstantDataRef {
+            // TODO: Extract to dedicated helper function
+            range: C::Layout::ranges().try_get_range::<P>().unwrap_or_else(|| {
+                panic!(
+                    "PushConstant {} not present in layout PushConstantRanges {}!",
+                    type_name::<P>(),
+                    type_name::<<C::Layout as Layout>::PushConstants>(),
+                )
+            }),
+            layout: self.layout.layout,
+            data: push_constant_data,
+        }
     }
 }

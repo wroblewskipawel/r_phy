@@ -22,7 +22,7 @@ pub enum BufferType {
     Index,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct BufferRanges {
     ranges: [Option<ByteRange>; BufferType::COUNT],
 }
@@ -57,7 +57,7 @@ impl BufferRanges {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct MeshPackData {
     pub buffer: DeviceLocalBuffer,
     pub buffer_ranges: BufferRanges,

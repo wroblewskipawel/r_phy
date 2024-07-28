@@ -1,6 +1,12 @@
-use std::{any::TypeId, marker::PhantomData};
+use std::{
+    any::{type_name, TypeId},
+    error::Error,
+    marker::PhantomData,
+};
 
 use ash::vk;
+
+use crate::renderer::vulkan::device::pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout};
 
 use super::{Descriptor, DescriptorLayout, DescriptorPool};
 
@@ -60,5 +66,32 @@ impl<'a, T: DescriptorLayout> DescriptorPoolRef<'a, T> {
 
     pub fn len(&self) -> usize {
         self.pool.sets.len()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorBindingData {
+    pub set_index: u32,
+    pub set: vk::DescriptorSet,
+    pub pipeline_layout: vk::PipelineLayout,
+}
+
+impl<L: DescriptorLayout> Descriptor<L> {
+    pub fn get_binding_data<C: GraphicsPipelineConfig>(
+        &self,
+        pipeline: &GraphicsPipeline<C>,
+    ) -> Result<DescriptorBindingData, Box<dyn Error>> {
+        let set_index = C::Layout::sets().get_set_index::<L>().unwrap_or_else(|| {
+            panic!(
+                "DescriptorSet {} not present in layout DescriptorSets {}",
+                type_name::<L>(),
+                type_name::<<C::Layout as Layout>::Descriptors>()
+            )
+        });
+        Ok(DescriptorBindingData {
+            set_index,
+            set: self.set,
+            pipeline_layout: pipeline.layout.layout,
+        })
     }
 }

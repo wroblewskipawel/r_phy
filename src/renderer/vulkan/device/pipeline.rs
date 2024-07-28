@@ -1,9 +1,11 @@
 mod graphics;
 mod layout;
+mod push_constant;
 mod states;
 
 pub use graphics::*;
 pub use layout::*;
+pub use push_constant::*;
 pub use states::*;
 
 use ash::{vk, Device};
@@ -128,4 +130,9 @@ impl VulkanDevice {
             self.device.destroy_pipeline(pipeline.into(), None);
         }
     }
+}
+
+pub struct PipelineBindData {
+    pub bind_point: vk::PipelineBindPoint,
+    pub pipeline: vk::Pipeline,
 }

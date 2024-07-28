@@ -84,6 +84,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Box::new(|elapsed_time, transform| transform.rotate(Vector3::z(), elapsed_time)),
             ),
             Object::new(
+                Model::new(meshes[0], unlit_materials[0]),
+                Transform::identity().translate(Vector3::new(0.0, 4.0, 4.0)),
+                Box::new(|elapsed_time, transform| {
+                    transform.rotate(Vector3::z(), 2.0 * elapsed_time)
+                }),
+            ),
+            Object::new(
+                Model::new(meshes[0], unlit_materials[0]),
+                Transform::identity().translate(Vector3::new(0.0, 2.0, 2.0)),
+                Box::new(|elapsed_time, transform| {
+                    transform.rotate(Vector3::z(), 3.0 * elapsed_time)
+                }),
+            ),
+            Object::new(
                 Model::new(meshes[1], unlit_materials[1]),
                 Transform::identity().translate(Vector3::new(0.0, 0.0, 3.0)),
                 Box::new(|elapsed_time, transform| {
@@ -95,6 +109,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Transform::identity().translate(Vector3::new(3.0, 0.0, 0.0)),
                 Box::new(|elapsed_time, transform| {
                     transform.rotate(Vector3::z(), 3.0 * elapsed_time)
+                }),
+            ),
+            Object::new(
+                Model::new(meshes[2], unlit_materials[1]),
+                Transform::identity().translate(Vector3::new(-4.0, -4.0, 0.0)),
+                Box::new(|elapsed_time, transform| {
+                    transform
+                        .rotate(Vector3::z(), 3.0 * elapsed_time)
+                        .rotate(Vector3::y(), 3.0 * elapsed_time)
                 }),
             ),
         ]);

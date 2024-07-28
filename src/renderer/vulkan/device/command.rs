@@ -4,10 +4,7 @@ use ash::{
 };
 use bytemuck::{bytes_of, Pod};
 
-use crate::{
-    math::types::Vector4,
-    renderer::{camera::CameraMatrices, model::Vertex},
-};
+use crate::{math::types::Vector4, renderer::camera::CameraMatrices};
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -16,12 +13,12 @@ use self::{
 
 use super::{
     buffer::Buffer,
-    descriptor::{Descriptor, DescriptorLayout},
+    descriptor::DescriptorBindingData,
     framebuffer::{Clear, FramebufferHandle},
     image::VulkanImage2D,
-    pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout, PushConstant},
+    pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{BufferType, MeshPackData, MeshRange},
+    resources::{BufferType, MeshPackData, MeshRangeBindData},
     skybox::{LayoutSkybox, Skybox},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
@@ -705,13 +702,14 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_pipeline<C: GraphicsPipelineConfig>(self, pipeline: &GraphicsPipeline<C>) -> Self {
+    pub fn bind_pipeline(self, pipeline: impl Into<PipelineBindData>) -> Self {
+        let binding = pipeline.into();
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_pipeline(
                 L::buffer(&command.data),
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.handle,
+                binding.bind_point,
+                binding.pipeline,
             );
         }
         RecordingCommand(command, device)
@@ -744,72 +742,60 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     ) -> Self {
         camera_matrices.view[3] = Vector4::w();
         self.bind_pipeline(&skybox.pipeline)
-            .bind_descriptor_set(&skybox.pipeline, skybox.descriptor[0])
+            .bind_descriptor_set(
+                skybox.descriptor[0]
+                    .get_binding_data(&skybox.pipeline)
+                    .unwrap(),
+            )
             .bind_mesh_pack(&skybox.mesh_pack)
-            .push_constants(&skybox.pipeline, &camera_matrices)
+            .push_constants(skybox.pipeline.get_push_range(&camera_matrices))
             .draw_mesh(skybox.mesh_pack[0])
     }
 
-    pub fn push_constants<C: GraphicsPipelineConfig, P: PushConstant + Pod>(
+    pub fn push_constants<'b, P: PushConstant + Pod>(
         self,
-        pipeline: &GraphicsPipeline<C>,
-        data: &P,
+        push_constant: impl Into<PushConstantDataRef<'b, P>>,
     ) -> Self {
-        let range = C::Layout::ranges().try_get_range::<P>().unwrap_or_else(|| {
-            panic!(
-                "PushConstant {} not present in layout PushConstantRanges {}!",
-                type_name::<P>(),
-                type_name::<<C::Layout as Layout>::PushConstants>()
-            )
-        });
+        let push_constant = push_constant.into();
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_push_constants(
                 L::buffer(&command.data),
-                pipeline.layout.layout,
-                range.stage_flags,
-                range.offset,
-                bytes_of(data),
+                push_constant.layout,
+                push_constant.range.stage_flags,
+                push_constant.range.offset,
+                bytes_of(push_constant.data),
             );
         }
         RecordingCommand(command, device)
     }
 
-    pub fn bind_descriptor_set<C: GraphicsPipelineConfig, D: DescriptorLayout>(
-        self,
-        pipeline: &GraphicsPipeline<C>,
-        descriptor: Descriptor<D>,
-    ) -> Self {
-        let set_index = C::Layout::sets().get_set_index::<D>().unwrap_or_else(|| {
-            panic!(
-                "DescriptorSet {} not present in layout DescriptorSets {}",
-                type_name::<D>(),
-                type_name::<<C::Layout as Layout>::Descriptors>()
-            )
-        });
+    pub fn bind_descriptor_set(self, descriptor: impl Into<DescriptorBindingData>) -> Self {
+        let binding = descriptor.into();
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_descriptor_sets(
                 L::buffer(&command.data),
                 vk::PipelineBindPoint::GRAPHICS,
-                pipeline.layout.layout,
-                set_index,
-                &[descriptor.set],
+                binding.pipeline_layout,
+                binding.set_index,
+                &[binding.set],
                 &[],
             )
         }
         RecordingCommand(command, device)
     }
 
-    pub fn draw_mesh<V: Vertex>(self, mesh_ranges: MeshRange<V>) -> Self {
+    pub fn draw_mesh(self, mesh: impl Into<MeshRangeBindData>) -> Self {
+        let binding = mesh.into();
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_draw_indexed(
                 L::buffer(&command.data),
-                mesh_ranges.indices.len as u32,
+                binding.index_count,
                 1,
-                mesh_ranges.indices.first as u32,
-                mesh_ranges.vertices.first as i32,
+                binding.index_offset,
+                binding.vertex_offset,
                 0,
             )
         }

@@ -41,6 +41,23 @@ impl<V: Vertex> Index<usize> for MeshPack<V> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct MeshRangeBindData {
+    pub index_count: u32,
+    pub index_offset: u32,
+    pub vertex_offset: i32,
+}
+
+impl<V: Vertex> From<MeshRange<V>> for MeshRangeBindData {
+    fn from(value: MeshRange<V>) -> Self {
+        MeshRangeBindData {
+            index_count: value.indices.len as u32,
+            index_offset: value.indices.first as u32,
+            vertex_offset: value.vertices.first as i32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct MeshRange<V: Vertex> {
     pub vertices: Range<V>,
     pub indices: Range<u32>,

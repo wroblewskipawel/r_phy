@@ -98,4 +98,8 @@ impl<'a, V: Vertex> MeshPackRef<'a, V> {
             indices: self.pack.meshes[index].indices.into(),
         }
     }
+
+    pub fn as_raw(&self) -> &MeshPackTypeErased {
+        self.pack
+    }
 }

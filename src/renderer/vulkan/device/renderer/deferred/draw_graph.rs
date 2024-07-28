@@ -1,0 +1,319 @@
+use std::{
+    any::TypeId, cell::LazyCell, collections::HashMap, error::Error, hash::Hash,
+    marker::PhantomData,
+};
+
+use crate::{
+    math::types::Matrix4,
+    renderer::{
+        model::{Drawable, Material, MaterialHandle, MaterialTypeList, MeshHandle, Vertex},
+        vulkan::device::{
+            descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
+            framebuffer::presets::AttachmentsGBuffer,
+            pipeline::{
+                GBufferWritePassPipeline, ModelMatrix, ModelNormalMatrix, PipelineBindData,
+                PushConstantRangeMapper,
+            },
+            render_pass::GBufferWritePass,
+            resources::{
+                MaterialPackList, MeshPackData, MeshPackList, MeshRangeBindData,
+                VulkanMaterialHandle, VulkanMeshHandle,
+            },
+            swapchain::SwapchainFrame,
+            VulkanDevice,
+        },
+    },
+};
+
+use super::{Commands, DeferredRenderer, DeferredRendererFrameState};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModelIndex {
+    mesh_index: u32,
+}
+
+impl ModelIndex {
+    fn get<D: Drawable>(drawable: &D) -> Self {
+        let VulkanMeshHandle { mesh_index, .. } = drawable.mesh().into();
+        Self { mesh_index }
+    }
+}
+
+pub struct ModelState {
+    mesh_bind_data: MeshRangeBindData,
+    instances: Vec<Matrix4>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferIndex {
+    mesh_pack_index: u32,
+}
+
+impl BufferIndex {
+    fn get<V: Vertex>(handle: MeshHandle<V>) -> Self {
+        let VulkanMeshHandle {
+            mesh_pack_index, ..
+        } = handle.into();
+        Self { mesh_pack_index }
+    }
+}
+
+pub struct BufferState {
+    mesh_pack_data: MeshPackData,
+    model_states: HashMap<ModelIndex, ModelState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DescriptorIndex {
+    material_pack_index: u32,
+    material_index: u32,
+}
+
+impl DescriptorIndex {
+    pub fn get<M: Material>(handle: MaterialHandle<M>) -> Self {
+        let VulkanMaterialHandle {
+            material_pack_index,
+            material_index,
+            ..
+        } = handle.into();
+        Self {
+            material_pack_index,
+            material_index,
+        }
+    }
+}
+
+pub struct DescriptorState {
+    sets: Vec<DescriptorBindingData>,
+    buffer_states: HashMap<BufferIndex, BufferState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PipelineIndex {
+    vertex_type: TypeId,
+    material_type: TypeId,
+}
+
+impl PipelineIndex {
+    pub fn get<D: Drawable>() -> Self {
+        Self {
+            vertex_type: TypeId::of::<D::Vertex>(),
+            material_type: TypeId::of::<D::Material>(),
+        }
+    }
+}
+
+pub struct PipelineState {
+    pipeline_bind_data: PipelineBindData,
+    push_constant_mapper: PushConstantRangeMapper,
+    descriptor_states: HashMap<DescriptorIndex, DescriptorState>,
+}
+
+pub struct DrawGraph {
+    // TODO: Change representation to use indexed linear buffers
+    pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
+}
+
+impl<T: MaterialTypeList> DeferredRenderer<T> {
+    pub(super) fn append_draw_call<D: Drawable, M: MaterialPackList, V: MeshPackList>(
+        &mut self,
+        material_packs: &M,
+        mesh_packs: &V,
+        drawable: &D,
+        transform: &Matrix4,
+    ) {
+        if let Some(mut current_frame) = self.current_frame.take() {
+            let state = &mut current_frame.renderer_state;
+            let pipeline_index = PipelineIndex::get::<D>();
+            let pipeline_state = state
+                .draw_graph
+                .pipeline_states
+                .entry(pipeline_index)
+                .or_insert_with(|| self.get_pipeline_state::<D>());
+            let descriptor_index = DescriptorIndex::get(drawable.material());
+            let descriptor_state = pipeline_state
+                .descriptor_states
+                .entry(descriptor_index)
+                .or_insert_with(|| {
+                    let material_descriptor = material_packs
+                        .try_get::<D::Material>()
+                        .unwrap()
+                        .get_descriptor(descriptor_index.material_index as usize);
+                    let material_binding_data =
+                        self.get_descriptor_binding_data::<D, _>(material_descriptor);
+                    let camera_binding_data =
+                        self.get_descriptor_binding_data::<D, _>(current_frame.camera_descriptor);
+                    DescriptorState {
+                        sets: vec![material_binding_data, camera_binding_data],
+                        buffer_states: HashMap::new(),
+                    }
+                });
+            let mesh_pack = LazyCell::new(|| mesh_packs.try_get::<D::Vertex>().unwrap());
+            let buffer_index = BufferIndex::get(drawable.mesh());
+            let buffer_state = descriptor_state
+                .buffer_states
+                .entry(buffer_index)
+                .or_insert_with(|| BufferState {
+                    mesh_pack_data: (*mesh_pack).as_raw().data,
+                    model_states: HashMap::new(),
+                });
+            let model_index = ModelIndex::get(drawable);
+            buffer_state
+                .model_states
+                .entry(model_index)
+                .and_modify(|model_states| model_states.instances.push(*transform))
+                .or_insert_with(|| ModelState {
+                    mesh_bind_data: (*mesh_pack).get(model_index.mesh_index as usize).into(),
+                    instances: vec![*transform],
+                });
+            self.current_frame.replace(current_frame);
+        }
+    }
+
+    pub(super) fn record_draw_calls(
+        &mut self,
+        device: &VulkanDevice,
+        state: DeferredRendererFrameState<T>,
+        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+    ) -> Result<Commands<T>, Box<dyn Error>> {
+        let DeferredRendererFrameState {
+            commands:
+                Commands {
+                    depth_prepass,
+                    mut write_pass,
+                    shading_pass,
+                    skybox_pass,
+                    ..
+                },
+            draw_graph,
+            ..
+        } = state;
+        let depth_prepass = device.record_command(depth_prepass, |command| {
+            draw_graph
+                .pipeline_states
+                .iter()
+                .fold(command, |command, (_, pipeline_state)| {
+                    pipeline_state.descriptor_states.iter().fold(
+                        command,
+                        |command, (_, descriptor_state)| {
+                            descriptor_state.buffer_states.iter().fold(
+                                command,
+                                |command, (_, buffer_state)| {
+                                    let command =
+                                        command.bind_mesh_pack(&buffer_state.mesh_pack_data);
+                                    buffer_state.model_states.iter().fold(
+                                        command,
+                                        |command, (_, model_state)| {
+                                            model_state.instances.iter().fold(
+                                                command,
+                                                |command, instance| {
+                                                    command
+                                                        .push_constants(
+                                                            self.pipelines
+                                                                .depth_prepass
+                                                                .get_push_range::<ModelMatrix>(
+                                                                    &instance.into(),
+                                                                ),
+                                                        )
+                                                        .draw_mesh(model_state.mesh_bind_data)
+                                                },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                })
+        });
+
+        for (_, pipeline_state) in draw_graph.pipeline_states {
+            let (_, command) = self.frames.secondary_commands.next();
+            let command = device.record_command(
+                device.begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
+                    command,
+                    self.render_pass,
+                    swapchain_frame.framebuffer,
+                )?,
+                |command| {
+                    let command = command.bind_pipeline(pipeline_state.pipeline_bind_data);
+                    pipeline_state.descriptor_states.iter().fold(
+                        command,
+                        |command, (_, descriptor_state)| {
+                            let command = descriptor_state
+                                .sets
+                                .iter()
+                                .fold(command, |c, &set| c.bind_descriptor_set(set));
+                            descriptor_state.buffer_states.iter().fold(
+                                command,
+                                |command, (_, buffer_state)| {
+                                    let command =
+                                        command.bind_mesh_pack(&buffer_state.mesh_pack_data);
+                                    buffer_state.model_states.iter().fold(
+                                        command,
+                                        |command, (_, model_state)| {
+                                            model_state.instances.iter().fold(
+                                                command,
+                                                |command, instance| {
+                                                    command
+                                                        .push_constants(pipeline_state
+                                                            .push_constant_mapper
+                                                            .map_push_constant::<ModelNormalMatrix>(
+                                                                &instance.into()
+                                                            ).unwrap())
+                                                        .draw_mesh(model_state.mesh_bind_data)
+                                                },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            );
+            write_pass.push(command);
+        }
+
+        Ok(Commands {
+            depth_prepass,
+            write_pass,
+            shading_pass,
+            skybox_pass,
+            _phantom: PhantomData,
+        })
+    }
+
+    fn get_pipeline_state<D: Drawable>(&self) -> PipelineState {
+        let pipeline = self
+            .pipelines
+            .write_pass
+            .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, D::Material>>()
+            .unwrap();
+        PipelineState {
+            pipeline_bind_data: (&pipeline).into(),
+            push_constant_mapper: PushConstantRangeMapper::new(&pipeline),
+            descriptor_states: HashMap::new(),
+        }
+    }
+
+    fn get_descriptor_binding_data<D: Drawable, L: DescriptorLayout>(
+        &self,
+        descriptor: Descriptor<L>,
+    ) -> DescriptorBindingData {
+        let pipeline = self
+            .pipelines
+            .write_pass
+            .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, D::Material>>()
+            .unwrap();
+        descriptor.get_binding_data(&pipeline).unwrap()
+    }
+}
+
+impl DrawGraph {
+    pub(super) fn new() -> Self {
+        Self {
+            pipeline_states: HashMap::new(),
+        }
+    }
+}
