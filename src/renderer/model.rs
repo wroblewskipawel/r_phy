@@ -7,10 +7,12 @@ use std::fmt::Debug;
 pub use material::*;
 pub use mesh::*;
 
-pub trait Drawable: 'static {
+pub trait DrawableType: 'static {
     type Vertex: Vertex;
     type Material: Material;
+}
 
+pub trait Drawable: DrawableType {
     fn material(&self) -> MaterialHandle<Self::Material>;
     fn mesh(&self) -> MeshHandle<Self::Vertex>;
 }
@@ -35,10 +37,12 @@ impl<M: Material, V: Vertex> Model<M, V> {
     }
 }
 
-impl<M: Material, V: Vertex> Drawable for Model<M, V> {
+impl<M: Material, V: Vertex> DrawableType for Model<M, V> {
     type Vertex = V;
     type Material = M;
+}
 
+impl<M: Material, V: Vertex> Drawable for Model<M, V> {
     fn material(&self) -> MaterialHandle<Self::Material> {
         self.material
     }

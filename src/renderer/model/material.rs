@@ -2,6 +2,8 @@ use std::{
     any::TypeId, collections::HashMap, error::Error, marker::PhantomData, ops::Deref, path::PathBuf,
 };
 
+use crate::core::{Contains, Here, Marker, There};
+
 pub trait Material: 'static {
     const NUM_IMAGES: usize;
     fn images(&self) -> impl Iterator<Item = &Image>;
@@ -190,9 +192,32 @@ impl MaterialCollection for MaterialTypeTerminator {
     }
 }
 
+impl<M: Material, N: MaterialTypeList> Contains<Vec<M>, Here> for MaterialTypeNode<M, N> {
+    fn get(&self) -> &Vec<M> {
+        &self.materials
+    }
+
+    fn get_mut(&mut self) -> &mut Vec<M> {
+        &mut self.materials
+    }
+}
+
+impl<S: Material, M: Material, T: Marker, N: MaterialTypeList + Contains<Vec<M>, T>>
+    Contains<Vec<M>, There<T>> for MaterialTypeNode<S, N>
+{
+    fn get(&self) -> &Vec<M> {
+        self.next.get()
+    }
+
+    fn get_mut(&mut self) -> &mut Vec<M> {
+        self.next.get_mut()
+    }
+}
+
+// TODO: Resolve temporary `pub` workaround
 pub struct MaterialTypeNode<M: Material, N: MaterialTypeList> {
-    materials: Vec<M>,
-    next: N,
+    pub materials: Vec<M>,
+    pub next: N,
 }
 
 impl<M: Material, N: MaterialTypeList> MaterialTypeList for MaterialTypeNode<M, N> {

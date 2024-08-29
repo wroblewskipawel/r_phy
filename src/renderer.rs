@@ -1,8 +1,10 @@
 pub mod camera;
 pub mod model;
+pub mod shader;
 pub mod vulkan;
 
 use model::{Material, MaterialHandle, MeshHandle, Vertex};
+use shader::{ShaderHandle, ShaderType};
 use std::error::Error;
 use winit::window::Window;
 
@@ -19,13 +21,15 @@ pub trait Renderer: 'static {
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>>;
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>>;
-    fn draw<D: Drawable>(
+    fn draw<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>>(
         &mut self,
+        _shdaer: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>>;
     fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>>;
     fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>>;
+    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>>;
 }
 
 pub trait RendererBuilder: 'static {
@@ -47,8 +51,9 @@ impl Renderer for RendererNone {
         unimplemented!()
     }
 
-    fn draw<D: Drawable>(
+    fn draw<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>>(
         &mut self,
+        _shdaer: ShaderHandle<S>,
         _drawable: &D,
         _transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
@@ -60,6 +65,10 @@ impl Renderer for RendererNone {
     }
 
     fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
+        unimplemented!()
+    }
+
+    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
         unimplemented!()
     }
 }

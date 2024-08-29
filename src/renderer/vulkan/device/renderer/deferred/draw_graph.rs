@@ -6,13 +6,14 @@ use std::{
 use crate::{
     math::types::Matrix4,
     renderer::{
-        model::{Drawable, Material, MaterialHandle, MaterialTypeList, MeshHandle, Vertex},
+        model::{Drawable, Material, MaterialHandle, MeshHandle, Vertex},
+        shader::{ShaderHandle, ShaderType, ShaderTypeList},
         vulkan::device::{
             descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
             framebuffer::presets::AttachmentsGBuffer,
             pipeline::{
-                GBufferWritePassPipeline, ModelMatrix, ModelNormalMatrix, PipelineBindData,
-                PushConstantRangeMapper,
+                GBufferWritePassPipeline, GraphicsPipeline, ModelMatrix, ModelNormalMatrix,
+                PipelineBindData, PushConstantRangeMapper,
             },
             render_pass::GBufferWritePass,
             resources::{
@@ -92,13 +93,19 @@ pub struct DescriptorState {
 pub struct PipelineIndex {
     vertex_type: TypeId,
     material_type: TypeId,
+    pipeline_index: usize,
 }
 
 impl PipelineIndex {
-    pub fn get<D: Drawable>() -> Self {
+    pub fn get<S: ShaderType>(shader: ShaderHandle<S>) -> Self {
+        let ShaderHandle {
+            index: pipeline_index,
+            ..
+        } = shader;
         Self {
-            vertex_type: TypeId::of::<D::Vertex>(),
-            material_type: TypeId::of::<D::Material>(),
+            vertex_type: TypeId::of::<S::Vertex>(),
+            material_type: TypeId::of::<S::Material>(),
+            pipeline_index,
         }
     }
 }
@@ -114,22 +121,28 @@ pub struct DrawGraph {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
-impl<T: MaterialTypeList> DeferredRenderer<T> {
-    pub(super) fn append_draw_call<D: Drawable, M: MaterialPackList, V: MeshPackList>(
+impl<T: ShaderTypeList> DeferredRenderer<T> {
+    pub(super) fn append_draw_call<
+        S: ShaderType,
+        D: Drawable,
+        M: MaterialPackList,
+        V: MeshPackList,
+    >(
         &mut self,
         material_packs: &M,
         mesh_packs: &V,
+        shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
     ) {
         if let Some(mut current_frame) = self.current_frame.take() {
             let state = &mut current_frame.renderer_state;
-            let pipeline_index = PipelineIndex::get::<D>();
+            let pipeline_index = PipelineIndex::get(shader);
             let pipeline_state = state
                 .draw_graph
                 .pipeline_states
                 .entry(pipeline_index)
-                .or_insert_with(|| self.get_pipeline_state::<D>());
+                .or_insert_with(|| self.get_pipeline_state(shader));
             let descriptor_index = DescriptorIndex::get(drawable.material());
             let descriptor_state = pipeline_state
                 .descriptor_states
@@ -140,9 +153,9 @@ impl<T: MaterialTypeList> DeferredRenderer<T> {
                         .unwrap()
                         .get_descriptor(descriptor_index.material_index as usize);
                     let material_binding_data =
-                        self.get_descriptor_binding_data::<D, _>(material_descriptor);
+                        self.get_descriptor_binding_data(material_descriptor, shader);
                     let camera_binding_data =
-                        self.get_descriptor_binding_data::<D, _>(current_frame.camera_descriptor);
+                        self.get_descriptor_binding_data(current_frame.camera_descriptor, shader);
                     DescriptorState {
                         sets: vec![material_binding_data, camera_binding_data],
                         buffer_states: HashMap::new(),
@@ -284,12 +297,19 @@ impl<T: MaterialTypeList> DeferredRenderer<T> {
         })
     }
 
-    fn get_pipeline_state<D: Drawable>(&self) -> PipelineState {
-        let pipeline = self
+    fn get_pipeline_state<S: ShaderType>(&self, shader: ShaderHandle<S>) -> PipelineState {
+        let ShaderHandle {
+            index: pipeline_index,
+            ..
+        } = shader;
+        let pipeline: GraphicsPipeline<
+            GBufferWritePassPipeline<AttachmentsGBuffer, S::Material, S::Vertex>,
+        > = self
             .pipelines
             .write_pass
-            .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, D::Material>>()
-            .unwrap();
+            .try_get()
+            .unwrap()
+            .get(pipeline_index);
         PipelineState {
             pipeline_bind_data: (&pipeline).into(),
             push_constant_mapper: PushConstantRangeMapper::new(&pipeline),
@@ -297,15 +317,23 @@ impl<T: MaterialTypeList> DeferredRenderer<T> {
         }
     }
 
-    fn get_descriptor_binding_data<D: Drawable, L: DescriptorLayout>(
+    fn get_descriptor_binding_data<S: ShaderType, L: DescriptorLayout>(
         &self,
         descriptor: Descriptor<L>,
+        shader: ShaderHandle<S>,
     ) -> DescriptorBindingData {
-        let pipeline = self
+        let ShaderHandle {
+            index: pipeline_index,
+            ..
+        } = shader;
+        let pipeline: GraphicsPipeline<
+            GBufferWritePassPipeline<AttachmentsGBuffer, S::Material, S::Vertex>,
+        > = self
             .pipelines
             .write_pass
-            .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, D::Material>>()
-            .unwrap();
+            .try_get()
+            .unwrap()
+            .get(pipeline_index);
         descriptor.get_binding_data(&pipeline).unwrap()
     }
 }

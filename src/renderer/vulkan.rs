@@ -10,84 +10,153 @@ use self::device::{
         MeshPackListBuilder, MeshPacks,
     },
 };
-use crate::math::types::Matrix4;
+use crate::{
+    core::{Contains, Marker},
+    math::types::Matrix4,
+};
 use core::Context;
 
 use super::{
     camera::Camera,
     model::{
-        Drawable, Material, MaterialHandle, MaterialTypeNode, MaterialTypeTerminator, Materials,
-        Mesh, MeshHandle, MeshNode, MeshTerminator, Meshes, Vertex,
+        Drawable, Material, MaterialHandle, MaterialTypeNode, MaterialTypeTerminator, Mesh,
+        MeshHandle, MeshNode, MeshTerminator, Vertex,
     },
+    shader::{ShaderHandle, ShaderType, ShaderTypeList, ShaderTypeNode, ShaderTypeTerminator},
     Renderer, RendererBuilder,
 };
 use device::frame::Frame;
-use std::{any::TypeId, collections::HashMap, error::Error, path::PathBuf};
+use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
 
-pub struct VulkanRendererBuilder<M: MaterialPackListBuilder, V: MeshPackListBuilder> {
-    materials: Materials<M>,
-    meshes: Meshes<V>,
+pub struct VulkanRendererBuilder<
+    M: MaterialPackListBuilder,
+    V: MeshPackListBuilder,
+    S: ShaderTypeList,
+> {
+    materials: M,
+    meshes: V,
+    shaders: S,
 }
 
-impl Default for VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator> {
+impl Default
+    for VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator, ShaderTypeTerminator>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator> {
+impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator, ShaderTypeTerminator> {
     pub fn new() -> Self {
         Self {
-            materials: Materials::new(),
-            meshes: Meshes::new(),
+            materials: MaterialTypeTerminator {},
+            meshes: MeshTerminator {},
+            shaders: ShaderTypeTerminator {},
         }
     }
 }
 
-impl<M: MaterialPackListBuilder, V: MeshPackListBuilder> VulkanRendererBuilder<M, V> {
-    pub fn with_materials<N: Material>(
-        self,
-        materials: Vec<N>,
-        shader_path: PathBuf,
-    ) -> VulkanRendererBuilder<MaterialTypeNode<N, M>, V> {
-        VulkanRendererBuilder {
-            materials: self.materials.push(materials, shader_path),
-            meshes: self.meshes,
-        }
-    }
-
-    pub fn with_meshes<N: Vertex>(
-        self,
-        meshes: Vec<Mesh<N>>,
-    ) -> VulkanRendererBuilder<M, MeshNode<N, V>> {
-        VulkanRendererBuilder {
-            materials: self.materials,
-            meshes: self.meshes.push(meshes),
-        }
-    }
-}
-
-impl<M: MaterialPackListBuilder, V: MeshPackListBuilder> RendererBuilder
-    for VulkanRendererBuilder<M, V>
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
+    VulkanRendererBuilder<M, V, S>
 {
-    type Renderer = VulkanRenderer<M::Pack, V::Pack>;
+    pub fn with_material_type<N: Material>(
+        self,
+    ) -> VulkanRendererBuilder<MaterialTypeNode<N, M>, V, S> {
+        let Self {
+            materials,
+            meshes,
+            shaders,
+        } = self;
+        VulkanRendererBuilder {
+            materials: MaterialTypeNode {
+                materials: vec![],
+                next: materials,
+            },
+            meshes,
+            shaders,
+        }
+    }
+
+    pub fn with_vertex_type<N: Vertex>(self) -> VulkanRendererBuilder<M, MeshNode<N, V>, S> {
+        let Self {
+            materials,
+            meshes,
+            shaders,
+        } = self;
+        VulkanRendererBuilder {
+            meshes: MeshNode {
+                meshes: vec![],
+                next: meshes,
+            },
+            materials,
+            shaders,
+        }
+    }
+
+    pub fn with_shader_type<N: ShaderType, T: Marker, O: Marker>(
+        self,
+        _shader_type: PhantomData<N>,
+    ) -> VulkanRendererBuilder<M, V, ShaderTypeNode<N, S>>
+    where
+        M: Contains<Vec<N::Material>, T>,
+        V: Contains<Vec<Mesh<N::Vertex>>, O>,
+    {
+        let Self {
+            materials,
+            meshes,
+            shaders,
+        } = self;
+        VulkanRendererBuilder {
+            shaders: ShaderTypeNode {
+                shader_sources: vec![],
+                next: shaders,
+            },
+            materials,
+            meshes,
+        }
+    }
+
+    pub fn with_meshes<N: Vertex, T: Marker>(mut self, meshes: Vec<Mesh<N>>) -> Self
+    where
+        V: Contains<Vec<Mesh<N>>, T>,
+    {
+        self.meshes.get_mut().extend(meshes);
+        self
+    }
+
+    pub fn with_materials<N: Material, T: Marker>(mut self, materials: Vec<N>) -> Self
+    where
+        M: Contains<Vec<N>, T>,
+    {
+        self.materials.get_mut().extend(materials);
+        self
+    }
+
+    pub fn with_shaders<N: ShaderType, T: Marker>(mut self, shaders: Vec<N>) -> Self
+    where
+        S: Contains<Vec<N>, T>,
+    {
+        self.shaders.get_mut().extend(shaders);
+        self
+    }
+}
+
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList> RendererBuilder
+    for VulkanRendererBuilder<M, V, S>
+{
+    type Renderer = VulkanRenderer<M::Pack, V::Pack, S>;
 
     fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
-        let renderer = VulkanRenderer::new(
-            window,
-            &*self.materials,
-            &*self.meshes,
-            &self.materials.shaders,
-        )?;
+        let renderer = VulkanRenderer::new(window, &self.materials, &self.meshes, &self.shaders)?;
         Ok(renderer)
     }
 }
 
-pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList> {
+pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> {
     materials: MaterialPacks<M>,
     meshes: MeshPacks<V>,
-    renderer: DeferredRenderer<M>,
+    renderer: DeferredRenderer<S>,
     context: Context,
 }
 
@@ -97,12 +166,12 @@ pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList> {
 // TODO: User should be able to load custom shareds,
 // while also some preset of preconfigured one should be available
 // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-impl<M: MaterialPackList, V: MeshPackList> VulkanRenderer<M, V> {
+impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> VulkanRenderer<M, V, S> {
     pub fn new(
         window: &Window,
         materials: &impl MaterialPackListBuilder<Pack = M>,
         meshes: &impl MeshPackListBuilder<Pack = V>,
-        shaders: &HashMap<TypeId, PathBuf>,
+        shaders: &S,
     ) -> Result<Self, Box<dyn Error>> {
         let context = Context::build(window)?;
         let renderer = context.create_deferred_renderer(shaders)?;
@@ -117,7 +186,7 @@ impl<M: MaterialPackList, V: MeshPackList> VulkanRenderer<M, V> {
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList> Drop for VulkanRenderer<M, V> {
+impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> Drop for VulkanRenderer<M, V, S> {
     fn drop(&mut self) {
         let _ = self.context.wait_idle();
         self.context.destroy_materials(&mut self.materials);
@@ -126,7 +195,7 @@ impl<M: MaterialPackList, V: MeshPackList> Drop for VulkanRenderer<M, V> {
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
+impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> Renderer for VulkanRenderer<M, V, S> {
     type Materials = M;
     type Meshes = V;
 
@@ -141,12 +210,14 @@ impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
         Ok(())
     }
 
-    fn draw<D: Drawable>(
+    fn draw<T: ShaderType, D: Drawable<Material = T::Material, Vertex = T::Vertex>>(
         &mut self,
+        shader: ShaderHandle<T>,
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
         self.renderer.draw(
+            shader,
             drawable,
             transform,
             &self.materials.packs,
@@ -161,5 +232,9 @@ impl<M: MaterialPackList, V: MeshPackList> Renderer for VulkanRenderer<M, V> {
 
     fn get_material_handles<T: Material>(&self) -> Option<Vec<MaterialHandle<T>>> {
         Some(self.materials.packs.try_get()?.get_handles())
+    }
+
+    fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
+        self.renderer.get_shader_handles()
     }
 }

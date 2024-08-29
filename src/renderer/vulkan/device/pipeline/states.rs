@@ -5,13 +5,16 @@ use std::marker::PhantomData;
 use ash::vk::{self, Extent2D};
 pub use presets::*;
 
-use crate::renderer::vulkan::device::{
-    framebuffer::{
-        AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
-        References,
+use crate::renderer::{
+    model::Vertex,
+    vulkan::device::{
+        framebuffer::{
+            AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
+            References,
+        },
+        render_pass::Subpass,
+        AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
     },
-    render_pass::Subpass,
-    AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
 };
 
 pub struct VertexInputInfo {
@@ -47,6 +50,42 @@ pub trait VertexBinding: 'static {
     fn get_binding_description(binding: u32) -> vk::VertexInputBindingDescription;
 
     fn get_attribute_descriptions(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
+}
+
+fn infer_vertex_format(size: usize) -> vk::Format {
+    match size {
+        4 => vk::Format::R32_SFLOAT,
+        8 => vk::Format::R32G32_SFLOAT,
+        12 => vk::Format::R32G32B32_SFLOAT,
+        16 => vk::Format::R32G32B32A32_SFLOAT,
+        _ => panic!("Unsupported vertex component size"),
+    }
+}
+
+impl<V: Vertex> VertexBinding for V {
+    fn get_binding_description(binding: u32) -> vk::VertexInputBindingDescription {
+        let last = V::components().last().unwrap();
+        vk::VertexInputBindingDescription {
+            binding,
+            stride: (last.offset + last.size) as u32,
+            input_rate: vk::VertexInputRate::VERTEX,
+        }
+    }
+
+    fn get_attribute_descriptions(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
+        V::components()
+            .iter()
+            .zip(0u32..)
+            .map(
+                |(component, location)| vk::VertexInputAttributeDescription {
+                    binding,
+                    location,
+                    format: infer_vertex_format(component.size),
+                    offset: component.offset as u32,
+                },
+            )
+            .collect()
+    }
 }
 
 pub trait VertexBindingList: 'static {

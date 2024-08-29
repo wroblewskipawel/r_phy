@@ -1,3 +1,7 @@
+mod type_list;
+
+pub use type_list::*;
+
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, StartCause, WindowEvent},
@@ -14,15 +18,17 @@ use crate::{
     renderer::{
         camera::{Camera, CameraBuilder, CameraNone},
         model::{
-            Drawable, Material, MaterialHandle, MaterialTypeTerminator, MeshHandle, Vertex,
-            VertexNone,
+            Drawable, DrawableType, Material, MaterialHandle, MaterialTypeTerminator, MeshHandle,
+            Vertex, VertexNone,
         },
+        shader::{ShaderHandle, ShaderType},
         Renderer, RendererBuilder, RendererNone,
     },
 };
 
 #[derive(Clone, Copy)]
-struct DrawCommand<D: Drawable> {
+struct DrawCommand<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>> {
+    shader: ShaderHandle<S>,
     model: D,
     transform: Matrix4,
 }
@@ -46,9 +52,14 @@ impl<D: Drawable + Clone + Copy> Object<D> {
         }
     }
 
-    fn update(&mut self, elapsed_time: f32) -> DrawCommand<D> {
+    fn update<S: ShaderType<Vertex = D::Vertex, Material = D::Material>>(
+        &mut self,
+        shader: ShaderHandle<S>,
+        elapsed_time: f32,
+    ) -> DrawCommand<S, D> {
         self.transform = (self.update)(elapsed_time, self.transform);
         DrawCommand {
+            shader,
             model: self.model,
             transform: self.transform.into(),
         }
@@ -175,10 +186,12 @@ pub trait DrawableTypeList: 'static {
 #[derive(Debug, Clone, Copy)]
 pub struct DrawableTerminator {}
 
-impl Drawable for DrawableTerminator {
-    type Material = MaterialTypeTerminator;
+impl DrawableType for DrawableTerminator {
     type Vertex = VertexNone;
+    type Material = MaterialTypeTerminator;
+}
 
+impl Drawable for DrawableTerminator {
     fn material(&self) -> MaterialHandle<Self::Material> {
         unreachable!()
     }
@@ -194,13 +207,21 @@ impl DrawableTypeList for DrawableTerminator {
     type Next = Self;
 }
 
-pub struct DrawableObjectNode<D: Drawable + Clone + Copy, N: DrawableTypeList> {
+pub struct DrawableObjectNode<
+    S: ShaderType,
+    D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
+    N: DrawableTypeList,
+> {
+    shader: ShaderHandle<S>,
     objects: Vec<Object<D>>,
     next: N,
 }
 
-impl<D: Drawable + Clone + Copy, N: DrawableTypeList> DrawableTypeList
-    for DrawableObjectNode<D, N>
+impl<
+        S: ShaderType,
+        D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
+        N: DrawableTypeList,
+    > DrawableTypeList for DrawableObjectNode<S, D, N>
 {
     const LEN: usize = N::LEN + 1;
     type Drawable = D;
@@ -215,25 +236,40 @@ impl DrawCommandCollection for DrawableTerminator {
     fn draw<R: Renderer>(self, _renderer: &mut R) {}
 }
 
-pub struct DrawCommandNode<D: Drawable, N: DrawCommandCollection> {
-    draw: Vec<DrawCommand<D>>,
+pub struct DrawCommandNode<
+    S: ShaderType,
+    D: Drawable<Material = S::Material, Vertex = S::Vertex>,
+    N: DrawCommandCollection,
+> {
+    draw: Vec<DrawCommand<S, D>>,
     next: N,
 }
 
-impl<D: Drawable + Clone + Copy, N: DrawCommandCollection> DrawableTypeList
-    for DrawCommandNode<D, N>
+impl<
+        S: ShaderType,
+        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
+        N: DrawCommandCollection,
+    > DrawableTypeList for DrawCommandNode<S, D, N>
 {
     const LEN: usize = N::LEN + 1;
     type Drawable = D;
     type Next = N;
 }
 
-impl<D: Drawable + Clone + Copy, N: DrawCommandCollection> DrawCommandCollection
-    for DrawCommandNode<D, N>
+impl<
+        S: ShaderType,
+        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
+        N: DrawCommandCollection,
+    > DrawCommandCollection for DrawCommandNode<S, D, N>
 {
     fn draw<R: Renderer>(self, renderer: &mut R) {
-        for DrawCommand { model, transform } in self.draw {
-            let _ = renderer.draw(&model, &transform);
+        for DrawCommand {
+            shader,
+            model,
+            transform,
+        } in self.draw
+        {
+            let _ = renderer.draw(shader, &model, &transform);
         }
         self.next.draw(renderer);
     }
@@ -251,15 +287,18 @@ impl DrawableCollection for DrawableTerminator {
     }
 }
 
-impl<D: Drawable + Clone + Copy, N: DrawableCollection> DrawableCollection
-    for DrawableObjectNode<D, N>
+impl<
+        S: ShaderType,
+        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
+        N: DrawableCollection,
+    > DrawableCollection for DrawableObjectNode<S, D, N>
 {
-    type DrawCommands = DrawCommandNode<D, N::DrawCommands>;
+    type DrawCommands = DrawCommandNode<S, D, N::DrawCommands>;
     fn update(&mut self, elapsed_time: f32) -> Self::DrawCommands {
         let draw = self
             .objects
             .iter_mut()
-            .map(|object| object.update(elapsed_time))
+            .map(|object| object.update(self.shader, elapsed_time))
             .collect();
         DrawCommandNode {
             draw,
@@ -292,12 +331,17 @@ pub struct Scene<D: DrawableCollection, L: LoopTypes> {
 }
 
 impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
-    pub fn with_objects<T: Drawable + Clone + Copy>(
+    pub fn with_objects<
+        S: ShaderType,
+        T: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
+    >(
         self,
+        shader: ShaderHandle<S>,
         objects: Vec<Object<T>>,
-    ) -> Scene<DrawableObjectNode<T, D>, L> {
+    ) -> Scene<DrawableObjectNode<S, T, D>, L> {
         Scene {
             objects: DrawableObjectNode {
+                shader,
                 objects,
                 next: self.objects,
             },
@@ -320,6 +364,10 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
 
     pub fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
         self.renderer.get_material_handles()
+    }
+
+    pub fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
+        self.renderer.get_shader_handles()
     }
 
     pub fn run<D: DrawableCollection>(

@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::renderer::{
     camera::CameraMatrices,
-    model::MaterialTypeList,
+    shader::ShaderTypeList,
     vulkan::device::{
         command::{
             level::{Primary, Secondary},
@@ -23,22 +23,22 @@ use crate::renderer::{
 
 use super::DeferredRenderer;
 
-pub(super) struct Commands<M: MaterialTypeList> {
+pub(super) struct Commands<S: ShaderTypeList> {
     pub write_pass: Vec<BeginCommand<Persistent, Secondary, Graphics>>,
     pub depth_prepass: BeginCommand<Persistent, Secondary, Graphics>,
     pub shading_pass: BeginCommand<Persistent, Secondary, Graphics>,
     pub skybox_pass: BeginCommand<Persistent, Secondary, Graphics>,
-    pub _phantom: PhantomData<M>,
+    pub _phantom: PhantomData<S>,
 }
 
-impl<M: MaterialTypeList> DeferredRenderer<M> {
+impl<S: ShaderTypeList> DeferredRenderer<S> {
     pub(super) fn prepare_commands(
         &mut self,
         device: &VulkanDevice,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
-    ) -> Result<Commands<M>, Box<dyn Error>> {
+    ) -> Result<Commands<S>, Box<dyn Error>> {
         let depth_prepass = {
             let (_, command) = self.frames.secondary_commands.next();
             device.record_command(
@@ -84,7 +84,7 @@ impl<M: MaterialTypeList> DeferredRenderer<M> {
         let skybox_pass = device.record_command(skybox_pass, |command| {
             command.draw_skybox(&self.skybox, *camera_matrices)
         });
-        let write_pass = Vec::with_capacity(M::LEN);
+        let write_pass = Vec::with_capacity(S::LEN);
         Ok(Commands {
             write_pass,
             depth_prepass,
@@ -98,7 +98,7 @@ impl<M: MaterialTypeList> DeferredRenderer<M> {
         &self,
         device: &VulkanDevice,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
-        commands: Commands<M>,
+        commands: Commands<S>,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
     ) -> Result<FinishedCommand<Persistent, Primary, Graphics>, Box<dyn Error>> {
         let Commands {

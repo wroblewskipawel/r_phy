@@ -1,11 +1,14 @@
-use crate::renderer::vulkan::device::{
-    pipeline::{
-        PipelineLayoutGBuffer, PipelineLayoutMaterial, PipelineLayoutNoMaterial,
-        PipelineLayoutSkybox, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
-    },
-    render_pass::{
-        DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
-        GBufferWritePass,
+use crate::renderer::{
+    model::CommonVertex,
+    vulkan::device::{
+        pipeline::{
+            PipelineLayoutGBuffer, PipelineLayoutMaterial, PipelineLayoutNoMaterial,
+            PipelineLayoutSkybox, StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
+        },
+        render_pass::{
+            DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
+            GBufferWritePass,
+        },
     },
 };
 
@@ -20,21 +23,21 @@ pub type GBufferSkyboxPipeline<A> = GraphicsPipelineBuilder<
 
 pub type GBufferDepthPrepasPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutNoMaterial,
-    StatesDepthTestEnabled,
+    StatesDepthTestEnabled<CommonVertex>,
     DeferedRenderPass<A>,
     GBufferDepthPrepas<A>,
 >;
 
-pub type GBufferWritePassPipeline<A, M> = GraphicsPipelineBuilder<
+pub type GBufferWritePassPipeline<A, M, V> = GraphicsPipelineBuilder<
     PipelineLayoutMaterial<M>,
-    StatesDepthWriteDisabled,
+    StatesDepthWriteDisabled<V>,
     DeferedRenderPass<A>,
     GBufferWritePass<A>,
 >;
 
 pub type GBufferShadingPassPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutGBuffer,
-    StatesDepthWriteDisabled,
+    StatesDepthWriteDisabled<CommonVertex>,
     DeferedRenderPass<A>,
     GBufferShadingPass<A>,
 >;

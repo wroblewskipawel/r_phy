@@ -7,7 +7,11 @@ use std::{error::Error, marker::PhantomData};
 
 use crate::{
     math::types::Matrix4,
-    renderer::{camera::CameraMatrices, model::Drawable},
+    renderer::{
+        camera::CameraMatrices,
+        model::Drawable,
+        shader::{ShaderHandle, ShaderType},
+    },
 };
 
 use super::{
@@ -29,14 +33,22 @@ pub trait Frame: Sized {
     type Attachments: AttachmentList;
     type State;
 
+    fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>>;
+
     fn begin_frame(
         &mut self,
         device: &VulkanDevice,
         camera: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>>;
 
-    fn draw<D: Drawable, M: MaterialPackList, V: MeshPackList>(
+    fn draw<
+        S: ShaderType,
+        D: Drawable<Material = S::Material, Vertex = S::Vertex>,
+        M: MaterialPackList,
+        V: MeshPackList,
+    >(
         &mut self,
+        shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
         material_packs: &M,

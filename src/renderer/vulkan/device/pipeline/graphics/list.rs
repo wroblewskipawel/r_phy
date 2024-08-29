@@ -1,4 +1,4 @@
-use std::{any::TypeId, collections::HashMap, error::Error, path::PathBuf};
+use std::{any::TypeId, collections::HashMap, error::Error, marker::PhantomData, path::PathBuf};
 
 use crate::renderer::vulkan::device::{
     framebuffer::presets::AttachmentsGBuffer, pipeline::ShaderDirectory, VulkanDevice,
@@ -23,32 +23,71 @@ impl GraphicsPipelineTypeList for GraphicsPipelineTerminator {
     type Next = Self;
 }
 
-pub struct PipelineList {
-    pipelines: Vec<GraphicsPipelineTypeErased>,
+pub struct PipelineCollection {
+    pipelines: HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>,
 }
 
-impl PipelineList {
-    pub fn try_get<T: GraphicsPipelineConfig>(&self) -> Option<GraphicsPipeline<T>> {
+pub struct PipelineListRef<'a, C: GraphicsPipelineConfig> {
+    pipelines: &'a Vec<GraphicsPipelineTypeErased>,
+    _phantom: PhantomData<C>,
+}
+
+impl<'a, T: GraphicsPipelineConfig> PipelineListRef<'a, T> {
+    pub fn get(&self, index: usize) -> GraphicsPipeline<T> {
+        self.pipelines[index].try_into().unwrap()
+    }
+
+    pub fn len(&self) -> usize {
+        self.pipelines.len()
+    }
+}
+
+impl<'a, T: GraphicsPipelineConfig> IntoIterator for PipelineListRef<'a, T> {
+    type Item = GraphicsPipeline<T>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.pipelines
             .iter()
-            .find_map(|&pipeline| pipeline.try_into().ok())
+            .map(|&p| p.try_into().unwrap())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+}
+
+impl PipelineCollection {
+    pub fn try_get<T: GraphicsPipelineConfig>(&self) -> Option<PipelineListRef<T>> {
+        if let Some(pipelines) = self.pipelines.get(&TypeId::of::<T>()) {
+            Some(PipelineListRef {
+                pipelines,
+                _phantom: PhantomData,
+            })
+        } else {
+            None
+        }
     }
 }
 
 impl VulkanDevice {
     fn insert_pipeline<C: GraphicsPipelineTypeList>(
         &self,
-        mut pipelines: Vec<GraphicsPipelineTypeErased>,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<Vec<GraphicsPipelineTypeErased>, Box<dyn Error>> {
+        mut pipelines: HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>,
+        shaders: &HashMap<TypeId, Vec<PathBuf>>,
+    ) -> Result<HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>, Box<dyn Error>> {
         if C::LEN > 0 {
-            pipelines.push(
-                self.create_graphics_pipeline::<C::Pipeline>(
-                    ShaderDirectory::new(shaders.get(&TypeId::of::<C::Pipeline>()).unwrap()),
-                    self.physical_device.surface_properties.get_current_extent(),
-                )?
-                .into(),
-            );
+            let type_erased = shaders
+                .get(&TypeId::of::<C::Pipeline>())
+                .ok_or("No shader found for pipeline!")?
+                .iter()
+                .flat_map(|shader_source| {
+                    self.create_graphics_pipeline::<C::Pipeline>(
+                        ShaderDirectory::new(&shader_source),
+                        self.physical_device.surface_properties.get_current_extent(),
+                    )
+                    .map(|pipeline| pipeline.into())
+                })
+                .collect();
+            pipelines.insert(TypeId::of::<C::Pipeline>(), type_erased);
             self.insert_pipeline::<C::Next>(pipelines, shaders)
         } else {
             Ok(pipelines)
@@ -57,15 +96,15 @@ impl VulkanDevice {
 
     pub fn create_pipeline_list<C: GraphicsPipelineTypeList>(
         &self,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<PipelineList, Box<dyn Error>> {
-        Ok(PipelineList {
-            pipelines: self.insert_pipeline::<C>(Vec::new(), shaders)?,
+        shaders: &HashMap<TypeId, Vec<PathBuf>>,
+    ) -> Result<PipelineCollection, Box<dyn Error>> {
+        Ok(PipelineCollection {
+            pipelines: self.insert_pipeline::<C>(HashMap::new(), shaders)?,
         })
     }
-    pub fn destory_pipeline_list(&self, list: &mut PipelineList) {
+    pub fn destory_pipeline_list(&self, list: &mut PipelineCollection) {
         list.pipelines
             .iter_mut()
-            .for_each(|pipeline| self.destroy_pipeline(pipeline));
+            .for_each(|(_, pipelines)| pipelines.iter_mut().for_each(|p| self.destroy_pipeline(p)));
     }
 }

@@ -1,14 +1,21 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, mem::offset_of, ops::Deref};
 
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
+    core::{Contains, Here, Marker, There},
     math::types::{Vector2, Vector3, Vector4},
     physics::shape,
 };
 
+pub struct Component {
+    pub(crate) size: usize,
+    pub(crate) offset: usize,
+}
+
 pub trait Vertex: Pod + Zeroable {
     fn pos(&mut self) -> &mut Vector3;
+    fn components() -> &'static [Component];
 }
 
 #[derive(Debug)]
@@ -36,6 +43,74 @@ impl Vertex for CommonVertex {
     fn pos(&mut self) -> &mut Vector3 {
         &mut self.pos
     }
+
+    fn components() -> &'static [Component] {
+        const COMPONENTS: &'static [Component] = &[
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(CommonVertex, pos),
+            },
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(CommonVertex, color),
+            },
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(CommonVertex, norm),
+            },
+            Component {
+                size: size_of::<Vector2>(),
+                offset: offset_of!(CommonVertex, uv),
+            },
+            Component {
+                size: size_of::<Vector4>(),
+                offset: offset_of!(CommonVertex, tan),
+            },
+        ];
+        COMPONENTS
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]
+pub struct SimpleVertex {
+    pub(crate) pos: Vector3,
+    pub(crate) color: Vector3,
+    pub(crate) norm: Vector3,
+}
+
+impl Vertex for SimpleVertex {
+    fn pos(&mut self) -> &mut Vector3 {
+        &mut self.pos
+    }
+
+    fn components() -> &'static [Component] {
+        const COMPONENTS: &'static [Component] = &[
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(SimpleVertex, pos),
+            },
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(SimpleVertex, color),
+            },
+            Component {
+                size: size_of::<Vector3>(),
+                offset: offset_of!(SimpleVertex, norm),
+            },
+        ];
+        COMPONENTS
+    }
+}
+
+impl From<CommonVertex> for SimpleVertex {
+    fn from(value: CommonVertex) -> Self {
+        Self {
+            pos: value.pos,
+            color: value.color,
+            norm: value.norm,
+        }
+    }
 }
 
 pub struct MeshBuilder<V: Vertex> {
@@ -53,6 +128,14 @@ impl<V: Vertex> MeshBuilder<V> {
         Self {
             vertices: Vec::new(),
             indices: Vec::new(),
+        }
+    }
+
+    pub fn convert<T: Vertex + From<V>>(self) -> MeshBuilder<T> {
+        let Self { vertices, indices } = self;
+        MeshBuilder {
+            vertices: vertices.into_iter().map(T::from).collect(),
+            indices,
         }
     }
 
@@ -189,14 +272,15 @@ impl MeshBuilder<CommonVertex> {
     }
 }
 
-impl From<shape::Cube> for Mesh<CommonVertex> {
+impl<V: Vertex + From<CommonVertex>> From<shape::Cube> for Mesh<V> {
     fn from(value: shape::Cube) -> Self {
         MeshBuilder::box_subdivided(0, Vector3::new(value.side, value.side, value.side), true)
+            .convert()
             .build()
     }
 }
 
-impl From<shape::Sphere> for Mesh<CommonVertex> {
+impl<V: Vertex + From<CommonVertex>> From<shape::Sphere> for Mesh<V> {
     fn from(value: shape::Sphere) -> Self {
         const UNIT_SPHERE_SUBDIV: usize = 4;
         let num_subdiv =
@@ -208,17 +292,18 @@ impl From<shape::Sphere> for Mesh<CommonVertex> {
             vert.pos = 0.5 * value.diameter * dir;
             vert.uv = value.diameter * vert.uv;
         }
-        mesh.build()
+        mesh.convert().build()
     }
 }
 
-impl From<shape::Box> for Mesh<CommonVertex> {
+impl<V: Vertex + From<CommonVertex>> From<shape::Box> for Mesh<V> {
     fn from(value: shape::Box) -> Self {
         MeshBuilder::box_subdivided(
             0,
             Vector3::new(value.width, value.depth, value.height),
             true,
         )
+        .convert()
         .build()
     }
 }
@@ -229,6 +314,10 @@ pub struct VertexNone {}
 
 impl Vertex for VertexNone {
     fn pos(&mut self) -> &mut Vector3 {
+        unreachable!()
+    }
+
+    fn components() -> &'static [Component] {
         unreachable!()
     }
 }
@@ -262,9 +351,32 @@ impl MeshCollection for MeshTerminator {
     }
 }
 
+impl<V: Vertex, N: MeshList> Contains<Vec<Mesh<V>>, Here> for MeshNode<V, N> {
+    fn get(&self) -> &Vec<Mesh<V>> {
+        &self.meshes
+    }
+
+    fn get_mut(&mut self) -> &mut Vec<Mesh<V>> {
+        &mut self.meshes
+    }
+}
+
+impl<S: Vertex, V: Vertex, T: Marker, N: MeshList + Contains<Vec<Mesh<V>>, T>>
+    Contains<Vec<Mesh<V>>, There<T>> for MeshNode<S, N>
+{
+    fn get(&self) -> &Vec<Mesh<V>> {
+        self.next.get()
+    }
+
+    fn get_mut(&mut self) -> &mut Vec<Mesh<V>> {
+        self.next.get_mut()
+    }
+}
+
+// TODO: Resolve temporary `pub` workaround
 pub struct MeshNode<V: Vertex, N: MeshList> {
-    meshes: Vec<Mesh<V>>,
-    next: N,
+    pub meshes: Vec<Mesh<V>>,
+    pub next: N,
 }
 
 impl<V: Vertex, N: MeshList> MeshList for MeshNode<V, N> {

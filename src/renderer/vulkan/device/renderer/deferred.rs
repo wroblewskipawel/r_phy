@@ -18,7 +18,8 @@ use crate::{
     math::types::{Matrix4, Vector3},
     renderer::{
         camera::CameraMatrices,
-        model::{CommonVertex, Drawable, MaterialTypeList, MeshBuilder},
+        model::{CommonVertex, Drawable, MeshBuilder},
+        shader::{ShaderHandle, ShaderType, ShaderTypeList},
         vulkan::{
             core::Context,
             device::{
@@ -32,7 +33,7 @@ use crate::{
                 pipeline::{
                     GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
                     GBufferWritePassPipeline, GraphicsPipeline, GraphicsPipelineTypeList,
-                    PipelineList, ShaderDirectory,
+                    PipelineCollection, ShaderDirectory,
                 },
                 render_pass::{DeferedRenderPass, GBufferShadingPass, RenderPass, Subpass},
                 resources::{MaterialPackList, MeshPack, MeshPackList},
@@ -44,10 +45,14 @@ use crate::{
     },
 };
 
-impl<T: MaterialTypeList> GraphicsPipelineTypeList for T {
-    const LEN: usize = T::LEN;
-    type Pipeline = GBufferWritePassPipeline<AttachmentsGBuffer, T::Item>;
-    type Next = T::Next;
+impl<S: ShaderTypeList> GraphicsPipelineTypeList for S {
+    const LEN: usize = S::LEN;
+    type Pipeline = GBufferWritePassPipeline<
+        AttachmentsGBuffer,
+        <S::Item as ShaderType>::Material,
+        <S::Item as ShaderType>::Vertex,
+    >;
+    type Next = S::Next;
 }
 
 pub struct GBuffer {
@@ -58,16 +63,36 @@ pub struct GBuffer {
     pub depth: VulkanImage2D,
 }
 
-pub struct Pipelines<M: MaterialTypeList> {
-    write_pass: PipelineList,
+pub struct Pipelines<S: ShaderTypeList> {
+    write_pass: PipelineCollection,
     depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
     shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
-    _phantom: PhantomData<M>,
+    _phantom: PhantomData<S>,
 }
 
-pub struct DeferredRenderer<M: MaterialTypeList> {
-    frames: FramePool<DeferredRenderer<M>>,
-    pipelines: Pipelines<M>,
+impl<S: ShaderTypeList> Pipelines<S> {
+    fn get_pipeline_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
+        if let Some(pipelines) =
+            self.write_pass
+                .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, T::Material, T::Vertex>>()
+        {
+            Some(
+                (0..pipelines.len())
+                    .map(|index| ShaderHandle {
+                        index,
+                        _phantom: PhantomData,
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    }
+}
+
+pub struct DeferredRenderer<S: ShaderTypeList> {
+    frames: FramePool<DeferredRenderer<S>>,
+    pipelines: Pipelines<S>,
     render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
     skybox: Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>,
@@ -77,15 +102,15 @@ pub struct DeferredRenderer<M: MaterialTypeList> {
     current_frame: Option<FrameData<Self>>,
 }
 
-pub struct DeferredRendererFrameState<M: MaterialTypeList> {
-    commands: Commands<M>,
+pub struct DeferredRendererFrameState<S: ShaderTypeList> {
+    commands: Commands<S>,
     draw_graph: DrawGraph,
 }
 
-impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
-    const REQUIRED_COMMANDS: usize = 3 + M::LEN;
+impl<T: ShaderTypeList> Frame for DeferredRenderer<T> {
+    const REQUIRED_COMMANDS: usize = 3 + T::LEN;
     type Attachments = AttachmentsGBuffer;
-    type State = DeferredRendererFrameState<M>;
+    type State = DeferredRendererFrameState<T>;
 
     fn begin_frame(
         &mut self,
@@ -112,14 +137,20 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
         Ok(())
     }
 
-    fn draw<D: Drawable, T: MaterialPackList, V: MeshPackList>(
+    fn draw<
+        S: ShaderType,
+        D: Drawable<Material = S::Material, Vertex = S::Vertex>,
+        M: MaterialPackList,
+        V: MeshPackList,
+    >(
         &mut self,
+        shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
-        material_packs: &T,
+        material_packs: &M,
         mesh_packs: &V,
     ) {
-        self.append_draw_call(material_packs, mesh_packs, drawable, transform);
+        self.append_draw_call(material_packs, mesh_packs, shader, drawable, transform);
     }
 
     fn end_frame(&mut self, device: &VulkanDevice) -> Result<(), Box<dyn Error>> {
@@ -134,6 +165,10 @@ impl<M: MaterialTypeList> Frame for DeferredRenderer<M> {
             self.record_primary_command(device, primary_command, commands, &swapchain_frame)?;
         device.present_frame(&self.swapchain, primary_command, swapchain_frame)?;
         Ok(())
+    }
+
+    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
+        self.pipelines.get_pipeline_handles()
     }
 }
 
@@ -152,26 +187,36 @@ impl GBuffer {
     }
 }
 
-fn adapt_shader_source_map<M: MaterialTypeList>(
-    mut adapted: HashMap<TypeId, PathBuf>,
-    shaders: &HashMap<TypeId, PathBuf>,
-) -> HashMap<TypeId, PathBuf> {
-    if M::LEN > 0 {
+fn adapt_shader_source_map<S: ShaderTypeList>(
+    mut adapted: HashMap<TypeId, Vec<PathBuf>>,
+    shaders: &S,
+) -> HashMap<TypeId, Vec<PathBuf>> {
+    if S::LEN > 0 {
         adapted.insert(
-            TypeId::of::<GBufferWritePassPipeline<AttachmentsGBuffer, M::Item>>(),
-            shaders.get(&TypeId::of::<M::Item>()).unwrap().clone(),
+            TypeId::of::<
+                GBufferWritePassPipeline<
+                    AttachmentsGBuffer,
+                    <S::Item as ShaderType>::Material,
+                    <S::Item as ShaderType>::Vertex,
+                >,
+            >(),
+            shaders
+                .shaders()
+                .iter()
+                .map(|s| s.source().into())
+                .collect(),
         );
-        adapt_shader_source_map::<M::Next>(adapted, shaders)
+        adapt_shader_source_map::<S::Next>(adapted, shaders.next())
     } else {
         adapted
     }
 }
 
 impl Context {
-    pub fn create_deferred_renderer<M: MaterialTypeList>(
+    pub fn create_deferred_renderer<B: ShaderTypeList>(
         &self,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<DeferredRenderer<M>, Box<dyn Error>> {
+        shaders: &B,
+    ) -> Result<DeferredRenderer<B>, Box<dyn Error>> {
         let g_buffer = self.create_g_buffer()?;
         let swapchain = self.create_swapchain::<AttachmentsGBuffer>(
             self.into(),
@@ -222,10 +267,7 @@ impl Context {
         })
     }
 
-    pub fn destroy_deferred_renderer<M: MaterialTypeList>(
-        &self,
-        renderer: &mut DeferredRenderer<M>,
-    ) {
+    pub fn destroy_deferred_renderer<S: ShaderTypeList>(&self, renderer: &mut DeferredRenderer<S>) {
         self.destroy_frame_pool(&mut renderer.frames);
         self.destroy_pipelines(&mut renderer.pipelines);
         self.destroy_descriptor_pool(&mut renderer.descriptors);
@@ -235,13 +277,13 @@ impl Context {
         self.destroy_g_buffer(&mut renderer.g_buffer);
     }
 
-    fn create_pipelines<M: MaterialTypeList>(
+    fn create_pipelines<B: ShaderTypeList>(
         &self,
-        shaders: &HashMap<TypeId, PathBuf>,
-    ) -> Result<Pipelines<M>, Box<dyn Error>> {
+        shaders: &B,
+    ) -> Result<Pipelines<B>, Box<dyn Error>> {
         let image_extent = self.physical_device.surface_properties.get_current_extent();
         let write_pass =
-            self.create_pipeline_list::<M>(&adapt_shader_source_map::<M>(HashMap::new(), shaders))?;
+            self.create_pipeline_list::<B>(&adapt_shader_source_map::<B>(HashMap::new(), shaders))?;
         let depth_prepass = self.create_graphics_pipeline(
             ShaderDirectory::new(Path::new("shaders/spv/deferred/depth_prepass")),
             image_extent,
@@ -258,7 +300,7 @@ impl Context {
         })
     }
 
-    fn destroy_pipelines<M: MaterialTypeList>(&self, pipelines: &mut Pipelines<M>) {
+    fn destroy_pipelines<S: ShaderTypeList>(&self, pipelines: &mut Pipelines<S>) {
         self.destory_pipeline_list(&mut pipelines.write_pass);
         self.destroy_pipeline(&mut pipelines.depth_prepass);
         self.destroy_pipeline(&mut pipelines.shading_pass);

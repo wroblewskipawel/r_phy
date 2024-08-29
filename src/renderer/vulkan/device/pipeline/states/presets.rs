@@ -1,7 +1,4 @@
-use std::mem::size_of;
-
 use ash::vk;
-use bytemuck::offset_of;
 
 use crate::renderer::{
     model::CommonVertex,
@@ -10,54 +7,9 @@ use crate::renderer::{
 
 use super::{
     Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,
-    VertexAssembly, VertexBinding, VertexBindingBuilder, VertexBindingNode,
-    VertexBindingTerminator, Viewport, ViewportInfo,
+    VertexAssembly, VertexBindingBuilder, VertexBindingNode, VertexBindingTerminator, Viewport,
+    ViewportInfo,
 };
-
-impl VertexBinding for CommonVertex {
-    fn get_binding_description(binding: u32) -> vk::VertexInputBindingDescription {
-        vk::VertexInputBindingDescription {
-            binding,
-            stride: size_of::<CommonVertex>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }
-    }
-
-    fn get_attribute_descriptions(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 0,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(CommonVertex, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 1,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(CommonVertex, color) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 2,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(CommonVertex, norm) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 3,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(CommonVertex, uv) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 4,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(CommonVertex, tan) as u32,
-            },
-        ]
-    }
-}
 
 pub struct TriangleList {}
 
@@ -274,11 +226,10 @@ impl Multisample for Multisampled {
     }
 }
 
-pub type MeshVertexInput =
-    VertexBindingBuilder<VertexBindingNode<CommonVertex, VertexBindingTerminator>>;
+pub type MeshVertexInput<V> = VertexBindingBuilder<VertexBindingNode<V, VertexBindingTerminator>>;
 
 pub type StatesSkybox = PipelineStatesBuilder<
-    MeshVertexInput,
+    MeshVertexInput<CommonVertex>,
     TriangleList,
     DepthWriteDisabled,
     CullFront,
@@ -287,8 +238,8 @@ pub type StatesSkybox = PipelineStatesBuilder<
     Multisampled,
 >;
 
-pub type StatesDepthWriteDisabled = PipelineStatesBuilder<
-    MeshVertexInput,
+pub type StatesDepthWriteDisabled<V> = PipelineStatesBuilder<
+    MeshVertexInput<V>,
     TriangleList,
     DepthWriteDisabled,
     CullBack,
@@ -297,8 +248,8 @@ pub type StatesDepthWriteDisabled = PipelineStatesBuilder<
     Multisampled,
 >;
 
-pub type StatesDepthTestEnabled = PipelineStatesBuilder<
-    MeshVertexInput,
+pub type StatesDepthTestEnabled<V> = PipelineStatesBuilder<
+    MeshVertexInput<V>,
     TriangleList,
     DepthTestEnabled,
     CullBack,
