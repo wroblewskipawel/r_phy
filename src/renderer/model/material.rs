@@ -1,12 +1,26 @@
+use core::slice;
 use std::{
     any::TypeId, collections::HashMap, error::Error, marker::PhantomData, ops::Deref, path::PathBuf,
 };
 
-use crate::core::{Contains, Here, Marker, There};
+use bytemuck::AnyBitPattern;
+
+use crate::{
+    core::{Contains, Here, Marker, There},
+    math::types::{Vector3, Vector4},
+};
+
+#[allow(dead_code)]
+pub const fn has_data<T: Material>() -> bool {
+    T::NUM_IMAGES != 0 || size_of::<T::Uniform>() != 0
+}
 
 pub trait Material: 'static {
     const NUM_IMAGES: usize;
-    fn images(&self) -> impl Iterator<Item = &Image>;
+    type Uniform: Clone + Copy + AnyBitPattern;
+
+    fn images(&self) -> Option<impl Iterator<Item = &Image>>;
+    fn uniform(&self) -> Option<&Self::Uniform>;
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +42,22 @@ impl<M: Material> Copy for MaterialHandle<M> {}
 
 pub struct UnlitMaterialBuilder {
     albedo: Option<Image>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EmptyMaterial {}
+
+impl Material for EmptyMaterial {
+    const NUM_IMAGES: usize = 0;
+    type Uniform = ();
+
+    fn images(&self) -> Option<impl Iterator<Item = &Image>> {
+        Option::<slice::Iter<Image>>::None
+    }
+
+    fn uniform(&self) -> Option<&Self::Uniform> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -57,102 +87,123 @@ impl UnlitMaterial {
 
 impl Material for UnlitMaterial {
     const NUM_IMAGES: usize = 1;
-    fn images(&self) -> impl Iterator<Item = &Image> {
-        [&self.albedo].into_iter()
+    type Uniform = ();
+
+    fn images(&self) -> Option<impl Iterator<Item = &Image>> {
+        Some([&self.albedo].into_iter())
+    }
+    fn uniform(&self) -> Option<&Self::Uniform> {
+        None
     }
 }
 
 #[derive(Debug, Clone)]
+pub enum PbrMaps {
+    Albedo,
+    Normal,
+    MetallicRoughness,
+    Occlusion,
+    Emissive,
+}
+
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy, Default, AnyBitPattern)]
+pub struct PbrFactors {
+    pub base_color: Vector4,
+    pub emissive: Vector3,
+    _padding: f32,
+    pub metallic: f32,
+    pub roughness: f32,
+    pub occlusion: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PbrImages {
+    images: [Image; 5],
+}
+
+#[derive(Debug, Clone)]
 pub struct PbrMaterial {
-    albedo: Image,
-    normal: Image,
-    metallic_roughness: Image,
-    occlusion: Image,
-    emissive: Image,
+    images: PbrImages,
+    factors: PbrFactors,
 }
 
 impl PbrMaterial {
     pub fn builder() -> PbrMaterialBuilder {
         PbrMaterialBuilder {
-            albedo: None,
-            normal: None,
-            metallic_roughness: None,
-            occlusion: None,
-            emissive: None,
+            images: Default::default(),
+            factors: Default::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct PbrMaterialBuilder {
-    pub albedo: Option<Image>,
-    pub normal: Option<Image>,
-    pub metallic_roughness: Option<Image>,
-    pub occlusion: Option<Image>,
-    pub emissive: Option<Image>,
+    images: [Option<Image>; 5],
+    factors: PbrFactors,
 }
 
 impl PbrMaterialBuilder {
     pub fn build(self) -> Result<PbrMaterial, Box<dyn Error>> {
+        let Self {
+            images: [albedo, normal, metallic_roughness, occlusion, emissive],
+            factors,
+        } = self;
         Ok(PbrMaterial {
-            albedo: self.albedo.ok_or("Albedo texture not provided!")?,
-            normal: self.normal.ok_or("Normal texture not provided!")?,
-            metallic_roughness: self
-                .metallic_roughness
-                .ok_or("MetallicRougness texture not provided!")?,
-            occlusion: self.occlusion.ok_or("Occlusion texture not provided!")?,
-            emissive: self.emissive.ok_or("Emissive texture not provided!")?,
+            images: PbrImages {
+                images: [
+                    albedo.ok_or("Albedo texture not provided!")?,
+                    normal.ok_or("Normal texture not provided!")?,
+                    metallic_roughness.ok_or("Metallic-roughness texture not provided!")?,
+                    occlusion.ok_or("Occlusion texture not provided!")?,
+                    emissive.ok_or("Emissive texture not provided!")?,
+                ],
+            },
+            factors,
         })
     }
 
-    pub fn with_albedo(self, image: Image) -> Self {
-        Self {
-            albedo: Some(image),
-            ..self
-        }
+    pub fn with_image(mut self, image: Image, map: PbrMaps) -> Self {
+        self.images[map as usize] = Some(image);
+        self
     }
 
-    pub fn with_normal(self, image: Image) -> Self {
-        Self {
-            normal: Some(image),
-            ..self
-        }
+    pub fn with_base_color(mut self, base_color: Vector4) -> Self {
+        self.factors.base_color = base_color;
+        self
     }
 
-    pub fn with_metallic_roughness(self, image: Image) -> Self {
-        Self {
-            metallic_roughness: Some(image),
-            ..self
-        }
+    pub fn with_metallic(mut self, metallic: f32) -> Self {
+        self.factors.metallic = metallic;
+        self
     }
 
-    pub fn with_emissive(self, image: Image) -> Self {
-        Self {
-            emissive: Some(image),
-            ..self
-        }
+    pub fn with_roughness(mut self, roughness: f32) -> Self {
+        self.factors.roughness = roughness;
+        self
     }
 
-    pub fn with_occlusion(self, image: Image) -> Self {
-        Self {
-            occlusion: Some(image),
-            ..self
-        }
+    pub fn with_occlusion(mut self, occlusion: f32) -> Self {
+        self.factors.occlusion = occlusion;
+        self
+    }
+
+    pub fn with_emissive(mut self, emissive: Vector3) -> Self {
+        self.factors.emissive = emissive;
+        self
     }
 }
 
 impl Material for PbrMaterial {
     const NUM_IMAGES: usize = 5;
+    type Uniform = PbrFactors;
 
-    fn images(&self) -> impl Iterator<Item = &Image> {
-        [
-            &self.albedo,
-            &self.normal,
-            &self.metallic_roughness,
-            &self.occlusion,
-            &self.emissive,
-        ]
-        .into_iter()
+    fn images(&self) -> Option<impl Iterator<Item = &Image>> {
+        Some(self.images.images.as_slice().into_iter())
+    }
+
+    fn uniform(&self) -> Option<&Self::Uniform> {
+        Some(&self.factors)
     }
 }
 
@@ -169,16 +220,9 @@ pub trait MaterialCollection: MaterialTypeList {
 
 pub struct MaterialTypeTerminator {}
 
-impl Material for MaterialTypeTerminator {
-    const NUM_IMAGES: usize = 0;
-    fn images(&self) -> impl Iterator<Item = &Image> {
-        [].into_iter()
-    }
-}
-
 impl MaterialTypeList for MaterialTypeTerminator {
     const LEN: usize = 0;
-    type Item = Self;
+    type Item = EmptyMaterial;
     type Next = Self;
 }
 

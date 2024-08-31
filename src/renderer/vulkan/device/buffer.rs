@@ -1,6 +1,7 @@
 use ash::{vk, Device};
-use bytemuck::{cast_slice_mut, Pod};
+use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
 use std::{
+    any::{type_name, TypeId},
     borrow::BorrowMut,
     error::Error,
     ffi::c_void,
@@ -37,7 +38,7 @@ impl ByteRange {
         ((offset + alignment - 1) / alignment) * alignment
     }
 
-    fn extend<T: Pod>(&mut self, len: usize) -> ByteRange {
+    fn extend<T: AnyBitPattern>(&mut self, len: usize) -> ByteRange {
         let beg = ByteRange::align::<T>(self.end);
         let end = beg + len * size_of::<T>();
         self.end = end;
@@ -45,7 +46,7 @@ impl ByteRange {
     }
 }
 
-impl<T: Pod> From<Range<T>> for ByteRange {
+impl<T: AnyBitPattern> From<Range<T>> for ByteRange {
     fn from(value: Range<T>) -> Self {
         let beg = value.first * size_of::<T>();
         Self {
@@ -57,13 +58,13 @@ impl<T: Pod> From<Range<T>> for ByteRange {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Range<T: Pod> {
+pub struct Range<T: AnyBitPattern> {
     pub len: usize,
     pub first: usize,
     _phantom: PhantomData<T>,
 }
 
-impl<T: Pod> From<ByteRange> for Range<T> {
+impl<T: AnyBitPattern> From<ByteRange> for Range<T> {
     fn from(value: ByteRange) -> Self {
         debug_assert_eq!(
             value.beg % size_of::<T>(),
@@ -85,7 +86,7 @@ impl<T: Pod> From<ByteRange> for Range<T> {
     }
 }
 
-impl<T: Pod> Range<T> {
+impl<T: AnyBitPattern> Range<T> {
     fn alloc(&mut self, len: usize) -> Self {
         debug_assert!(len <= self.len, "Range alloc overflow!");
         let first = self.first;
@@ -290,7 +291,7 @@ impl StagingBufferBuilder {
         }
     }
 
-    pub fn append<T: Pod>(&mut self, len: usize) -> Range<T> {
+    pub fn append<T: AnyBitPattern>(&mut self, len: usize) -> Range<T> {
         self.range.extend::<T>(len).into()
     }
 }
@@ -301,7 +302,7 @@ pub struct StagingBuffer<'a> {
     device: &'a VulkanDevice,
 }
 
-pub struct WritableRange<T: Pod> {
+pub struct WritableRange<T: AnyBitPattern> {
     ptr: *mut T,
     range: Range<T>,
 }
@@ -415,7 +416,7 @@ impl<'a> StagingBuffer<'a> {
         Ok(())
     }
 
-    pub fn write_range<T: Pod>(&mut self, range: Range<T>) -> WritableRange<T> {
+    pub fn write_range<T: AnyBitPattern>(&mut self, range: Range<T>) -> WritableRange<T> {
         // TODO: Improve safety,
         // - Range should comme from current staging buffer builder (unnecessary complexity?)
         debug_assert!(
@@ -433,13 +434,15 @@ impl<'a> StagingBuffer<'a> {
     }
 }
 
-impl<T: Pod> WritableRange<T> {
+impl<T: AnyBitPattern> WritableRange<T> {
     pub fn write(&mut self, value: &[T]) -> Range<T> {
         let range = self.range.alloc(value.len());
         unsafe { copy_nonoverlapping(value.as_ptr(), self.ptr.add(range.first), value.len()) }
         range
     }
+}
 
+impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
     pub fn remaining_as_slice_mut(&mut self) -> &mut [T] {
         let range = self.range.alloc(self.range.len);
         let values =
@@ -505,25 +508,27 @@ impl VulkanDevice {
     }
 }
 
-pub struct UniformBuffer<U: Pod, O: Operation> {
+pub struct UniformBuffer<U: AnyBitPattern, O: Operation> {
     buffer: PersistentBuffer,
     pub size: usize,
     _phantom: PhantomData<(U, O)>,
 }
 
-impl<'a, U: Pod, O: Operation> From<&'a UniformBuffer<U, O>> for &'a PersistentBuffer {
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a UniformBuffer<U, O>> for &'a PersistentBuffer {
     fn from(value: &'a UniformBuffer<U, O>) -> Self {
         &value.buffer
     }
 }
 
-impl<'a, U: Pod, O: Operation> From<&'a mut UniformBuffer<U, O>> for &'a mut PersistentBuffer {
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a mut UniformBuffer<U, O>>
+    for &'a mut PersistentBuffer
+{
     fn from(value: &'a mut UniformBuffer<U, O>) -> Self {
         &mut value.buffer
     }
 }
 
-impl<U: Pod, O: Operation> Index<usize> for UniformBuffer<U, O> {
+impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBuffer<U, O> {
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -533,7 +538,7 @@ impl<U: Pod, O: Operation> Index<usize> for UniformBuffer<U, O> {
     }
 }
 
-impl<U: Pod, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
+impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         debug_assert!(index < self.size, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
@@ -541,7 +546,7 @@ impl<U: Pod, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
     }
 }
 
-impl<U: Pod, O: Operation> UniformBuffer<U, O> {
+impl<U: AnyBitPattern, O: Operation> UniformBuffer<U, O> {
     pub fn as_raw(&self) -> vk::Buffer {
         // Do it more elegant way later, maybe push as_raw up the encapsulation chain?
         self.buffer.buffer.buffer.buffer
@@ -549,7 +554,7 @@ impl<U: Pod, O: Operation> UniformBuffer<U, O> {
 }
 
 impl VulkanDevice {
-    pub(super) fn create_uniform_buffer<U: Pod, O: Operation>(
+    pub(super) fn create_uniform_buffer<U: AnyBitPattern, O: Operation>(
         &self,
         size: usize,
     ) -> Result<UniformBuffer<U, O>, Box<dyn Error>> {
@@ -566,10 +571,81 @@ impl VulkanDevice {
         })
     }
 
-    pub(super) fn destroy_uniform_buffer<U: Pod, O: Operation>(
+    pub(super) fn destroy_uniform_buffer<U: AnyBitPattern, O: Operation>(
         &self,
         buffer: &mut UniformBuffer<U, O>,
     ) {
         self.destroy_persistent_buffer(buffer.into());
+    }
+}
+
+// TODO: Move to separate module
+pub struct UniformBufferTypeErased<O: Operation> {
+    type_id: TypeId,
+    buffer: PersistentBuffer,
+    pub size: usize,
+    _phantom: PhantomData<O>,
+}
+
+impl<P: AnyBitPattern, O: Operation> From<UniformBuffer<P, O>> for UniformBufferTypeErased<O> {
+    fn from(value: UniformBuffer<P, O>) -> Self {
+        let UniformBuffer { buffer, size, .. } = value;
+        UniformBufferTypeErased {
+            type_id: TypeId::of::<P>(),
+            buffer,
+            size,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub struct UniformBufferRef<'a, P: AnyBitPattern, O: Operation> {
+    buffer: &'a mut PersistentBuffer,
+    pub size: usize,
+    _phantom: PhantomData<(P, O)>,
+}
+
+impl<'a, P: AnyBitPattern, O: Operation> TryFrom<&'a mut UniformBufferTypeErased<O>>
+    for UniformBufferRef<'a, P, O>
+{
+    type Error = Box<dyn Error>;
+
+    fn try_from(value: &'a mut UniformBufferTypeErased<O>) -> Result<Self, Self::Error> {
+        if value.type_id == TypeId::of::<P>() {
+            Ok(UniformBufferRef {
+                buffer: &mut value.buffer,
+                size: value.size,
+                _phantom: PhantomData,
+            })
+        } else {
+            Err(format!(
+                "Invalid uniform data type {} for uniform buffer!",
+                type_name::<P>()
+            ))?
+        }
+    }
+}
+
+impl<'a, O: Operation> From<&'a mut UniformBufferTypeErased<O>> for &'a mut PersistentBuffer {
+    fn from(value: &'a mut UniformBufferTypeErased<O>) -> Self {
+        &mut value.buffer
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBufferRef<'_, U, O> {
+    type Output = U;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.add(index).as_ref().unwrap() }
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBufferRef<'_, U, O> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.add(index).as_mut().unwrap() }
     }
 }

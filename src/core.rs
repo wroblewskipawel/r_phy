@@ -18,8 +18,8 @@ use crate::{
     renderer::{
         camera::{Camera, CameraBuilder, CameraNone},
         model::{
-            Drawable, DrawableType, Material, MaterialHandle, MaterialTypeTerminator, MeshHandle,
-            Vertex, VertexNone,
+            Drawable, DrawableType, EmptyMaterial, Material, MaterialHandle, MeshHandle, Vertex,
+            VertexNone,
         },
         shader::{ShaderHandle, ShaderType},
         Renderer, RendererBuilder, RendererNone,
@@ -188,7 +188,7 @@ pub struct DrawableTerminator {}
 
 impl DrawableType for DrawableTerminator {
     type Vertex = VertexNone;
-    type Material = MaterialTypeTerminator;
+    type Material = EmptyMaterial;
 }
 
 impl Drawable for DrawableTerminator {

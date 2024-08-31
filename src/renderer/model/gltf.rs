@@ -1,4 +1,4 @@
-use super::{CommonVertex, Mesh, PbrMaterial};
+use super::{CommonVertex, Mesh, PbrMaps, PbrMaterial};
 use base64::Engine;
 use gltf::{self, buffer, mesh::Mode, Gltf, Semantic};
 use std::{error::Error, path::Path};
@@ -188,32 +188,44 @@ impl DocumentReader {
     ) -> Result<PbrMaterial, Box<dyn Error>> {
         let mut builder = PbrMaterial::builder();
 
-        if let Some(base_color) = material.pbr_metallic_roughness().base_color_texture() {
-            builder = builder.with_albedo(self.get_image(base_color.texture().source(), base)?);
-        };
-
-        if let Some(normal) = material.normal_texture() {
-            builder = builder.with_normal(self.get_image(normal.texture().source(), base)?);
-        };
-
-        if let Some(metalic_roughness) = material
-            .pbr_metallic_roughness()
-            .metallic_roughness_texture()
-        {
-            builder = builder.with_metallic_roughness(
-                self.get_image(metalic_roughness.texture().source(), base)?,
+        let pbr = material.pbr_metallic_roughness();
+        builder = builder
+            .with_base_color(pbr.base_color_factor().into())
+            .with_metallic(pbr.metallic_factor())
+            .with_roughness(pbr.roughness_factor());
+        if let Some(base_color) = pbr.base_color_texture() {
+            builder = builder.with_image(
+                self.get_image(base_color.texture().source(), base)?,
+                PbrMaps::Albedo,
             );
         };
-
+        if let Some(metallic_roughness) = pbr.metallic_roughness_texture() {
+            builder = builder.with_image(
+                self.get_image(metallic_roughness.texture().source(), base)?,
+                PbrMaps::MetallicRoughness,
+            );
+        };
+        if let Some(normal) = material.normal_texture() {
+            builder = builder.with_image(
+                self.get_image(normal.texture().source(), base)?,
+                PbrMaps::Normal,
+            );
+        };
         if let Some(occlusion) = material.occlusion_texture() {
-            builder = builder.with_occlusion(self.get_image(occlusion.texture().source(), base)?);
+            builder = builder.with_image(
+                self.get_image(occlusion.texture().source(), base)?,
+                PbrMaps::Occlusion,
+            );
         };
-
         if let Some(emissive) = material.emissive_texture() {
-            builder = builder.with_emissive(self.get_image(emissive.texture().source(), base)?);
+            builder = builder.with_image(
+                self.get_image(emissive.texture().source(), base)?,
+                PbrMaps::Emissive,
+            );
         };
-
-        builder.build()
+        builder
+            .with_emissive(material.emissive_factor().into())
+            .build()
     }
 }
 

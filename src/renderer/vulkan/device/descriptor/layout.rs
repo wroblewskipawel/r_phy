@@ -26,6 +26,8 @@ fn get_descriptor_set_layout_map(
 }
 
 pub trait DescriptorBinding: 'static {
+    fn has_data() -> bool;
+
     fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding;
 
     fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet;
@@ -42,17 +44,20 @@ pub trait DescriptorLayout: 'static {
 }
 
 pub trait DescriptorBindingList: 'static {
+    const LEN: usize;
+
     type Item: DescriptorBinding;
     type Next: DescriptorBindingList;
-
-    fn exhausted() -> bool;
-    fn len() -> usize;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DescriptorBindingTerminator {}
 
 impl DescriptorBinding for DescriptorBindingTerminator {
+    fn has_data() -> bool {
+        unreachable!()
+    }
+
     fn get_descriptor_set_binding(_binding: u32) -> vk::DescriptorSetLayoutBinding {
         unreachable!()
     }
@@ -67,16 +72,10 @@ impl DescriptorBinding for DescriptorBindingTerminator {
 }
 
 impl DescriptorBindingList for DescriptorBindingTerminator {
+    const LEN: usize = 0;
+
     type Item = Self;
     type Next = Self;
-
-    fn exhausted() -> bool {
-        true
-    }
-
-    fn len() -> usize {
-        0
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,16 +94,10 @@ impl<B: DescriptorBinding, N: DescriptorBindingList> Default for DescriptorBindi
 impl<B: DescriptorBinding, N: DescriptorBindingList> DescriptorBindingList
     for DescriptorBindingNode<B, N>
 {
+    const LEN: usize = N::LEN + 1;
+
     type Item = B;
     type Next = N;
-
-    fn exhausted() -> bool {
-        false
-    }
-
-    fn len() -> usize {
-        Self::Next::len() + 1
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -141,32 +134,40 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
     }
 
     fn next_descriptor_binding<'a, T: DescriptorBindingList>(
-        mut iter: impl Iterator<Item = (u32, &'a mut vk::DescriptorSetLayoutBinding)>,
-    ) {
-        if !T::exhausted() {
-            if let Some((binding_index, entry)) = iter.next() {
-                *entry = T::Item::get_descriptor_set_binding(binding_index);
-                Self::next_descriptor_binding::<T::Next>(iter);
-            }
+        binding: u32,
+        mut descriptor_bindings: Vec<vk::DescriptorSetLayoutBinding>,
+    ) -> Vec<vk::DescriptorSetLayoutBinding> {
+        if T::LEN > 0 {
+            let next_binding = if T::Item::has_data() {
+                descriptor_bindings.push(T::Item::get_descriptor_set_binding(binding));
+                binding + 1
+            } else {
+                binding
+            };
+            Self::next_descriptor_binding::<T::Next>(next_binding, descriptor_bindings)
+        } else {
+            descriptor_bindings
         }
     }
 
     pub fn get_descriptor_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
-        let num_bindings = B::len();
-        let mut bindings = vec![vk::DescriptorSetLayoutBinding::default(); num_bindings];
-        Self::next_descriptor_binding::<B>((0u32..num_bindings as u32).zip(bindings.iter_mut()));
-        bindings
+        Self::next_descriptor_binding::<B>(0, Vec::with_capacity(B::LEN))
     }
 
     fn try_get_descriptor_writes<S: DescriptorBinding, T: DescriptorBindingList>(
         binding: u32,
         mut vec: Vec<vk::WriteDescriptorSet>,
     ) -> Vec<vk::WriteDescriptorSet> {
-        if !T::exhausted() {
-            if TypeId::of::<S>() == TypeId::of::<T::Item>() {
-                vec.push(T::Item::get_descriptor_write(binding));
+        debug_assert!(S::has_data(), "DescriptorBinding has no data!");
+        if T::LEN > 0 {
+            if T::Item::has_data() {
+                if TypeId::of::<S>() == TypeId::of::<T::Item>() {
+                    vec.push(T::Item::get_descriptor_write(binding));
+                }
+                Self::try_get_descriptor_writes::<S, T::Next>(binding + 1, vec)
+            } else {
+                Self::try_get_descriptor_writes::<S, T::Next>(binding, vec)
             }
-            Self::try_get_descriptor_writes::<S, T::Next>(binding + 1, vec)
         } else {
             vec
         }
@@ -180,10 +181,12 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         num_sets: u32,
         pool_sizes: &mut HashMap<vk::DescriptorType, u32>,
     ) {
-        if !T::exhausted() {
-            let pool_size = T::Item::get_descriptor_pool_size(num_sets);
-            let descriptor_count = pool_sizes.entry(pool_size.ty).or_insert(0);
-            *descriptor_count += pool_size.descriptor_count;
+        if T::LEN > 0 {
+            if T::Item::has_data() {
+                let pool_size = T::Item::get_descriptor_pool_size(num_sets);
+                let descriptor_count = pool_sizes.entry(pool_size.ty).or_insert(0);
+                *descriptor_count += pool_size.descriptor_count;
+            }
             Self::next_descriptor_pool_size::<T::Next>(num_sets, pool_sizes);
         }
     }

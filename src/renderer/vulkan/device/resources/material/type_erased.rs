@@ -5,6 +5,8 @@ use ash::vk;
 use crate::renderer::{
     model::MaterialHandle,
     vulkan::device::{
+        buffer::{PersistentBuffer, UniformBufferTypeErased},
+        command::operation::Graphics,
         descriptor::{Descriptor, DescriptorPoolRef, DescriptorPoolTypeErased},
         image::Texture2D,
     },
@@ -15,7 +17,8 @@ use super::{MaterialPack, MaterialPackData, VulkanMaterial, VulkanMaterialHandle
 pub struct MaterialPackTypeErased {
     type_id: TypeId,
     index: usize,
-    textures: Vec<Texture2D>,
+    textures: Option<Vec<Texture2D>>,
+    uniforms: Option<UniformBufferTypeErased<Graphics>>,
     descriptors: DescriptorPoolTypeErased,
 }
 
@@ -25,14 +28,19 @@ impl<M: VulkanMaterial> From<MaterialPack<M>> for MaterialPackTypeErased {
             type_id: TypeId::of::<M>(),
             index: value.index,
             textures: value.textures,
+            uniforms: value.uniforms.map(|uniforms| uniforms.into()),
             descriptors: value.descriptors.into(),
         }
     }
 }
 
 impl MaterialPackData for MaterialPackTypeErased {
-    fn get_textures(&mut self) -> &mut Vec<Texture2D> {
-        &mut self.textures
+    fn get_textures(&mut self) -> Option<&mut Vec<Texture2D>> {
+        self.textures.as_mut()
+    }
+
+    fn get_uniforms(&mut self) -> Option<&mut PersistentBuffer> {
+        self.uniforms.as_mut().map(|uniform| uniform.into())
     }
 
     fn get_descriptor_pool(&mut self) -> vk::DescriptorPool {

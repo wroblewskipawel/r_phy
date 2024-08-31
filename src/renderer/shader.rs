@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     core::{Contains, Here, Marker, There},
-    renderer::model::{Material, MaterialTypeTerminator, Vertex, VertexNone},
+    renderer::model::{EmptyMaterial, Material, Vertex, VertexNone},
 };
 
 pub trait ShaderType: 'static {
@@ -56,7 +56,7 @@ pub struct ShaderTypeTerminator {}
 
 impl ShaderType for ShaderTypeTerminator {
     type Vertex = VertexNone;
-    type Material = MaterialTypeTerminator;
+    type Material = EmptyMaterial;
 
     fn source(&self) -> &Path {
         unreachable!()

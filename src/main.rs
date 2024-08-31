@@ -18,7 +18,10 @@ use r_phy::{
     physics::shape,
     renderer::{
         camera::first_person::FirstPersonCameraBuilder,
-        model::{CommonVertex, Image, Mesh, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
+        model::{
+            CommonVertex, EmptyMaterial, Image, Mesh, Model, PbrMaterial, SimpleVertex,
+            UnlitMaterial,
+        },
         shader::Shader,
         vulkan::VulkanRendererBuilder,
     },
@@ -46,19 +49,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_albedo(Image::File(Path::new("assets/textures/tile_2.png").into()))
             .build()?,
     ];
+    let empty_material = vec![EmptyMaterial::default()];
     let prb_materials = vec![gltf_material];
 
     let renderer_builder = VulkanRendererBuilder::new()
         .with_material_type::<UnlitMaterial>()
         .with_material_type::<PbrMaterial>()
+        .with_material_type::<EmptyMaterial>()
         .with_vertex_type::<CommonVertex>()
         .with_vertex_type::<SimpleVertex>()
+        .with_shader_type(Shader::<CommonVertex, EmptyMaterial>::marker())
         .with_shader_type(Shader::<CommonVertex, UnlitMaterial>::marker())
         .with_shader_type(Shader::<CommonVertex, PbrMaterial>::marker())
         .with_meshes(simple_meshes)
         .with_meshes(meshes)
         .with_materials(unlit_materials)
         .with_materials(prb_materials)
+        .with_materials(empty_material)
+        .with_shaders(vec![Shader::<CommonVertex, EmptyMaterial>::new(
+            "shaders/spv/deferred/gbuffer_write/checker",
+        )])
         .with_shaders(vec![Shader::<CommonVertex, UnlitMaterial>::new(
             "shaders/spv/deferred/gbuffer_write/unlit",
         )])
@@ -82,8 +92,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_camera(camera_builder)
         .build()?;
     let meshes = game_loop.get_mesh_handles::<CommonVertex>().unwrap();
+    let empty_materials = game_loop.get_material_handles::<EmptyMaterial>().unwrap();
     let unlit_materials = game_loop.get_material_handles::<UnlitMaterial>().unwrap();
     let pbr_materials = game_loop.get_material_handles::<PbrMaterial>().unwrap();
+    let empty_complex_shader_handles = game_loop
+        .get_shader_handles::<Shader<CommonVertex, EmptyMaterial>>()
+        .unwrap();
     let pbr_complex_shader_handles = game_loop
         .get_shader_handles::<Shader<CommonVertex, PbrMaterial>>()
         .unwrap();
@@ -133,15 +147,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         transform.rotate(Vector3::z(), 2.0 * elapsed_time)
                     }),
                 ),
+            ],
+        )
+        .with_objects(
+            empty_complex_shader_handles[0],
+            vec![
                 Object::new(
-                    Model::new(meshes[2], unlit_materials[1]),
+                    Model::new(meshes[2], empty_materials[0]),
                     Transform::identity().translate(Vector3::new(3.0, 0.0, 0.0)),
                     Box::new(|elapsed_time, transform| {
                         transform.rotate(Vector3::z(), 3.0 * elapsed_time)
                     }),
                 ),
                 Object::new(
-                    Model::new(meshes[2], unlit_materials[1]),
+                    Model::new(meshes[2], empty_materials[0]),
                     Transform::identity().translate(Vector3::new(-4.0, -4.0, 0.0)),
                     Box::new(|elapsed_time, transform| {
                         transform

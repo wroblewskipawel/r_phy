@@ -15,7 +15,7 @@ glob = "0.3.1"
 gltf = "1.4.0"
 png = "0.17.13"
 serde = "1.0.197"
-strum = { version = "0.26.1", features =  ["derive"]}
+strum = { version = "0.26.1", features = ["derive"] }
 winit = "0.29.10"
 
 [target.'cfg(windows)'.dependencies]

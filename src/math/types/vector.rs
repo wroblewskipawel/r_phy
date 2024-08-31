@@ -120,6 +120,23 @@ impl From<Vector4> for Vector2 {
     }
 }
 
+impl From<[f32; 2]> for Vector2 {
+    #[inline]
+    fn from(value: [f32; 2]) -> Self {
+        Self {
+            x: value[0],
+            y: value[1],
+        }
+    }
+}
+
+impl From<Vector2> for [f32; 2] {
+    #[inline]
+    fn from(value: Vector2) -> Self {
+        [value.x, value.y]
+    }
+}
+
 impl Vector2 {
     #[inline]
     pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
@@ -312,6 +329,24 @@ impl From<Vector4> for Vector3 {
             y: value.y,
             z: value.z,
         }
+    }
+}
+
+impl From<[f32; 3]> for Vector3 {
+    #[inline]
+    fn from(value: [f32; 3]) -> Self {
+        Self {
+            x: value[0],
+            y: value[1],
+            z: value[2],
+        }
+    }
+}
+
+impl From<Vector3> for [f32; 3] {
+    #[inline]
+    fn from(value: Vector3) -> Self {
+        [value.x, value.y, value.z]
     }
 }
 
@@ -545,6 +580,25 @@ impl From<Vector3> for Vector4 {
             z: value.z,
             w: 0.0,
         }
+    }
+}
+
+impl From<[f32; 4]> for Vector4 {
+    #[inline]
+    fn from(value: [f32; 4]) -> Self {
+        Self {
+            x: value[0],
+            y: value[1],
+            z: value[2],
+            w: value[3],
+        }
+    }
+}
+
+impl From<Vector4> for [f32; 4] {
+    #[inline]
+    fn from(value: Vector4) -> Self {
+        [value.x, value.y, value.z, value.w]
     }
 }
 

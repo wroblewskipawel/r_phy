@@ -1,7 +1,7 @@
 use std::{any::type_name, error::Error, marker::PhantomData, mem::size_of, ops::Index};
 
 use ash::vk;
-use bytemuck::Pod;
+use bytemuck::AnyBitPattern;
 
 use crate::renderer::vulkan::device::{
     buffer::UniformBuffer, command::operation::Operation, VulkanDevice,
@@ -81,7 +81,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         }
     }
 
-    pub fn write_buffer<U: Pod + DescriptorBinding, O: Operation>(
+    pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation>(
         mut self,
         buffer: &UniformBuffer<U, O>,
     ) -> Self {
