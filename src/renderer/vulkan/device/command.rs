@@ -18,7 +18,7 @@ use super::{
     image::VulkanImage2D,
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{BufferType, MeshPackData, MeshRangeBindData},
+    resources::{BufferType, MeshPackBinding, MeshRangeBindData},
     skybox::{LayoutSkybox, Skybox},
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
@@ -715,20 +715,20 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_mesh_pack<'b>(self, pack: impl Into<&'b MeshPackData>) -> Self {
+    pub fn bind_mesh_pack(self, pack: impl Into<MeshPackBinding>) -> Self {
         let pack = pack.into();
         let RecordingCommand(command, device) = self;
         unsafe {
             device.cmd_bind_index_buffer(
                 L::buffer(&command.data),
-                pack.buffer.buffer.buffer,
+                pack.buffer,
                 pack.buffer_ranges[BufferType::Index].beg as vk::DeviceSize,
                 vk::IndexType::UINT32,
             );
             device.cmd_bind_vertex_buffers(
                 L::buffer(&command.data),
                 0,
-                &[pack.buffer.buffer.buffer],
+                &[pack.buffer],
                 &[pack.buffer_ranges[BufferType::Vertex].beg as vk::DeviceSize],
             );
         }

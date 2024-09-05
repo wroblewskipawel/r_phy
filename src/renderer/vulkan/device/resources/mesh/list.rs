@@ -50,13 +50,13 @@ impl<V: Vertex, N: MeshPackList> MeshPackList for MeshPackNode<V, N> {
 pub trait MeshPackListBuilder: MeshList {
     type Pack: MeshPackList;
 
-    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
+    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
 impl MeshPackListBuilder for MeshTerminator {
     type Pack = Self;
 
-    fn build(&self, _device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+    fn build(&self, _device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(Self {})
     }
 }
@@ -64,7 +64,7 @@ impl MeshPackListBuilder for MeshTerminator {
 impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for MeshNode<V, N> {
     type Pack = MeshPackNode<V, N::Pack>;
 
-    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(MeshPackNode {
             mesh_pack: device.load_mesh_pack(self.get(), Self::LEN)?.into(),
             next: self.next().build(device)?,
@@ -79,7 +79,7 @@ pub struct MeshPacks<L: MeshPackList> {
 
 impl VulkanDevice {
     pub fn load_meshes<B: MeshPackListBuilder>(
-        &self,
+        &mut self,
         meshes: &B,
     ) -> Result<MeshPacks<B::Pack>, Box<dyn Error>> {
         Ok(MeshPacks {

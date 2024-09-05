@@ -17,7 +17,7 @@ use crate::{
             },
             render_pass::GBufferWritePass,
             resources::{
-                MaterialPackList, MeshPackData, MeshPackList, MeshRangeBindData,
+                MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData,
                 VulkanMaterialHandle, VulkanMeshHandle,
             },
             swapchain::SwapchainFrame,
@@ -60,7 +60,7 @@ impl BufferIndex {
 }
 
 pub struct BufferState {
-    mesh_pack_data: MeshPackData,
+    mesh_pack_binding: MeshPackBinding,
     model_states: HashMap<ModelIndex, ModelState>,
 }
 
@@ -167,7 +167,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
                 .buffer_states
                 .entry(buffer_index)
                 .or_insert_with(|| BufferState {
-                    mesh_pack_data: (*mesh_pack).as_raw().data,
+                    mesh_pack_binding: (*mesh_pack).into(),
                     model_states: HashMap::new(),
                 });
             let model_index = ModelIndex::get(drawable);
@@ -213,7 +213,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
                                 command,
                                 |command, (_, buffer_state)| {
                                     let command =
-                                        command.bind_mesh_pack(&buffer_state.mesh_pack_data);
+                                        command.bind_mesh_pack(buffer_state.mesh_pack_binding);
                                     buffer_state.model_states.iter().fold(
                                         command,
                                         |command, (_, model_state)| {
@@ -261,7 +261,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
                                 command,
                                 |command, (_, buffer_state)| {
                                     let command =
-                                        command.bind_mesh_pack(&buffer_state.mesh_pack_data);
+                                        command.bind_mesh_pack(buffer_state.mesh_pack_binding);
                                     buffer_state.model_states.iter().fold(
                                         command,
                                         |command, (_, model_state)| {

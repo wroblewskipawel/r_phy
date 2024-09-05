@@ -43,17 +43,20 @@ impl<M: VulkanMaterial> MaterialPackData for MaterialPack<M> {
 
 impl VulkanDevice {
     fn load_material_pack_textures<M: VulkanMaterial>(
-        &self,
+        &mut self,
         materials: &[M],
     ) -> Result<Option<Vec<Texture2D>>, Box<dyn Error>> {
         if M::NUM_IMAGES > 0 {
             let textures = materials
                 .iter()
                 .flat_map(|material| {
+                    // TODO: It would be better to create vector of iterators and flatten them
+                    // Currently unable to do this because of the lifetime of the iterator
                     material
                         .images()
                         .unwrap()
                         .map(|image| self.load_texture(image))
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Some(textures))
@@ -63,7 +66,7 @@ impl VulkanDevice {
     }
 
     fn load_material_pack_uniforms<M: VulkanMaterial>(
-        &self,
+        &mut self,
         materials: &[M],
     ) -> Result<
         Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
@@ -88,7 +91,7 @@ impl VulkanDevice {
     }
 
     pub fn load_material_pack<M: VulkanMaterial>(
-        &self,
+        &mut self,
         materials: &[M],
         index: usize,
     ) -> Result<MaterialPack<M>, Box<dyn Error>> {

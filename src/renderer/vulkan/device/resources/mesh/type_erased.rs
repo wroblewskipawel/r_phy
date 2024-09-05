@@ -5,7 +5,7 @@ use crate::renderer::{
     vulkan::device::buffer::ByteRange,
 };
 
-use super::{MeshPack, MeshPackData, MeshRange, VulkanMeshHandle};
+use super::{MeshPack, MeshPackBinding, MeshPackData, MeshRange, VulkanMeshHandle};
 
 #[derive(Debug, Clone, Copy)]
 pub struct MeshRangeTypeErased {
@@ -77,6 +77,15 @@ impl<'a, V: Vertex> TryFrom<&'a MeshPackTypeErased> for MeshPackRef<'a, V> {
 impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for &'a MeshPackData {
     fn from(value: MeshPackRef<'a, V>) -> Self {
         &value.pack.data
+    }
+}
+
+impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
+    fn from(value: MeshPackRef<'a, V>) -> Self {
+        MeshPackBinding {
+            buffer: value.pack.data.buffer.buffer.buffer,
+            buffer_ranges: value.pack.data.buffer_ranges,
+        }
     }
 }
 

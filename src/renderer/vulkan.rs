@@ -25,9 +25,40 @@ use super::{
     shader::{ShaderHandle, ShaderType, ShaderTypeList, ShaderTypeNode, ShaderTypeTerminator},
     Renderer, RendererBuilder,
 };
+use ash::vk;
 use device::frame::Frame;
 use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
+
+#[derive(Debug)]
+pub struct VulkanRendererConfig {
+    pub page_size: vk::DeviceSize,
+}
+
+impl VulkanRendererConfig {
+    pub fn builder() -> VulkanRendererConfigBuilder {
+        VulkanRendererConfigBuilder::default()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct VulkanRendererConfigBuilder {
+    page_size: Option<vk::DeviceSize>,
+}
+
+impl VulkanRendererConfigBuilder {
+    pub fn build(self) -> Result<VulkanRendererConfig, Box<dyn Error>> {
+        let config = VulkanRendererConfig {
+            page_size: self.page_size.ok_or("Page size not provided")?,
+        };
+        Ok(config)
+    }
+
+    pub fn with_page_size(mut self, size: vk::DeviceSize) -> Self {
+        self.page_size = Some(size);
+        self
+    }
+}
 
 pub struct VulkanRendererBuilder<
     M: MaterialPackListBuilder,
@@ -37,6 +68,7 @@ pub struct VulkanRendererBuilder<
     materials: M,
     meshes: V,
     shaders: S,
+    config: Option<VulkanRendererConfig>,
 }
 
 impl Default
@@ -53,6 +85,7 @@ impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator, ShaderTypeTer
             materials: MaterialTypeTerminator {},
             meshes: MeshTerminator {},
             shaders: ShaderTypeTerminator {},
+            config: None,
         }
     }
 }
@@ -67,6 +100,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             materials,
             meshes,
             shaders,
+            config: configuration,
         } = self;
         VulkanRendererBuilder {
             materials: MaterialTypeNode {
@@ -75,6 +109,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             },
             meshes,
             shaders,
+            config: configuration,
         }
     }
 
@@ -83,6 +118,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             materials,
             meshes,
             shaders,
+            config: configuration,
         } = self;
         VulkanRendererBuilder {
             meshes: MeshNode {
@@ -91,6 +127,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             },
             materials,
             shaders,
+            config: configuration,
         }
     }
 
@@ -106,6 +143,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             materials,
             meshes,
             shaders,
+            config: configuration,
         } = self;
         VulkanRendererBuilder {
             shaders: ShaderTypeNode {
@@ -114,7 +152,13 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             },
             materials,
             meshes,
+            config: configuration,
         }
+    }
+
+    pub fn with_config(mut self, config: VulkanRendererConfig) -> Self {
+        self.config = Some(config);
+        self
     }
 
     pub fn with_meshes<N: Vertex, T: Marker>(mut self, meshes: Vec<Mesh<N>>) -> Self
@@ -148,7 +192,13 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList> Rend
     type Renderer = VulkanRenderer<M::Pack, V::Pack, S>;
 
     fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
-        let renderer = VulkanRenderer::new(window, &self.materials, &self.meshes, &self.shaders)?;
+        let renderer = VulkanRenderer::new(
+            window,
+            &self.materials,
+            &self.meshes,
+            &self.shaders,
+            &self.config.ok_or("Configuration not provided")?,
+        )?;
         Ok(renderer)
     }
 }
@@ -172,8 +222,9 @@ impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> VulkanRenderer<M, 
         materials: &impl MaterialPackListBuilder<Pack = M>,
         meshes: &impl MeshPackListBuilder<Pack = V>,
         shaders: &S,
+        config: &VulkanRendererConfig,
     ) -> Result<Self, Box<dyn Error>> {
-        let context = Context::build(window)?;
+        let mut context = Context::build(window, config)?;
         let renderer = context.create_deferred_renderer(shaders)?;
         let materials = context.load_materials(materials)?;
         let meshes = context.load_meshes(meshes)?;

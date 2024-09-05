@@ -2,6 +2,7 @@ mod list;
 mod type_erased;
 mod type_safe;
 
+use ash::vk;
 pub use list::*;
 pub use type_erased::*;
 pub use type_safe::*;
@@ -57,7 +58,7 @@ impl BufferRanges {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct MeshPackData {
     pub buffer: DeviceLocalBuffer,
     pub buffer_ranges: BufferRanges,
@@ -72,5 +73,21 @@ impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer {
 impl VulkanDevice {
     pub fn destroy_mesh_pack<'a>(&self, pack: impl Into<&'a mut MeshPackData>) {
         self.destroy_buffer((&mut pack.into().buffer).into());
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MeshPackBinding {
+    pub buffer: vk::Buffer,
+    pub buffer_ranges: BufferRanges,
+}
+
+impl<'a> From<&'a MeshPackData> for MeshPackBinding {
+    fn from(value: &'a MeshPackData) -> Self {
+        Self {
+            // TODO: Improve buffer aggregation scheme and naming
+            buffer: value.buffer.buffer.buffer,
+            buffer_ranges: value.buffer_ranges,
+        }
     }
 }

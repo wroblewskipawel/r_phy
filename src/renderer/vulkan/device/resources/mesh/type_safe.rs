@@ -11,7 +11,7 @@ use crate::renderer::{
     },
 };
 
-use super::{BufferRanges, BufferType, MeshPackData};
+use super::{BufferRanges, BufferType, MeshPackBinding, MeshPackData};
 
 #[derive(Debug)]
 pub struct MeshPack<V: Vertex> {
@@ -29,6 +29,12 @@ impl<'a, V: Vertex> From<&'a MeshPack<V>> for &'a MeshPackData {
 impl<'a, V: Vertex> From<&'a mut MeshPack<V>> for &'a mut MeshPackData {
     fn from(value: &'a mut MeshPack<V>) -> Self {
         &mut value.data
+    }
+}
+
+impl<'a, V: Vertex> From<&'a MeshPack<V>> for MeshPackBinding {
+    fn from(value: &'a MeshPack<V>) -> Self {
+        (&value.data).into()
     }
 }
 
@@ -66,7 +72,7 @@ pub struct MeshRange<V: Vertex> {
 impl VulkanDevice {
     // TODO: Should &self be &mut? Consider renaming the function to create_mesh_pack
     pub fn load_mesh_pack<V: Vertex>(
-        &self,
+        &mut self,
         meshes: &[Mesh<V>],
         index: usize,
     ) -> Result<MeshPack<V>, Box<dyn Error>> {

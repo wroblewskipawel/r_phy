@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::ffi::{c_char, CStr};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use ash::{vk, Entry, Instance};
 use winit::window::Window;
@@ -8,6 +8,7 @@ use winit::window::Window;
 use super::debug::VulkanDebugUtils as DebugUtils;
 use super::device::VulkanDevice as Device;
 use super::surface::VulkanSurface as Surface;
+use super::VulkanRendererConfig;
 
 fn check_required_extension_support(
     entry: &Entry,
@@ -53,14 +54,14 @@ fn check_required_layer_support(
 
 pub(super) struct Context {
     device: Device,
-    surface: Surface,
+    pub surface: Surface,
     debug_utils: Option<DebugUtils>,
-    instance: Instance,
+    pub instance: Instance,
     _entry: Entry,
 }
 
 impl Context {
-    pub fn build(window: &Window) -> Result<Self, Box<dyn Error>> {
+    pub fn build(window: &Window, config: &VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
         let entry = unsafe { Entry::load()? };
         let enabled_layer_names =
             check_required_layer_support(&entry, DebugUtils::required_layers().iter().copied())?;
@@ -84,7 +85,7 @@ impl Context {
         let instance = unsafe { entry.create_instance(&create_info, None)? };
         let debug_utils = DebugUtils::build(&entry, &instance)?;
         let surface = Surface::create(&entry, &instance, window)?;
-        let device = Device::create(&instance, &surface)?;
+        let device = Device::create(&instance, &surface, config)?;
 
         Ok(Self {
             device,
@@ -134,5 +135,11 @@ impl Deref for Context {
 
     fn deref(&self) -> &Self::Target {
         &self.device
+    }
+}
+
+impl DerefMut for Context {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.device
     }
 }

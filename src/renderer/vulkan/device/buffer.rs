@@ -1,4 +1,4 @@
-use ash::{vk, Device};
+use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
 use std::{
     any::{type_name, TypeId},
@@ -18,6 +18,7 @@ use super::{
         SubmitSemaphoreState,
     },
     image::VulkanImage2D,
+    memory::{AllocReq, MemoryBlock},
     VulkanDevice,
 };
 
@@ -33,8 +34,16 @@ impl ByteRange {
         Self { beg: 0, end: 0 }
     }
 
+    pub fn new(size: usize) -> Self {
+        Self { beg: 0, end: size }
+    }
+
     fn align<T>(offset: usize) -> usize {
         let alignment = std::mem::align_of::<T>();
+        ((offset + alignment - 1) / alignment) * alignment
+    }
+
+    fn align_raw(offset: usize, alignment: usize) -> usize {
         ((offset + alignment - 1) / alignment) * alignment
     }
 
@@ -43,6 +52,32 @@ impl ByteRange {
         let end = beg + len * size_of::<T>();
         self.end = end;
         ByteRange { beg, end }
+    }
+
+    pub fn take<T: AnyBitPattern>(&mut self, count: usize) -> Option<ByteRange> {
+        let beg = ByteRange::align::<T>(self.beg);
+        let end = beg + count * size_of::<T>();
+        if end < self.end {
+            self.beg = end;
+            Some(ByteRange { beg, end })
+        } else {
+            None
+        }
+    }
+
+    pub fn alloc_raw(&mut self, size: usize, alignment: usize) -> Option<ByteRange> {
+        let beg = ByteRange::align_raw(self.beg, alignment);
+        let end = beg + size;
+        if end < self.end {
+            self.beg = end;
+            Some(ByteRange { beg, end })
+        } else {
+            None
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.end - self.beg
     }
 }
 
@@ -100,18 +135,16 @@ impl<T: AnyBitPattern> Range<T> {
     }
 }
 
-// TODO: This soud not be Clone and Copy - buffer is not copied, only the handle
-// This is temporary workaround to allow for simple DrawGraph implementation purpose
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Buffer {
     pub size: usize,
     pub buffer: vk::Buffer,
-    device_memory: vk::DeviceMemory,
+    memory: MemoryBlock,
 }
 
 impl VulkanDevice {
     pub fn create_buffer(
-        &self,
+        &mut self,
         size: usize,
         usage: vk::BufferUsageFlags,
         sharing_mode: vk::SharingMode,
@@ -126,32 +159,27 @@ impl VulkanDevice {
             p_queue_family_indices: queue_families.as_ptr(),
             ..Default::default()
         };
-        let (buffer, device_memory) = unsafe {
+        let (buffer, memory) = unsafe {
             let buffer = self.device.create_buffer(&create_info, None)?;
-            let requirements = self.device.get_buffer_memory_requirements(buffer);
-            let memory_type_index = self
-                .get_memory_type_index(requirements.memory_type_bits, memory_property_flags)
-                .ok_or("Failed to pick suitable memory type index for buffer!")?;
-            let alloc_info = vk::MemoryAllocateInfo {
-                allocation_size: requirements.size,
-                memory_type_index,
-                ..Default::default()
-            };
-            let device_memory = self.device.allocate_memory(&alloc_info, None)?;
-            self.device.bind_buffer_memory(buffer, device_memory, 0)?;
-            (buffer, device_memory)
+            let alloc_req = AllocReq::new(
+                memory_property_flags,
+                self.device.get_buffer_memory_requirements(buffer),
+            );
+            let memory = self.allocate_memory(alloc_req)?;
+            memory.bind_buffer_memory(&self.device, buffer)?;
+            (buffer, memory)
         };
         Ok(Buffer {
             size,
             buffer,
-            device_memory,
+            memory,
         })
     }
 
     pub fn destroy_buffer(&self, buffer: &mut Buffer) {
         unsafe {
             self.device.destroy_buffer(buffer.buffer, None);
-            self.device.free_memory(buffer.device_memory, None);
+            // self.device.free_memory(buffer.device_memory, None); // TODO: Currently all allocation is static and freed on device drop
         }
     }
 }
@@ -172,56 +200,9 @@ impl<'a> From<&'a mut HostVisibleBuffer> for &'a mut Buffer {
     }
 }
 
-impl HostVisibleBuffer {
-    pub fn map(
-        &mut self,
-        device: &Device,
-        range: ByteRange,
-    ) -> Result<HostMappedMemory, Box<dyn Error>> {
-        let ptr = unsafe {
-            device.map_memory(
-                self.buffer.device_memory,
-                range.beg as vk::DeviceSize,
-                (range.end - range.beg) as vk::DeviceSize,
-                vk::MemoryMapFlags::empty(),
-            )?
-        };
-        Ok(HostMappedMemory {
-            device_memory: self.buffer.device_memory,
-            ptr: Some(ptr),
-        })
-    }
-}
-
-pub struct HostMappedMemory {
-    device_memory: vk::DeviceMemory,
-    ptr: Option<*mut c_void>,
-}
-
-impl HostMappedMemory {
-    fn unmap(&mut self, device: &Device) {
-        if self.ptr.take().is_some() {
-            unsafe { device.unmap_memory(self.device_memory) };
-        }
-    }
-
-    pub fn unwrap(&self) -> *mut c_void {
-        self.ptr
-            .expect("'unwrap' called on Host Visible buffer which isn't currently mapped!")
-    }
-}
-
-impl Drop for HostMappedMemory {
-    fn drop(&mut self) {
-        if self.ptr.take().is_some() {
-            // panic!("HostMappedMemory wasn't unmapped before drop!");
-        }
-    }
-}
-
 impl VulkanDevice {
     pub fn create_host_visible_buffer(
-        &self,
+        &mut self,
         size: usize,
         usage: vk::BufferUsageFlags,
         sharing_mode: vk::SharingMode,
@@ -238,7 +219,7 @@ impl VulkanDevice {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DeviceLocalBuffer {
     pub buffer: Buffer,
 }
@@ -257,7 +238,7 @@ impl<'a> From<&'a mut DeviceLocalBuffer> for &'a mut Buffer {
 
 impl VulkanDevice {
     pub fn create_device_local_buffer(
-        &self,
+        &mut self,
         size: usize,
         usage: vk::BufferUsageFlags,
         sharing_mode: vk::SharingMode,
@@ -453,7 +434,7 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 
 impl VulkanDevice {
     pub fn create_stagging_buffer(
-        &self,
+        &mut self,
         builder: StagingBufferBuilder,
     ) -> Result<StagingBuffer, Box<dyn Error>> {
         let StagingBufferBuilder { range } = builder;
@@ -473,7 +454,7 @@ impl VulkanDevice {
 
 pub struct PersistentBuffer {
     buffer: HostVisibleBuffer,
-    ptr: HostMappedMemory,
+    ptr: Option<*mut c_void>,
 }
 
 impl<'a> From<&'a PersistentBuffer> for &'a Buffer {
@@ -490,7 +471,7 @@ impl<'a> From<&'a mut PersistentBuffer> for &'a mut Buffer {
 
 impl VulkanDevice {
     pub fn create_persistent_buffer(
-        &self,
+        &mut self,
         size: usize,
         usage: vk::BufferUsageFlags,
         sharing_mode: vk::SharingMode,
@@ -498,12 +479,18 @@ impl VulkanDevice {
     ) -> Result<PersistentBuffer, Box<dyn Error>> {
         let mut buffer =
             self.create_host_visible_buffer(size, usage, sharing_mode, queue_families)?;
-        let ptr = buffer.map(self, ByteRange { beg: 0, end: size })?;
-        Ok(PersistentBuffer { buffer, ptr })
+        let ptr = buffer
+            .buffer
+            .memory
+            .map_memory(self, ByteRange { beg: 0, end: size })?;
+        Ok(PersistentBuffer {
+            buffer,
+            ptr: Some(ptr),
+        })
     }
 
     pub fn destroy_persistent_buffer(&self, buffer: &mut PersistentBuffer) {
-        buffer.ptr.unmap(self);
+        buffer.buffer.buffer.memory.unmap_memory(self);
         self.destroy_buffer(buffer.into());
     }
 }
@@ -555,7 +542,7 @@ impl<U: AnyBitPattern, O: Operation> UniformBuffer<U, O> {
 
 impl VulkanDevice {
     pub(super) fn create_uniform_buffer<U: AnyBitPattern, O: Operation>(
-        &self,
+        &mut self,
         size: usize,
     ) -> Result<UniformBuffer<U, O>, Box<dyn Error>> {
         let buffer = self.create_persistent_buffer(

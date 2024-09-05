@@ -1,5 +1,6 @@
 use crate::renderer::model::Image;
 
+use super::memory::{AllocReq, MemoryBlock};
 use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
 use png::{self, BitDepth, ColorType, Transformations};
@@ -179,11 +180,11 @@ pub struct VulkanImage2D {
     pub extent: vk::Extent2D,
     pub image: vk::Image,
     pub image_view: vk::ImageView,
-    device_memory: vk::DeviceMemory,
+    _memory: MemoryBlock,
 }
 
 impl VulkanDevice {
-    fn create_image(&self, info: VulkanImageInfo) -> Result<VulkanImage2D, Box<dyn Error>> {
+    fn create_image(&mut self, info: VulkanImageInfo) -> Result<VulkanImage2D, Box<dyn Error>> {
         let VulkanImageInfo {
             extent,
             format,
@@ -212,20 +213,13 @@ impl VulkanDevice {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(usage);
-        let (image_view, image, device_memory) = unsafe {
+        let (image_view, image, memory) = unsafe {
             let image = self.device.create_image(&image_info, None)?;
-            let memory_requirements = self.device.get_image_memory_requirements(image);
-            let allocate_info = vk::MemoryAllocateInfo::builder()
-                .allocation_size(memory_requirements.size)
-                .memory_type_index(
-                    self.get_memory_type_index(
-                        memory_requirements.memory_type_bits,
-                        memory_properties,
-                    )
-                    .ok_or("Failed to find suitable memory type for image!")?,
-                );
-            let device_memory = self.device.allocate_memory(&allocate_info, None)?;
-            self.device.bind_image_memory(image, device_memory, 0)?;
+            let memory = self.allocate_memory(AllocReq::new(
+                memory_properties,
+                self.device.get_image_memory_requirements(image),
+            ))?;
+            memory.bind_image_memory(&self.device, image)?;
             let view_info = vk::ImageViewCreateInfo::builder()
                 .components(vk::ComponentMapping::default())
                 .format(format)
@@ -239,7 +233,7 @@ impl VulkanDevice {
                     layer_count: array_layers,
                 });
             let image_view = self.device.create_image_view(&view_info, None)?;
-            (image_view, image, device_memory)
+            (image_view, image, memory)
         };
         Ok(VulkanImage2D {
             array_layers,
@@ -248,11 +242,11 @@ impl VulkanDevice {
             extent,
             image,
             image_view,
-            device_memory,
+            _memory: memory,
         })
     }
 
-    pub fn create_color_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
+    pub fn create_color_attachment_image(&mut self) -> Result<VulkanImage2D, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
         self.create_image(VulkanImageInfo {
             extent,
@@ -270,7 +264,9 @@ impl VulkanDevice {
         })
     }
 
-    pub fn create_depth_stencil_attachment_image(&self) -> Result<VulkanImage2D, Box<dyn Error>> {
+    pub fn create_depth_stencil_attachment_image(
+        &mut self,
+    ) -> Result<VulkanImage2D, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
         self.create_image(VulkanImageInfo {
             extent,
@@ -295,7 +291,6 @@ impl VulkanDevice {
         unsafe {
             self.device.destroy_image_view(image.image_view, None);
             self.device.destroy_image(image.image, None);
-            self.device.free_memory(image.device_memory, None);
         }
     }
 }
@@ -316,7 +311,7 @@ impl From<&Texture2D> for vk::DescriptorImageInfo {
 }
 
 impl VulkanDevice {
-    pub fn load_texture(&self, image: &Image) -> Result<Texture2D, Box<dyn Error>> {
+    pub fn load_texture(&mut self, image: &Image) -> Result<Texture2D, Box<dyn Error>> {
         match image {
             Image::File(path) => self.load_texture_impl(PngImageReader::from_file(path)?),
             Image::Buffer(data) => self.load_texture_impl(PngImageReader::from_buffer(data)?),
@@ -324,23 +319,24 @@ impl VulkanDevice {
     }
 
     fn load_texture_impl<R: Read>(
-        &self,
+        &mut self,
         image_reader: PngImageReader<R>,
     ) -> Result<Texture2D, Box<dyn Error>> {
         let mut image = self.create_image(image_reader.info()?)?;
 
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(image_reader.required_buffer_size());
-        let mut staging_buffer = self.create_stagging_buffer(builder)?;
-        let mut image_range = staging_buffer.write_range::<u8>(image_range);
-        image_reader.read(image_range.remaining_as_slice_mut())?;
-        staging_buffer.transfer_image_data(
-            &mut image,
-            0,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )?;
-        image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-
+        {
+            let mut staging_buffer = self.create_stagging_buffer(builder)?;
+            let mut image_range = staging_buffer.write_range::<u8>(image_range);
+            image_reader.read(image_range.remaining_as_slice_mut())?;
+            staging_buffer.transfer_image_data(
+                &mut image,
+                0,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )?;
+            image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        }
         let create_info = vk::SamplerCreateInfo::builder()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)
@@ -354,24 +350,25 @@ impl VulkanDevice {
         Ok(Texture2D { image, sampler })
     }
 
-    pub fn load_cubemap(&self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
+    pub fn load_cubemap(&mut self, path: &Path) -> Result<Texture2D, Box<dyn Error>> {
         let cube_reader = ImageCubeReader::prepare(path)?;
         let mut image = self.create_image(cube_reader.info()?)?;
 
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(cube_reader.required_buffer_size());
-        let mut staging_buffer = self.create_stagging_buffer(builder)?;
-        cube_reader.iter().try_for_each(|(face, reader)| {
-            let mut image_range = staging_buffer.write_range::<u8>(image_range);
-            reader.read(image_range.remaining_as_slice_mut())?;
-            staging_buffer.transfer_image_data(
-                &mut image,
-                face as u32,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            )
-        })?;
-        image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-
+        {
+            let mut staging_buffer = self.create_stagging_buffer(builder)?;
+            cube_reader.iter().try_for_each(|(face, reader)| {
+                let mut image_range = staging_buffer.write_range::<u8>(image_range);
+                reader.read(image_range.remaining_as_slice_mut())?;
+                staging_buffer.transfer_image_data(
+                    &mut image,
+                    face as u32,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                )
+            })?;
+            image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        }
         let create_info = vk::SamplerCreateInfo::builder()
             .mag_filter(vk::Filter::LINEAR)
             .min_filter(vk::Filter::LINEAR)

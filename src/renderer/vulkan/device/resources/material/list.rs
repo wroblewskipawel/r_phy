@@ -52,14 +52,14 @@ impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for MaterialPackNo
 
 pub trait MaterialPackListBuilder: MaterialTypeList + 'static {
     type Pack: MaterialPackList;
-    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
+    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
 impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder
     for MaterialTypeNode<M, N>
 {
     type Pack = MaterialPackNode<Self::Item, N::Pack>;
-    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(MaterialPackNode {
             pack: device.load_material_pack(self.get(), Self::LEN)?.into(),
             next: self.next().build(device)?,
@@ -71,7 +71,7 @@ impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder
 impl MaterialPackListBuilder for MaterialTypeTerminator {
     type Pack = Self;
 
-    fn build(&self, _device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+    fn build(&self, _device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(MaterialTypeTerminator {})
     }
 }
@@ -82,7 +82,7 @@ pub struct MaterialPacks<N: MaterialPackList> {
 
 impl VulkanDevice {
     pub fn load_materials<B: MaterialPackListBuilder>(
-        &self,
+        &mut self,
         material_types: &B,
     ) -> Result<MaterialPacks<B::Pack>, Box<dyn Error>> {
         Ok(MaterialPacks {

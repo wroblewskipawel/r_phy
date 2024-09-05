@@ -214,13 +214,14 @@ fn adapt_shader_source_map<S: ShaderTypeList>(
 
 impl Context {
     pub fn create_deferred_renderer<B: ShaderTypeList>(
-        &self,
+        &mut self,
         shaders: &B,
     ) -> Result<DeferredRenderer<B>, Box<dyn Error>> {
         let g_buffer = self.create_g_buffer()?;
+        // TODO: Consider revamping the module hierarchy
         let swapchain = self.create_swapchain::<AttachmentsGBuffer>(
-            self.into(),
-            self.into(),
+            &self.instance,
+            &self.surface,
             |swapchain_image, extent| {
                 self.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
                     g_buffer.get_framebuffer_builder(swapchain_image),
@@ -306,7 +307,7 @@ impl Context {
         self.destroy_pipeline(&mut pipelines.shading_pass);
     }
 
-    pub fn create_g_buffer(&self) -> Result<GBuffer, Box<dyn Error>> {
+    pub fn create_g_buffer(&mut self) -> Result<GBuffer, Box<dyn Error>> {
         let combined = self.create_color_attachment_image()?;
         let albedo = self.create_color_attachment_image()?;
         let normal = self.create_color_attachment_image()?;

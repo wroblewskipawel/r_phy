@@ -3,6 +3,7 @@
 // NodeBuilder<Node> -> Builds TypeLIst Node
 // End -> Builds TypeList Terminator
 
+use ash::vk;
 use std::{error::Error, path::Path, result::Result};
 use winit::{
     dpi::PhysicalSize,
@@ -23,9 +24,11 @@ use r_phy::{
             UnlitMaterial,
         },
         shader::Shader,
-        vulkan::VulkanRendererBuilder,
+        vulkan::{VulkanRendererBuilder, VulkanRendererConfig},
     },
 };
+
+const RENDERER_MEM_ALLOC_PAGE_SIZE: vk::DeviceSize = 128 * 1024 * 1024;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let (gltf_mesh, gltf_material) =
@@ -74,7 +77,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         )])
         .with_shaders(vec![Shader::<CommonVertex, PbrMaterial>::new(
             "shaders/spv/deferred/gbuffer_write/pbr",
-        )]);
+        )])
+        .with_config(
+            VulkanRendererConfig::builder()
+                .with_page_size(RENDERER_MEM_ALLOC_PAGE_SIZE)
+                .build()?,
+        );
     let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {

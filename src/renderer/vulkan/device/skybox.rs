@@ -31,7 +31,7 @@ pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
 
 impl VulkanDevice {
     pub fn create_skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>>(
-        &self,
+        &mut self,
         path: &Path,
         modules: impl ModuleLoader,
     ) -> Result<Skybox<L>, Box<dyn Error>> {
