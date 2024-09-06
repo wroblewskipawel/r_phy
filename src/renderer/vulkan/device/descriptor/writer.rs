@@ -1,4 +1,4 @@
-use std::{any::type_name, error::Error, marker::PhantomData, mem::size_of, ops::Index};
+use std::{any::type_name, error::Error, marker::PhantomData, mem::size_of};
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
@@ -7,47 +7,9 @@ use crate::renderer::vulkan::device::{
     buffer::UniformBuffer, command::operation::Operation, VulkanDevice,
 };
 
-use super::{DescriptorBinding, DescriptorLayout};
+use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};
 
 #[derive(Debug)]
-pub struct Descriptor<T: DescriptorLayout> {
-    pub set: vk::DescriptorSet,
-    pub(super) _phantom: PhantomData<T>,
-}
-
-impl<T: DescriptorLayout> Clone for Descriptor<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: DescriptorLayout> Copy for Descriptor<T> {}
-
-pub struct DescriptorPool<T: DescriptorLayout> {
-    pub(super) pool: vk::DescriptorPool,
-    pub(super) sets: Vec<Descriptor<T>>,
-}
-
-impl<T: DescriptorLayout> Index<usize> for DescriptorPool<T> {
-    type Output = Descriptor<T>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.sets[index]
-    }
-}
-
-impl<T: DescriptorLayout> From<&mut DescriptorPool<T>> for vk::DescriptorPool {
-    fn from(pool: &mut DescriptorPool<T>) -> Self {
-        pool.pool
-    }
-}
-
-impl<T: DescriptorLayout> DescriptorPool<T> {
-    pub fn len(&self) -> usize {
-        self.sets.len()
-    }
-}
-
 enum SetWrite {
     Buffer {
         set_index: usize,
@@ -61,6 +23,7 @@ enum SetWrite {
     },
 }
 
+#[derive(Debug)]
 pub struct DescriptorSetWriter<T: DescriptorLayout> {
     num_sets: usize,
     writes: Vec<SetWrite>,
@@ -241,7 +204,14 @@ impl VulkanDevice {
                     .set_layouts(&vec![layout.layout; writer.num_sets]),
             )?
         };
-        let sets = self.write_descriptors(writer, sets);
-        Ok(DescriptorPool { pool, sets })
+        let sets = self
+            .write_descriptors(writer, sets)
+            .into_iter()
+            .map(Into::<vk::DescriptorSet>::into)
+            .collect();
+        Ok(DescriptorPool {
+            data: DescriptorPoolData { pool, sets },
+            _phantom: PhantomData,
+        })
     }
 }

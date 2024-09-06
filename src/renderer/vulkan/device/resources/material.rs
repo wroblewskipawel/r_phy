@@ -1,30 +1,24 @@
 mod list;
-mod type_erased;
-mod type_safe;
+mod pack;
 
 use std::marker::PhantomData;
 
 pub use list::*;
-pub use type_erased::*;
-pub use type_safe::*;
+pub use pack::*;
 
 use ash::vk;
 
 use crate::renderer::model::Material;
 
-use crate::renderer::vulkan::device::buffer::PersistentBuffer;
 use crate::renderer::vulkan::device::descriptor::{FragmentStage, PodUniform};
-use crate::renderer::vulkan::device::image::Texture2D;
-use crate::renderer::vulkan::device::{
-    descriptor::{
-        DescriptorBinding, DescriptorBindingNode, DescriptorBindingTerminator, DescriptorLayout,
-        DescriptorLayoutBuilder,
-    },
-    VulkanDevice,
+
+use crate::renderer::vulkan::device::descriptor::{
+    DescriptorBinding, DescriptorBindingNode, DescriptorBindingTerminator, DescriptorLayout,
+    DescriptorLayoutBuilder,
 };
 
 pub struct TextureSamplers<M: Material> {
-    _phantom_data: PhantomData<M>,
+    _phantom: PhantomData<M>,
 }
 
 impl<T: Material> DescriptorBinding for TextureSamplers<T> {
@@ -71,24 +65,4 @@ impl<T: Material> VulkanMaterial for T {
             DescriptorBindingNode<TextureSamplers<T>, DescriptorBindingTerminator>,
         >,
     >;
-}
-
-pub trait MaterialPackData {
-    fn get_textures(&mut self) -> Option<&mut Vec<Texture2D>>;
-    fn get_uniforms(&mut self) -> Option<&mut PersistentBuffer>;
-    fn get_descriptor_pool(&mut self) -> vk::DescriptorPool;
-}
-
-impl VulkanDevice {
-    pub fn destroy_material_pack(&self, pack: &mut impl MaterialPackData) {
-        if let Some(textures) = pack.get_textures() {
-            textures
-                .iter_mut()
-                .for_each(|texture| self.destroy_texture(texture));
-        }
-        if let Some(uniforms) = pack.get_uniforms() {
-            self.destroy_persistent_buffer(uniforms);
-        }
-        self.destroy_descriptor_pool(pack.get_descriptor_pool());
-    }
 }

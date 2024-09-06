@@ -120,7 +120,7 @@ impl<T: ShaderTypeList> Frame for DeferredRenderer<T> {
         let (index, primary_command) = self.frames.primary_commands.next();
         let primary_command = device.begin_primary_command(primary_command)?;
         let swapchain_frame = device.get_frame(&self.swapchain, self.frames.image_sync[index])?;
-        let camera_descriptor = self.frames.camera_uniform.descriptors[index];
+        let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
         self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
         let commands =
             self.prepare_commands(device, &swapchain_frame, camera_descriptor, camera_matrices)?;

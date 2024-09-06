@@ -1,8 +1,3 @@
-// TYpe list idea:
-// Implement generic trait that builds type list node based on trait generic parameter
-// NodeBuilder<Node> -> Builds TypeLIst Node
-// End -> Builds TypeList Terminator
-
 use ash::vk;
 use std::{error::Error, path::Path, result::Result};
 use winit::{

@@ -1,16 +1,15 @@
 mod list;
-mod type_erased;
-mod type_safe;
+mod pack;
 
 use ash::vk;
 pub use list::*;
-pub use type_erased::*;
-pub use type_safe::*;
+pub use pack::*;
 
 use std::ops::Index;
 
 use strum::EnumCount;
 
+use crate::renderer::model::Vertex;
 use crate::renderer::vulkan::device::buffer::Buffer;
 use crate::renderer::vulkan::device::{
     buffer::{ByteRange, DeviceLocalBuffer},
@@ -58,10 +57,26 @@ impl BufferRanges {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MeshByteRange {
+    pub vertices: ByteRange,
+    pub indices: ByteRange,
+}
+
+impl<V: Vertex> From<MeshByteRange> for MeshRange<V> {
+    fn from(value: MeshByteRange) -> Self {
+        Self {
+            vertices: value.vertices.into(),
+            indices: value.indices.into(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MeshPackData {
     pub buffer: DeviceLocalBuffer,
     pub buffer_ranges: BufferRanges,
+    pub meshes: Vec<MeshByteRange>,
 }
 
 impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer {

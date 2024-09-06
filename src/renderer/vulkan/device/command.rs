@@ -743,13 +743,15 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         camera_matrices.view[3] = Vector4::w();
         self.bind_pipeline(&skybox.pipeline)
             .bind_descriptor_set(
-                skybox.descriptor[0]
+                &skybox
+                    .descriptor
+                    .get(0)
                     .get_binding_data(&skybox.pipeline)
                     .unwrap(),
             )
             .bind_mesh_pack(&skybox.mesh_pack)
             .push_constants(skybox.pipeline.get_push_range(&camera_matrices))
-            .draw_mesh(skybox.mesh_pack[0])
+            .draw_mesh(skybox.mesh_pack.get(0))
     }
 
     pub fn push_constants<'b, P: PushConstant + Pod>(
@@ -770,7 +772,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn bind_descriptor_set(self, descriptor: impl Into<DescriptorBindingData>) -> Self {
+    pub fn bind_descriptor_set<'b>(self, descriptor: impl Into<&'b DescriptorBindingData>) -> Self {
         let binding = descriptor.into();
         let RecordingCommand(command, device) = self;
         unsafe {

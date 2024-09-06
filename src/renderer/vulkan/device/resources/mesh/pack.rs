@@ -1,9 +1,9 @@
-use std::{error::Error, ops::Index};
+use std::{any::TypeId, error::Error, marker::PhantomData};
 
 use ash::vk;
 
 use crate::renderer::{
-    model::{Mesh, Vertex},
+    model::{Mesh, MeshHandle, Vertex},
     vulkan::device::{
         buffer::{Range, StagingBufferBuilder},
         command::operation::{self, Operation},
@@ -11,13 +11,71 @@ use crate::renderer::{
     },
 };
 
-use super::{BufferRanges, BufferType, MeshPackBinding, MeshPackData};
+use super::{
+    BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, VulkanMeshHandle,
+};
 
 #[derive(Debug)]
 pub struct MeshPack<V: Vertex> {
     pub index: usize,
     pub data: MeshPackData,
-    pub meshes: Vec<MeshRange<V>>,
+    _phantom: PhantomData<V>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MeshPackRef<'a, V: Vertex> {
+    pub index: usize,
+    pub data: &'a MeshPackData,
+    pub _phantom: PhantomData<V>,
+}
+
+impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
+    type Error = &'static str;
+
+    fn try_from(value: &'a MeshPack<V>) -> Result<Self, Self::Error> {
+        if TypeId::of::<T>() == TypeId::of::<V>() {
+            Ok(Self {
+                index: value.index,
+                data: &value.data,
+                _phantom: PhantomData,
+            })
+        } else {
+            Err("Invalid Vertex type")
+        }
+    }
+}
+
+impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
+    fn from(value: MeshPackRef<'a, V>) -> Self {
+        MeshPackBinding {
+            buffer: value.data.buffer.buffer.buffer,
+            buffer_ranges: value.data.buffer_ranges,
+        }
+    }
+}
+
+impl<'a, V: Vertex> MeshPackRef<'a, V> {
+    pub fn get_handles(&self) -> Vec<MeshHandle<V>> {
+        self.data
+            .meshes
+            .iter()
+            .enumerate()
+            .map(|(mesh_index, _)| {
+                VulkanMeshHandle::new(self.index as u32, mesh_index as u32).into()
+            })
+            .collect()
+    }
+
+    pub fn get(&self, index: usize) -> MeshRange<V> {
+        MeshRange {
+            vertices: self.data.meshes[index].vertices.into(),
+            indices: self.data.meshes[index].indices.into(),
+        }
+    }
+
+    pub fn as_raw(&self) -> &MeshPackData {
+        self.data
+    }
 }
 
 impl<'a, V: Vertex> From<&'a MeshPack<V>> for &'a MeshPackData {
@@ -38,11 +96,9 @@ impl<'a, V: Vertex> From<&'a MeshPack<V>> for MeshPackBinding {
     }
 }
 
-impl<V: Vertex> Index<usize> for MeshPack<V> {
-    type Output = MeshRange<V>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.meshes[index]
+impl<V: Vertex> MeshPack<V> {
+    pub fn get(&self, index: usize) -> MeshRange<V> {
+        self.data.meshes[index].into()
     }
 }
 
@@ -107,19 +163,23 @@ impl VulkanDevice {
             staging_buffer.transfer_buffer_data(&mut buffer, 0)?;
             (vertex_ranges, index_ranges)
         };
-        let data = MeshPackData {
-            buffer,
-            buffer_ranges,
-        };
         let meshes = vertex_ranges
             .into_iter()
             .zip(index_ranges)
-            .map(|(vertices, indices)| MeshRange { vertices, indices })
+            .map(|(vertices, indices)| MeshByteRange {
+                vertices: vertices.into(),
+                indices: indices.into(),
+            })
             .collect();
+        let data = MeshPackData {
+            buffer,
+            buffer_ranges,
+            meshes,
+        };
         Ok(MeshPack {
             index,
             data,
-            meshes,
+            _phantom: PhantomData,
         })
     }
 }

@@ -18,10 +18,7 @@ use core::Context;
 
 use super::{
     camera::Camera,
-    model::{
-        Drawable, Material, MaterialHandle, Mesh,
-        MeshHandle, Vertex,
-    },
+    model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
     shader::{ShaderHandle, ShaderType, ShaderTypeList},
     Renderer, RendererBuilder,
 };
@@ -91,9 +88,7 @@ impl VulkanRendererBuilder<Nil, Nil, Nil> {
 impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
     VulkanRendererBuilder<M, V, S>
 {
-    pub fn with_material_type<N: Material>(
-        self,
-    ) -> VulkanRendererBuilder<Cons<Vec<N>, M>, V, S> {
+    pub fn with_material_type<N: Material>(self) -> VulkanRendererBuilder<Cons<Vec<N>, M>, V, S> {
         let Self {
             materials,
             meshes,

@@ -1,11 +1,14 @@
 use std::{error::Error, marker::PhantomData};
 
-use crate::{core::{Cons, Nil}, renderer::{
-    model::{Mesh, MeshCollection, MeshHandle, MeshList, Vertex},
-    vulkan::device::VulkanDevice,
-}};
+use crate::{
+    core::{Cons, Nil},
+    renderer::{
+        model::{Mesh, MeshCollection, MeshHandle, MeshList, Vertex},
+        vulkan::device::VulkanDevice,
+    },
+};
 
-use super::{MeshPackRef, MeshPackTypeErased};
+use super::{MeshPack, MeshPackRef};
 
 pub trait MeshPackList: MeshList {
     fn destroy(&mut self, device: &VulkanDevice);
@@ -20,29 +23,23 @@ impl MeshPackList for Nil {
     }
 }
 
-pub struct MeshPackNode<V: Vertex, N: MeshPackList> {
-    pub mesh_pack: MeshPackTypeErased,
-    pub next: N,
-    _phantom: PhantomData<V>,
-}
-
-impl<V: Vertex, N: MeshPackList> MeshList for MeshPackNode<V, N> {
+impl<V: Vertex, N: MeshPackList> MeshList for Cons<MeshPack<V>, N> {
     const LEN: usize = N::LEN + 1;
     type Vertex = V;
     type Next = N;
 }
 
-impl<V: Vertex, N: MeshPackList> MeshPackList for MeshPackNode<V, N> {
+impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<MeshPack<V>, N> {
     fn destroy(&mut self, device: &VulkanDevice) {
-        device.destroy_mesh_pack(&mut self.mesh_pack);
-        self.next.destroy(device);
+        device.destroy_mesh_pack(&mut self.head);
+        self.tail.destroy(device);
     }
 
     fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
-        if let Ok(mesh_pack_ref) = (&self.mesh_pack).try_into() {
+        if let Ok(mesh_pack_ref) = (&self.head).try_into() {
             Some(mesh_pack_ref)
         } else {
-            self.next.try_get::<T>()
+            self.tail.try_get::<T>()
         }
     }
 }
@@ -62,13 +59,12 @@ impl MeshPackListBuilder for Nil {
 }
 
 impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
-    type Pack = MeshPackNode<V, N::Pack>;
+    type Pack = Cons<MeshPack<V>, N::Pack>;
 
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
-        Ok(MeshPackNode {
-            mesh_pack: device.load_mesh_pack(self.get(), Self::LEN)?.into(),
-            next: self.next().build(device)?,
-            _phantom: PhantomData,
+        Ok(Cons {
+            head: device.load_mesh_pack(self.get(), Self::LEN)?.into(),
+            tail: self.next().build(device)?,
         })
     }
 }

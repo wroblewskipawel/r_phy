@@ -34,9 +34,7 @@ impl<S, N> Contains<S, Here> for Cons<S, N> {
     }
 }
 
-impl<O, S, T: Marker, N: Contains<S, T>>
-    Contains<S, There<T>> for Cons<O, N>
-{
+impl<O, S, T: Marker, N: Contains<S, T>> Contains<S, There<T>> for Cons<O, N> {
     fn get(&self) -> &S {
         self.tail.get()
     }

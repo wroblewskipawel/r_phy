@@ -256,7 +256,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
                             let command = descriptor_state
                                 .sets
                                 .iter()
-                                .fold(command, |c, &set| c.bind_descriptor_set(set));
+                                .fold(command, |c, set| c.bind_descriptor_set(set));
                             descriptor_state.buffer_states.iter().fold(
                                 command,
                                 |command, (_, buffer_state)| {

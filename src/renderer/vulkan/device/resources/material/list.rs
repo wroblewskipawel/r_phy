@@ -1,11 +1,14 @@
 use std::{error::Error, marker::PhantomData};
 
-use crate::{core::{Cons, Nil}, renderer::{
-    model::{MaterialCollection, MaterialHandle, MaterialTypeList},
-    vulkan::device::VulkanDevice,
-}};
+use crate::{
+    core::{Cons, Nil},
+    renderer::{
+        model::{MaterialCollection, MaterialHandle, MaterialTypeList},
+        vulkan::device::VulkanDevice,
+    },
+};
 
-use super::{MaterialPackRef, MaterialPackTypeErased, VulkanMaterial};
+use super::{MaterialPack, MaterialPackRef, VulkanMaterial};
 
 pub trait MaterialPackList: MaterialTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
@@ -20,29 +23,23 @@ impl MaterialPackList for Nil {
     }
 }
 
-pub struct MaterialPackNode<M: VulkanMaterial, N: MaterialPackList> {
-    pack: MaterialPackTypeErased,
-    next: N,
-    _phantom: PhantomData<M>,
-}
-
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialTypeList for MaterialPackNode<M, N> {
+impl<M: VulkanMaterial, N: MaterialPackList> MaterialTypeList for Cons<MaterialPack<M>, N> {
     const LEN: usize = N::LEN + 1;
     type Item = M;
     type Next = N;
 }
 
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for MaterialPackNode<M, N> {
+impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for Cons<MaterialPack<M>, N> {
     fn destroy(&mut self, device: &VulkanDevice) {
-        device.destroy_material_pack(&mut self.pack);
-        self.next.destroy(device);
+        device.destroy_material_pack(&mut self.head);
+        self.tail.destroy(device);
     }
 
     fn try_get<T: VulkanMaterial>(&self) -> Option<MaterialPackRef<T>> {
-        if let Ok(material_pack_ref) = (&self.pack).try_into() {
+        if let Ok(material_pack_ref) = (&self.head).try_into() {
             Some(material_pack_ref)
         } else {
-            self.next.try_get::<T>()
+            self.tail.try_get::<T>()
         }
     }
 }
@@ -52,15 +49,12 @@ pub trait MaterialPackListBuilder: MaterialTypeList + 'static {
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
-impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder
-    for Cons<Vec<M>, N>
-{
-    type Pack = MaterialPackNode<Self::Item, N::Pack>;
+impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
+    type Pack = Cons<MaterialPack<Self::Item>, N::Pack>;
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
-        Ok(MaterialPackNode {
-            pack: device.load_material_pack(self.get(), Self::LEN)?.into(),
-            next: self.next().build(device)?,
-            _phantom: PhantomData,
+        Ok(Cons {
+            head: device.load_material_pack(self.get(), Self::LEN)?,
+            tail: self.next().build(device)?,
         })
     }
 }

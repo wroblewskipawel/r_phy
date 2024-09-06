@@ -51,7 +51,7 @@ impl<S: ShaderTypeList> DeferredRenderer<S> {
                     command
                         .bind_pipeline(&self.pipelines.depth_prepass)
                         .bind_descriptor_set(
-                            camera_descriptor
+                            &camera_descriptor
                                 .get_binding_data(&self.pipelines.depth_prepass)
                                 .unwrap(),
                         )
@@ -68,12 +68,14 @@ impl<S: ShaderTypeList> DeferredRenderer<S> {
             command
                 .bind_pipeline(&self.pipelines.shading_pass)
                 .bind_descriptor_set(
-                    self.descriptors[0]
+                    &self
+                        .descriptors
+                        .get(0)
                         .get_binding_data(&self.pipelines.shading_pass)
                         .unwrap(),
                 )
                 .bind_mesh_pack(&self.mesh)
-                .draw_mesh(self.mesh[0])
+                .draw_mesh(self.mesh.get(0))
         });
         let (_, skybox_pass) = self.frames.secondary_commands.next();
         let skybox_pass = device.begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
