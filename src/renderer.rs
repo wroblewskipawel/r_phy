@@ -8,11 +8,11 @@ use shader::{ShaderHandle, ShaderType};
 use std::error::Error;
 use winit::window::Window;
 
-use crate::math::types::Matrix4;
+use crate::{core::Nil, math::types::Matrix4};
 
 use self::{
     camera::Camera,
-    model::{Drawable, MaterialTypeList, MaterialTypeTerminator, MeshList, MeshTerminator},
+    model::{Drawable, MaterialTypeList, MeshList},
 };
 
 pub trait Renderer: 'static {
@@ -40,8 +40,8 @@ pub trait RendererBuilder: 'static {
 pub struct RendererNone;
 
 impl Renderer for RendererNone {
-    type Materials = MaterialTypeTerminator;
-    type Meshes = MeshTerminator;
+    type Materials = Nil;
+    type Meshes = Nil;
 
     fn begin_frame<C: Camera>(&mut self, _camera: &C) -> Result<(), Box<dyn Error>> {
         unimplemented!()

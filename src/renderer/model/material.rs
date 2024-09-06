@@ -6,7 +6,7 @@ use std::{
 use bytemuck::AnyBitPattern;
 
 use crate::{
-    core::{Contains, Here, Marker, There},
+    core::{Cons, Nil},
     math::types::{Vector3, Vector4},
 };
 
@@ -218,15 +218,13 @@ pub trait MaterialCollection: MaterialTypeList {
     fn next(&self) -> &Self::Next;
 }
 
-pub struct MaterialTypeTerminator {}
-
-impl MaterialTypeList for MaterialTypeTerminator {
+impl MaterialTypeList for Nil {
     const LEN: usize = 0;
     type Item = EmptyMaterial;
     type Next = Self;
 }
 
-impl MaterialCollection for MaterialTypeTerminator {
+impl MaterialCollection for Nil {
     fn get(&self) -> &[Self::Item] {
         unreachable!()
     }
@@ -236,47 +234,19 @@ impl MaterialCollection for MaterialTypeTerminator {
     }
 }
 
-impl<M: Material, N: MaterialTypeList> Contains<Vec<M>, Here> for MaterialTypeNode<M, N> {
-    fn get(&self) -> &Vec<M> {
-        &self.materials
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<M> {
-        &mut self.materials
-    }
-}
-
-impl<S: Material, M: Material, T: Marker, N: MaterialTypeList + Contains<Vec<M>, T>>
-    Contains<Vec<M>, There<T>> for MaterialTypeNode<S, N>
-{
-    fn get(&self) -> &Vec<M> {
-        self.next.get()
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<M> {
-        self.next.get_mut()
-    }
-}
-
-// TODO: Resolve temporary `pub` workaround
-pub struct MaterialTypeNode<M: Material, N: MaterialTypeList> {
-    pub materials: Vec<M>,
-    pub next: N,
-}
-
-impl<M: Material, N: MaterialTypeList> MaterialTypeList for MaterialTypeNode<M, N> {
+impl<M: Material, N: MaterialTypeList> MaterialTypeList for Cons<Vec<M>, N> {
     const LEN: usize = Self::Next::LEN + 1;
     type Item = M;
     type Next = N;
 }
 
-impl<M: Material, N: MaterialTypeList> MaterialCollection for MaterialTypeNode<M, N> {
+impl<M: Material, N: MaterialTypeList> MaterialCollection for Cons<Vec<M>, N> {
     fn get(&self) -> &[Self::Item] {
-        &self.materials
+        &self.head
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 }
 
@@ -285,16 +255,16 @@ pub struct Materials<N: MaterialTypeList> {
     pub shaders: HashMap<TypeId, PathBuf>,
 }
 
-impl Default for Materials<MaterialTypeTerminator> {
+impl Default for Materials<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Materials<MaterialTypeTerminator> {
+impl Materials<Nil> {
     pub fn new() -> Self {
         Self {
-            list: MaterialTypeTerminator {},
+            list: Nil {},
             shaders: HashMap::new(),
         }
     }
@@ -305,12 +275,12 @@ impl<N: MaterialTypeList> Materials<N> {
         mut self,
         materials: Vec<M>,
         shader_path: PathBuf,
-    ) -> Materials<MaterialTypeNode<M, N>> {
+    ) -> Materials<Cons<Vec<M>, N>> {
         self.shaders.insert(TypeId::of::<M>(), shader_path);
         Materials {
-            list: MaterialTypeNode {
-                materials,
-                next: self.list,
+            list: Cons {
+                head: materials,
+                tail: self.list,
             },
             shaders: self.shaders,
         }

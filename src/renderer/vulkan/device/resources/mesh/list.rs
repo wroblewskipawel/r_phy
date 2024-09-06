@@ -1,9 +1,9 @@
 use std::{error::Error, marker::PhantomData};
 
-use crate::renderer::{
-    model::{MeshCollection, MeshHandle, MeshList, MeshNode, MeshTerminator, Vertex},
+use crate::{core::{Cons, Nil}, renderer::{
+    model::{Mesh, MeshCollection, MeshHandle, MeshList, Vertex},
     vulkan::device::VulkanDevice,
-};
+}};
 
 use super::{MeshPackRef, MeshPackTypeErased};
 
@@ -13,7 +13,7 @@ pub trait MeshPackList: MeshList {
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
 }
 
-impl MeshPackList for MeshTerminator {
+impl MeshPackList for Nil {
     fn destroy(&mut self, _device: &VulkanDevice) {}
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
         None
@@ -53,7 +53,7 @@ pub trait MeshPackListBuilder: MeshList {
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
-impl MeshPackListBuilder for MeshTerminator {
+impl MeshPackListBuilder for Nil {
     type Pack = Self;
 
     fn build(&self, _device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
@@ -61,7 +61,7 @@ impl MeshPackListBuilder for MeshTerminator {
     }
 }
 
-impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for MeshNode<V, N> {
+impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
     type Pack = MeshPackNode<V, N::Pack>;
 
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {

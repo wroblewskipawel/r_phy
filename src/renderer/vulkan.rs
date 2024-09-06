@@ -11,7 +11,7 @@ use self::device::{
     },
 };
 use crate::{
-    core::{Contains, Marker},
+    core::{Cons, Contains, Marker, Nil},
     math::types::Matrix4,
 };
 use core::Context;
@@ -19,10 +19,10 @@ use core::Context;
 use super::{
     camera::Camera,
     model::{
-        Drawable, Material, MaterialHandle, MaterialTypeNode, MaterialTypeTerminator, Mesh,
-        MeshHandle, MeshNode, MeshTerminator, Vertex,
+        Drawable, Material, MaterialHandle, Mesh,
+        MeshHandle, Vertex,
     },
-    shader::{ShaderHandle, ShaderType, ShaderTypeList, ShaderTypeNode, ShaderTypeTerminator},
+    shader::{ShaderHandle, ShaderType, ShaderTypeList},
     Renderer, RendererBuilder,
 };
 use ash::vk;
@@ -71,20 +71,18 @@ pub struct VulkanRendererBuilder<
     config: Option<VulkanRendererConfig>,
 }
 
-impl Default
-    for VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator, ShaderTypeTerminator>
-{
+impl Default for VulkanRendererBuilder<Nil, Nil, Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VulkanRendererBuilder<MaterialTypeTerminator, MeshTerminator, ShaderTypeTerminator> {
+impl VulkanRendererBuilder<Nil, Nil, Nil> {
     pub fn new() -> Self {
         Self {
-            materials: MaterialTypeTerminator {},
-            meshes: MeshTerminator {},
-            shaders: ShaderTypeTerminator {},
+            materials: Nil {},
+            meshes: Nil {},
+            shaders: Nil {},
             config: None,
         }
     }
@@ -95,7 +93,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
 {
     pub fn with_material_type<N: Material>(
         self,
-    ) -> VulkanRendererBuilder<MaterialTypeNode<N, M>, V, S> {
+    ) -> VulkanRendererBuilder<Cons<Vec<N>, M>, V, S> {
         let Self {
             materials,
             meshes,
@@ -103,9 +101,9 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             config: configuration,
         } = self;
         VulkanRendererBuilder {
-            materials: MaterialTypeNode {
-                materials: vec![],
-                next: materials,
+            materials: Cons {
+                head: vec![],
+                tail: materials,
             },
             meshes,
             shaders,
@@ -113,7 +111,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
         }
     }
 
-    pub fn with_vertex_type<N: Vertex>(self) -> VulkanRendererBuilder<M, MeshNode<N, V>, S> {
+    pub fn with_vertex_type<N: Vertex>(self) -> VulkanRendererBuilder<M, Cons<Vec<Mesh<N>>, V>, S> {
         let Self {
             materials,
             meshes,
@@ -121,9 +119,9 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             config: configuration,
         } = self;
         VulkanRendererBuilder {
-            meshes: MeshNode {
-                meshes: vec![],
-                next: meshes,
+            meshes: Cons {
+                head: vec![],
+                tail: meshes,
             },
             materials,
             shaders,
@@ -134,7 +132,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
     pub fn with_shader_type<N: ShaderType, T: Marker, O: Marker>(
         self,
         _shader_type: PhantomData<N>,
-    ) -> VulkanRendererBuilder<M, V, ShaderTypeNode<N, S>>
+    ) -> VulkanRendererBuilder<M, V, Cons<Vec<N>, S>>
     where
         M: Contains<Vec<N::Material>, T>,
         V: Contains<Vec<Mesh<N::Vertex>>, O>,
@@ -146,9 +144,9 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
             config: configuration,
         } = self;
         VulkanRendererBuilder {
-            shaders: ShaderTypeNode {
-                shader_sources: vec![],
-                next: shaders,
+            shaders: Cons {
+                head: vec![],
+                tail: shaders,
             },
             materials,
             meshes,

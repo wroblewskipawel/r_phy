@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    core::{Contains, Here, Marker, There},
+    core::{Cons, Nil},
     renderer::model::{EmptyMaterial, Material, Vertex, VertexNone},
 };
 
@@ -48,13 +48,10 @@ pub trait ShaderTypeList: 'static {
     type Next: ShaderTypeList;
 
     fn shaders(&self) -> &[Self::Item];
-
     fn next(&self) -> &Self::Next;
 }
 
-pub struct ShaderTypeTerminator {}
-
-impl ShaderType for ShaderTypeTerminator {
+impl ShaderType for Nil {
     type Vertex = VertexNone;
     type Material = EmptyMaterial;
 
@@ -63,7 +60,7 @@ impl ShaderType for ShaderTypeTerminator {
     }
 }
 
-impl ShaderTypeList for ShaderTypeTerminator {
+impl ShaderTypeList for Nil {
     const LEN: usize = 0;
     type Item = Self;
     type Next = Self;
@@ -77,44 +74,22 @@ impl ShaderTypeList for ShaderTypeTerminator {
     }
 }
 
-pub struct ShaderTypeNode<S: ShaderType, N: ShaderTypeList> {
-    pub shader_sources: Vec<S>,
-    pub next: N,
-}
+// pub struct ShaderTypeNode<S: ShaderType, N: ShaderTypeList> {
+//     pub shader_sources: Vec<S>,
+//     pub next: N,
+// }
 
-impl<S: ShaderType, N: ShaderTypeList> Contains<Vec<S>, Here> for ShaderTypeNode<S, N> {
-    fn get(&self) -> &Vec<S> {
-        &self.shader_sources
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<S> {
-        &mut self.shader_sources
-    }
-}
-
-impl<O: ShaderType, S: ShaderType, T: Marker, N: ShaderTypeList + Contains<Vec<S>, T>>
-    Contains<Vec<S>, There<T>> for ShaderTypeNode<O, N>
-{
-    fn get(&self) -> &Vec<S> {
-        self.next.get()
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<S> {
-        self.next.get_mut()
-    }
-}
-
-impl<S: ShaderType, N: ShaderTypeList> ShaderTypeList for ShaderTypeNode<S, N> {
+impl<S: ShaderType, N: ShaderTypeList> ShaderTypeList for Cons<Vec<S>, N> {
     const LEN: usize = N::LEN + 1;
     type Item = S;
     type Next = N;
 
     fn shaders(&self) -> &[Self::Item] {
-        &self.shader_sources
+        &self.head
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 }
 

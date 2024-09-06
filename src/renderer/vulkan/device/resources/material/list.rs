@@ -1,12 +1,9 @@
 use std::{error::Error, marker::PhantomData};
 
-use crate::renderer::{
-    model::{
-        MaterialCollection, MaterialHandle, MaterialTypeList, MaterialTypeNode,
-        MaterialTypeTerminator,
-    },
+use crate::{core::{Cons, Nil}, renderer::{
+    model::{MaterialCollection, MaterialHandle, MaterialTypeList},
     vulkan::device::VulkanDevice,
-};
+}};
 
 use super::{MaterialPackRef, MaterialPackTypeErased, VulkanMaterial};
 
@@ -16,7 +13,7 @@ pub trait MaterialPackList: MaterialTypeList {
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>>;
 }
 
-impl MaterialPackList for MaterialTypeTerminator {
+impl MaterialPackList for Nil {
     fn destroy(&mut self, _device: &VulkanDevice) {}
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>> {
         None
@@ -56,7 +53,7 @@ pub trait MaterialPackListBuilder: MaterialTypeList + 'static {
 }
 
 impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder
-    for MaterialTypeNode<M, N>
+    for Cons<Vec<M>, N>
 {
     type Pack = MaterialPackNode<Self::Item, N::Pack>;
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
@@ -68,11 +65,11 @@ impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder
     }
 }
 
-impl MaterialPackListBuilder for MaterialTypeTerminator {
+impl MaterialPackListBuilder for Nil {
     type Pack = Self;
 
     fn build(&self, _device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
-        Ok(MaterialTypeTerminator {})
+        Ok(Nil {})
     }
 }
 

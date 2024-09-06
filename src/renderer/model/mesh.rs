@@ -3,7 +3,7 @@ use std::{marker::PhantomData, mem::offset_of, ops::Deref};
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
-    core::{Contains, Here, Marker, There},
+    core::{Cons, Nil},
     math::types::{Vector2, Vector3, Vector4},
     physics::shape,
 };
@@ -333,15 +333,13 @@ pub trait MeshCollection: MeshList {
     fn next(&self) -> &Self::Next;
 }
 
-pub struct MeshTerminator {}
-
-impl MeshList for MeshTerminator {
+impl MeshList for Nil {
     const LEN: usize = 0;
     type Vertex = VertexNone;
     type Next = Self;
 }
 
-impl MeshCollection for MeshTerminator {
+impl MeshCollection for Nil {
     fn get(&self) -> &[Mesh<Self::Vertex>] {
         &[]
     }
@@ -351,73 +349,43 @@ impl MeshCollection for MeshTerminator {
     }
 }
 
-impl<V: Vertex, N: MeshList> Contains<Vec<Mesh<V>>, Here> for MeshNode<V, N> {
-    fn get(&self) -> &Vec<Mesh<V>> {
-        &self.meshes
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<Mesh<V>> {
-        &mut self.meshes
-    }
-}
-
-impl<S: Vertex, V: Vertex, T: Marker, N: MeshList + Contains<Vec<Mesh<V>>, T>>
-    Contains<Vec<Mesh<V>>, There<T>> for MeshNode<S, N>
-{
-    fn get(&self) -> &Vec<Mesh<V>> {
-        self.next.get()
-    }
-
-    fn get_mut(&mut self) -> &mut Vec<Mesh<V>> {
-        self.next.get_mut()
-    }
-}
-
-// TODO: Resolve temporary `pub` workaround
-pub struct MeshNode<V: Vertex, N: MeshList> {
-    pub meshes: Vec<Mesh<V>>,
-    pub next: N,
-}
-
-impl<V: Vertex, N: MeshList> MeshList for MeshNode<V, N> {
+impl<V: Vertex, N: MeshList> MeshList for Cons<Vec<Mesh<V>>, N> {
     const LEN: usize = N::LEN + 1;
     type Vertex = V;
     type Next = N;
 }
 
-impl<V: Vertex, N: MeshList> MeshCollection for MeshNode<V, N> {
+impl<V: Vertex, N: MeshList> MeshCollection for Cons<Vec<Mesh<V>>, N> {
     fn get(&self) -> &[Mesh<Self::Vertex>] {
-        &self.meshes
+        &self.head
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 }
 pub struct Meshes<L: MeshList> {
     list: L,
 }
 
-impl Default for Meshes<MeshTerminator> {
+impl Default for Meshes<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Meshes<MeshTerminator> {
+impl Meshes<Nil> {
     pub fn new() -> Self {
-        Self {
-            list: MeshTerminator {},
-        }
+        Self { list: Nil {} }
     }
 }
 
 impl<L: MeshList> Meshes<L> {
-    pub fn push<V: Vertex>(self, meshes: Vec<Mesh<V>>) -> Meshes<MeshNode<V, L>> {
+    pub fn push<V: Vertex>(self, meshes: Vec<Mesh<V>>) -> Meshes<Cons<Vec<Mesh<V>>, L>> {
         Meshes {
-            list: MeshNode {
-                meshes,
-                next: self.list,
+            list: Cons {
+                head: meshes,
+                tail: self.list,
             },
         }
     }
