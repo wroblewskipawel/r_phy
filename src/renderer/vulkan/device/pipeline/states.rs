@@ -5,15 +5,18 @@ use std::marker::PhantomData;
 use ash::vk::{self, Extent2D};
 pub use presets::*;
 
-use crate::renderer::{
-    model::Vertex,
-    vulkan::device::{
-        framebuffer::{
-            AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
-            References,
+use crate::{
+    core::Nil,
+    renderer::{
+        model::Vertex,
+        vulkan::device::{
+            framebuffer::{
+                AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
+                References,
+            },
+            render_pass::Subpass,
+            AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
         },
-        render_pass::Subpass,
-        AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
     },
 };
 
@@ -96,9 +99,7 @@ pub trait VertexBindingList: 'static {
     fn len() -> usize;
 }
 
-pub struct VertexBindingTerminator {}
-
-impl VertexBinding for VertexBindingTerminator {
+impl VertexBinding for Nil {
     fn get_binding_description(_binding: u32) -> vk::VertexInputBindingDescription {
         unreachable!()
     }
@@ -108,7 +109,7 @@ impl VertexBinding for VertexBindingTerminator {
     }
 }
 
-impl VertexBindingList for VertexBindingTerminator {
+impl VertexBindingList for Nil {
     type Item = Self;
     type Next = Self;
 

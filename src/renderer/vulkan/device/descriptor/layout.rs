@@ -8,7 +8,10 @@ use std::{
 
 use ash::vk;
 
-use crate::renderer::vulkan::device::VulkanDevice;
+use crate::{
+    core::{Cons, Nil},
+    renderer::vulkan::device::VulkanDevice,
+};
 
 // Check out once_cell and lazy_static crates to improve the implementation
 fn get_descriptor_set_layout_map(
@@ -50,10 +53,7 @@ pub trait DescriptorBindingList: 'static {
     type Next: DescriptorBindingList;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DescriptorBindingTerminator {}
-
-impl DescriptorBinding for DescriptorBindingTerminator {
+impl DescriptorBinding for Nil {
     fn has_data() -> bool {
         unreachable!()
     }
@@ -71,29 +71,14 @@ impl DescriptorBinding for DescriptorBindingTerminator {
     }
 }
 
-impl DescriptorBindingList for DescriptorBindingTerminator {
+impl DescriptorBindingList for Nil {
     const LEN: usize = 0;
 
     type Item = Self;
     type Next = Self;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DescriptorBindingNode<B: DescriptorBinding, N: DescriptorBindingList> {
-    _phantom: PhantomData<(B, N)>,
-}
-
-impl<B: DescriptorBinding, N: DescriptorBindingList> Default for DescriptorBindingNode<B, N> {
-    fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<B: DescriptorBinding, N: DescriptorBindingList> DescriptorBindingList
-    for DescriptorBindingNode<B, N>
-{
+impl<B: DescriptorBinding, N: DescriptorBindingList> DescriptorBindingList for Cons<B, N> {
     const LEN: usize = N::LEN + 1;
 
     type Item = B;
@@ -115,15 +100,13 @@ impl<B: DescriptorBindingList> Default for DescriptorLayoutBuilder<B> {
 
 #[allow(dead_code)]
 impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
-    pub fn new() -> DescriptorLayoutBuilder<DescriptorBindingTerminator> {
+    pub fn new() -> DescriptorLayoutBuilder<Nil> {
         DescriptorLayoutBuilder {
             _phantom: PhantomData,
         }
     }
 
-    pub fn push<N: DescriptorBinding>(
-        self,
-    ) -> DescriptorLayoutBuilder<DescriptorBindingNode<N, B>> {
+    pub fn push<N: DescriptorBinding>(self) -> DescriptorLayoutBuilder<Cons<N, B>> {
         DescriptorLayoutBuilder {
             _phantom: PhantomData,
         }

@@ -12,7 +12,7 @@ use std::{
 
 use ash::vk;
 
-use crate::renderer::vulkan::device::{descriptor::DescriptorLayout, VulkanDevice};
+use crate::{core::Nil, renderer::vulkan::device::{descriptor::DescriptorLayout, VulkanDevice}};
 
 // TODO: Create macro to avoid code repetition
 fn get_pipeline_layout_map() -> &'static RwLock<HashMap<std::any::TypeId, vk::PipelineLayout>> {
@@ -53,16 +53,13 @@ pub trait PushConstantList: 'static {
     fn len() -> usize;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PushConstantTerminator {}
-
-impl PushConstant for PushConstantTerminator {
+impl PushConstant for Nil {
     fn range(_offset: u32) -> vk::PushConstantRange {
         unreachable!()
     }
 }
 
-impl PushConstantList for PushConstantTerminator {
+impl PushConstantList for Nil {
     type Item = Self;
     type Next = Self;
 
@@ -107,7 +104,7 @@ impl<N: PushConstantList> Default for PushConstantRanges<N> {
 
 #[allow(dead_code)]
 impl<N: PushConstantList> PushConstantRanges<N> {
-    pub fn new() -> PushConstantRanges<PushConstantTerminator> {
+    pub fn new() -> PushConstantRanges<Nil> {
         PushConstantRanges {
             _phantom: PhantomData,
         }
@@ -170,10 +167,7 @@ pub trait DescriptorLayoutList: 'static {
     fn len() -> usize;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DescriptorLayoutTerminator {}
-
-impl DescriptorLayoutList for DescriptorLayoutTerminator {
+impl DescriptorLayoutList for Nil {
     type Item = Self;
     type Next = Self;
 
@@ -186,7 +180,7 @@ impl DescriptorLayoutList for DescriptorLayoutTerminator {
     }
 }
 
-impl DescriptorLayout for DescriptorLayoutTerminator {
+impl DescriptorLayout for Nil {
     fn get_descriptor_set_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
         unreachable!()
     }
@@ -264,7 +258,7 @@ impl<T: DescriptorLayoutList, P: PushConstantList> Default for PipelineLayoutBui
 
 #[allow(dead_code)]
 impl<T: DescriptorLayoutList, P: PushConstantList> PipelineLayoutBuilder<T, P> {
-    pub fn new() -> PipelineLayoutBuilder<DescriptorLayoutTerminator, PushConstantTerminator> {
+    pub fn new() -> PipelineLayoutBuilder<Nil, Nil> {
         PipelineLayoutBuilder {
             _phantom: PhantomData,
         }

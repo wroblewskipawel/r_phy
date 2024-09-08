@@ -4,7 +4,10 @@ use std::{error::Error, marker::PhantomData, usize};
 
 use ash::vk::{self, Extent2D};
 
-use crate::renderer::vulkan::device::{AttachmentProperties, VulkanDevice};
+use crate::{
+    core::Nil,
+    renderer::vulkan::device::{AttachmentProperties, VulkanDevice},
+};
 
 use super::{image::VulkanImage2D, render_pass::RenderPassConfig};
 
@@ -42,9 +45,7 @@ impl ClearValue for ClearDeptStencil {
     }
 }
 
-pub struct ClearValueTerminator {}
-
-impl ClearValue for ClearValueTerminator {
+impl ClearValue for Nil {
     fn get(&self) -> Option<vk::ClearValue> {
         unreachable!()
     }
@@ -76,7 +77,7 @@ pub trait ClearValueList {
     fn next(&self) -> &Self::Next;
 }
 
-impl ClearValueList for ClearValueTerminator {
+impl ClearValueList for Nil {
     const LEN: usize = 0;
     type Item = Self;
     type Next = Self;
@@ -113,16 +114,16 @@ pub struct ClearValueBuilder<C: ClearValueList> {
     clear_values: C,
 }
 
-impl Default for ClearValueBuilder<ClearValueTerminator> {
+impl Default for ClearValueBuilder<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ClearValueBuilder<ClearValueTerminator> {
+impl ClearValueBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            clear_values: ClearValueTerminator {},
+            clear_values: Nil {},
         }
     }
 }
@@ -185,8 +186,6 @@ pub struct IndexedAttachmentReference {
     pub reference: AttachmentReference,
     pub index: u32,
 }
-pub struct AttachmentReferenceTerminator {}
-
 pub trait AttachmentReferenceList {
     const LEN: usize;
     type Next: AttachmentReferenceList;
@@ -198,7 +197,7 @@ pub trait AttachmentReferenceList {
     fn get_value(&self) -> Option<AttachmentReference>;
 }
 
-impl AttachmentReferenceList for AttachmentReferenceTerminator {
+impl AttachmentReferenceList for Nil {
     const LEN: usize = 0;
     type Next = Self;
 
@@ -260,17 +259,15 @@ pub struct AttachmentReferenceBuilder<A: AttachmentList> {
     pub references: A::ReferenceListType,
 }
 
-impl Default for AttachmentReferenceBuilder<AttachmentTerminator> {
+impl Default for AttachmentReferenceBuilder<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AttachmentReferenceBuilder<AttachmentTerminator> {
+impl AttachmentReferenceBuilder<Nil> {
     pub fn new() -> Self {
-        Self {
-            references: AttachmentReferenceTerminator {},
-        }
+        Self { references: Nil {} }
     }
 }
 
@@ -338,8 +335,6 @@ pub struct AttachmentTransition {
     pub final_layout: vk::ImageLayout,
 }
 
-pub struct AttachmentTransitionTerminator {}
-
 pub trait AttachmentTransitionList {
     const LEN: usize;
     type Next: AttachmentTransitionList;
@@ -351,7 +346,7 @@ pub trait AttachmentTransitionList {
     fn get_value(&self) -> AttachmentTransition;
 }
 
-impl AttachmentTransitionList for AttachmentTransitionTerminator {
+impl AttachmentTransitionList for Nil {
     const LEN: usize = 0;
     type Next = Self;
 
@@ -406,16 +401,16 @@ pub struct AttachmentTransitionBuilder<A: AttachmentTransitionList> {
     transitions: A,
 }
 
-impl Default for AttachmentTransitionBuilder<AttachmentTransitionTerminator> {
+impl Default for AttachmentTransitionBuilder<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AttachmentTransitionBuilder<AttachmentTransitionTerminator> {
+impl AttachmentTransitionBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            transitions: AttachmentTransitionTerminator {},
+            transitions: Nil {},
         }
     }
 }
@@ -509,23 +504,21 @@ pub trait AttachmentListFormats: AttachmentList {
 
 impl<T: AttachmentList> AttachmentListFormats for T {}
 
-pub struct AttachmentTerminator {}
-
-impl Attachment for AttachmentTerminator {
+impl Attachment for Nil {
     type Clear = ClearNone;
 
     fn get_format(_properties: &AttachmentProperties) -> AttachmentFormatInfo {
-        panic!("get_format called on AttachmentTerminator!");
+        panic!("get_format called on Nil!");
     }
 }
 
-impl AttachmentList for AttachmentTerminator {
+impl AttachmentList for Nil {
     const LEN: usize = 0;
     type Item = Self;
     type Next = Self;
-    type ClearListType = ClearValueTerminator;
-    type ReferenceListType = AttachmentReferenceTerminator;
-    type TransitionListType = AttachmentTransitionTerminator;
+    type ClearListType = Nil;
+    type ReferenceListType = Nil;
+    type TransitionListType = Nil;
 
     fn next(&self) -> &Self::Next {
         unreachable!()
@@ -563,16 +556,16 @@ pub struct AttachmentsBuilder<A: AttachmentList> {
     attachments: A,
 }
 
-impl Default for AttachmentsBuilder<AttachmentTerminator> {
+impl Default for AttachmentsBuilder<Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AttachmentsBuilder<AttachmentTerminator> {
+impl AttachmentsBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            attachments: AttachmentTerminator {},
+            attachments: Nil {},
         }
     }
 }

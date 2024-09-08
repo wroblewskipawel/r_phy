@@ -7,7 +7,7 @@ use crate::renderer::{
 
 use super::{
     Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,
-    VertexAssembly, VertexBindingBuilder, VertexBindingNode, VertexBindingTerminator, Viewport,
+    VertexAssembly, VertexBindingBuilder, VertexBindingNode, Nil, Viewport,
     ViewportInfo,
 };
 
@@ -226,7 +226,7 @@ impl Multisample for Multisampled {
     }
 }
 
-pub type MeshVertexInput<V> = VertexBindingBuilder<VertexBindingNode<V, VertexBindingTerminator>>;
+pub type MeshVertexInput<V> = VertexBindingBuilder<VertexBindingNode<V, Nil>>;
 
 pub type StatesSkybox = PipelineStatesBuilder<
     MeshVertexInput<CommonVertex>,

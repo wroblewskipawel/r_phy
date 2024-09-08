@@ -4,20 +4,16 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
-    math::types::{Matrix3, Matrix4},
-    renderer::{
+    core::Nil, math::types::{Matrix3, Matrix4}, renderer::{
         camera::CameraMatrices,
         vulkan::device::{
             descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
             resources::VulkanMaterial,
         },
-    },
+    }
 };
 
-use super::{
-    DescriptorLayoutNode, DescriptorLayoutTerminator, PipelineLayoutBuilder, PushConstant,
-    PushConstantNode, PushConstantTerminator,
-};
+use super::{DescriptorLayoutNode, PipelineLayoutBuilder, PushConstant, PushConstantNode};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
@@ -73,22 +69,20 @@ impl PushConstant for CameraMatrices {
 pub type PipelineLayoutMaterial<M> = PipelineLayoutBuilder<
     DescriptorLayoutNode<
         <M as VulkanMaterial>::DescriptorLayout,
-        DescriptorLayoutNode<CameraDescriptorSet, DescriptorLayoutTerminator>,
+        DescriptorLayoutNode<CameraDescriptorSet, Nil>,
     >,
-    PushConstantNode<ModelNormalMatrix, PushConstantTerminator>,
+    PushConstantNode<ModelNormalMatrix, Nil>,
 >;
 
 pub type PipelineLayoutSkybox = PipelineLayoutBuilder<
-    DescriptorLayoutNode<TextureDescriptorSet, DescriptorLayoutTerminator>,
-    PushConstantNode<CameraMatrices, PushConstantTerminator>,
+    DescriptorLayoutNode<TextureDescriptorSet, Nil>,
+    PushConstantNode<CameraMatrices, Nil>,
 >;
 
 pub type PipelineLayoutNoMaterial = PipelineLayoutBuilder<
-    DescriptorLayoutNode<CameraDescriptorSet, DescriptorLayoutTerminator>,
-    PushConstantNode<ModelMatrix, PushConstantTerminator>,
+    DescriptorLayoutNode<CameraDescriptorSet, Nil>,
+    PushConstantNode<ModelMatrix, Nil>,
 >;
 
-pub type PipelineLayoutGBuffer = PipelineLayoutBuilder<
-    DescriptorLayoutNode<GBufferDescriptorSet, DescriptorLayoutTerminator>,
-    PushConstantTerminator,
->;
+pub type PipelineLayoutGBuffer =
+    PipelineLayoutBuilder<DescriptorLayoutNode<GBufferDescriptorSet, Nil>, Nil>;

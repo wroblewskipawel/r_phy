@@ -12,9 +12,9 @@ use std::{
 
 use ash::vk;
 
-use crate::renderer::vulkan::device::{
+use crate::{core::TypedNil, renderer::vulkan::device::{
     framebuffer::AttachmentList, AttachmentProperties, VulkanDevice,
-};
+}};
 
 use super::framebuffer::{
     AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,
@@ -242,17 +242,13 @@ pub trait SubpassList: 'static {
     fn get_references() -> Vec<Option<IndexedAttachmentReference>>;
 }
 
-pub struct SubpassTerminator<A: AttachmentList> {
-    _phantom: PhantomData<A>,
-}
-
-impl<A: AttachmentList> Subpass<A> for SubpassTerminator<A> {
+impl<A: AttachmentList> Subpass<A> for TypedNil<A> {
     fn references() -> References<A> {
         unreachable!()
     }
 }
 
-impl<A: AttachmentList> SubpassList for SubpassTerminator<A> {
+impl<A: AttachmentList> SubpassList for TypedNil<A> {
     const LEN: usize = 0;
     type Attachments = A;
     type Item = Self;

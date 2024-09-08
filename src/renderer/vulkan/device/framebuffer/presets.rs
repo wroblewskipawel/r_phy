@@ -3,7 +3,7 @@ use ash::vk;
 use crate::renderer::vulkan::device::AttachmentProperties;
 
 use super::{
-    Attachment, AttachmentFormatInfo, AttachmentNode, AttachmentTerminator, ClearColor,
+    Attachment, AttachmentFormatInfo, AttachmentNode, Nil, ClearColor,
     ClearDeptStencil, ClearNone,
 };
 
@@ -56,7 +56,7 @@ pub type AttachmentsGBuffer = AttachmentNode<
                 ColorMultisampled, // Position
                 AttachmentNode<
                     DepthStencilMultisampled,
-                    AttachmentNode<Resolve, AttachmentTerminator>,
+                    AttachmentNode<Resolve, Nil>,
                 >,
             >,
         >,

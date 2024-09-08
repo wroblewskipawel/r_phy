@@ -1,25 +1,24 @@
 use ash::vk;
 
-use crate::renderer::vulkan::device::framebuffer::{
+use crate::{core::Nil, renderer::vulkan::device::framebuffer::{
     presets::AttachmentsGBuffer, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
-    AttachmentTarget, AttachmentTerminator, AttachmentTransition, AttachmentTransitionBuilder,
-    References, Transitions,
-};
+    AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, References, Transitions,
+}};
 
-use super::{RenderPassBuilder, Subpass, SubpassNode, SubpassTerminator, TransitionList};
+use super::{RenderPassBuilder, Subpass, SubpassNode, TypedNil, TransitionList};
 
 pub struct EmptyRenderPassTransitions {}
 
-impl TransitionList<AttachmentTerminator> for EmptyRenderPassTransitions {
-    fn transitions() -> Transitions<AttachmentTerminator> {
+impl TransitionList<Nil> for EmptyRenderPassTransitions {
+    fn transitions() -> Transitions<Nil> {
         unreachable!()
     }
 }
 
 pub struct EmptySubpass {}
 
-impl Subpass<AttachmentTerminator> for EmptySubpass {
-    fn references() -> References<AttachmentTerminator> {
+impl Subpass<Nil> for EmptySubpass {
+    fn references() -> References<Nil> {
         unreachable!()
     }
 }
@@ -192,8 +191,7 @@ impl Subpass<AttachmentsGBuffer> for GBufferSkyboxPass<AttachmentsGBuffer> {
     }
 }
 
-pub type EmptyRenderPass =
-    RenderPassBuilder<SubpassTerminator<AttachmentTerminator>, EmptyRenderPassTransitions>;
+pub type EmptyRenderPass = RenderPassBuilder<TypedNil<Nil>, EmptyRenderPassTransitions>;
 
 pub type DeferedRenderPass<A> = RenderPassBuilder<
     SubpassNode<
@@ -202,7 +200,7 @@ pub type DeferedRenderPass<A> = RenderPassBuilder<
             GBufferWritePass<A>,
             SubpassNode<
                 GBufferSkyboxPass<A>,
-                SubpassNode<GBufferDepthPrepas<A>, SubpassTerminator<A>>,
+                SubpassNode<GBufferDepthPrepas<A>, TypedNil<A>>,
             >,
         >,
     >,

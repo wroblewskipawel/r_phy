@@ -183,15 +183,12 @@ pub trait DrawableTypeList: 'static {
     type Next: DrawableTypeList;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DrawableTerminator {}
-
-impl DrawableType for DrawableTerminator {
+impl DrawableType for Nil {
     type Vertex = VertexNone;
     type Material = EmptyMaterial;
 }
 
-impl Drawable for DrawableTerminator {
+impl Drawable for Nil {
     fn material(&self) -> MaterialHandle<Self::Material> {
         unreachable!()
     }
@@ -201,7 +198,7 @@ impl Drawable for DrawableTerminator {
     }
 }
 
-impl DrawableTypeList for DrawableTerminator {
+impl DrawableTypeList for Nil {
     const LEN: usize = 0;
     type Drawable = Self;
     type Next = Self;
@@ -232,7 +229,7 @@ pub trait DrawCommandCollection: DrawableTypeList {
     fn draw<R: Renderer>(self, renderer: &mut R);
 }
 
-impl DrawCommandCollection for DrawableTerminator {
+impl DrawCommandCollection for Nil {
     fn draw<R: Renderer>(self, _renderer: &mut R) {}
 }
 
@@ -280,7 +277,7 @@ pub trait DrawableCollection: DrawableTypeList {
     fn update(&mut self, elapsed_time: f32) -> Self::DrawCommands;
 }
 
-impl DrawableCollection for DrawableTerminator {
+impl DrawableCollection for Nil {
     type DrawCommands = Self;
     fn update(&mut self, _elapsed_time: f32) -> Self::DrawCommands {
         Self {}
@@ -351,9 +348,9 @@ impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
 }
 
 impl<R: Renderer, C: Camera> Loop<R, C> {
-    pub fn scene(&self) -> Scene<DrawableTerminator, Self> {
+    pub fn scene(&self) -> Scene<Nil, Self> {
         Scene {
-            objects: DrawableTerminator {},
+            objects: Nil {},
             _loop: PhantomData,
         }
     }

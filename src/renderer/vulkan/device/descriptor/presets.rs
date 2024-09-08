@@ -3,14 +3,15 @@ use std::marker::PhantomData;
 use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
-use crate::renderer::{
-    camera::CameraMatrices,
-    vulkan::device::{framebuffer::InputAttachment, image::Texture2D},
+use crate::{
+    core::{Cons, Nil},
+    renderer::{
+        camera::CameraMatrices,
+        vulkan::device::{framebuffer::InputAttachment, image::Texture2D},
+    },
 };
 
-use super::{
-    DescriptorBinding, DescriptorBindingNode, DescriptorBindingTerminator, DescriptorLayoutBuilder,
-};
+use super::{DescriptorBinding, DescriptorLayoutBuilder};
 
 pub trait PipelineStage: 'static {
     const STAGE: vk::ShaderStageFlags;
@@ -202,26 +203,24 @@ impl DescriptorBinding for InputAttachment {
     }
 }
 
-pub type CameraDescriptorSet =
-    DescriptorLayoutBuilder<DescriptorBindingNode<CameraMatrices, DescriptorBindingTerminator>>;
+pub type CameraDescriptorSet = DescriptorLayoutBuilder<Cons<CameraMatrices, Nil>>;
 
-pub type TextureDescriptorSet =
-    DescriptorLayoutBuilder<DescriptorBindingNode<Texture2D, DescriptorBindingTerminator>>;
+pub type TextureDescriptorSet = DescriptorLayoutBuilder<Cons<Texture2D, Nil>>;
 
 pub type GBufferDescriptorSet = DescriptorLayoutBuilder<
-    DescriptorBindingNode<
+    Cons<
         // Albedo
         InputAttachment,
-        DescriptorBindingNode<
+        Cons<
             // Position
             InputAttachment,
-            DescriptorBindingNode<
+            Cons<
                 // Normal
                 InputAttachment,
-                DescriptorBindingNode<
+                Cons<
                     // Depth
                     InputAttachment,
-                    DescriptorBindingTerminator,
+                    Nil,
                 >,
             >,
         >,

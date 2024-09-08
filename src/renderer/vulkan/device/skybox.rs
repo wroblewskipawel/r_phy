@@ -2,6 +2,7 @@ use std::error::Error;
 use std::path::Path;
 
 use crate::{
+    core::Nil,
     physics::shape,
     renderer::{camera::CameraMatrices, model::CommonVertex},
 };
@@ -10,16 +11,16 @@ use super::{
     descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
     image::Texture2D,
     pipeline::{
-        DescriptorLayoutNode, DescriptorLayoutTerminator, GraphicsPipeline, GraphicsPipelineConfig,
-        ModuleLoader, PipelineLayoutBuilder, PushConstantNode, PushConstantTerminator,
+        DescriptorLayoutNode, GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader,
+        PipelineLayoutBuilder, PushConstantNode,
     },
     resources::MeshPack,
     VulkanDevice,
 };
 
 pub type LayoutSkybox = PipelineLayoutBuilder<
-    DescriptorLayoutNode<TextureDescriptorSet, DescriptorLayoutTerminator>,
-    PushConstantNode<CameraMatrices, PushConstantTerminator>,
+    DescriptorLayoutNode<TextureDescriptorSet, Nil>,
+    PushConstantNode<CameraMatrices, Nil>,
 >;
 
 pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {

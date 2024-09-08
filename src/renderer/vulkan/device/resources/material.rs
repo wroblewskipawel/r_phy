@@ -8,13 +8,13 @@ pub use pack::*;
 
 use ash::vk;
 
+use crate::core::{Cons, Nil};
 use crate::renderer::model::Material;
 
 use crate::renderer::vulkan::device::descriptor::{FragmentStage, PodUniform};
 
 use crate::renderer::vulkan::device::descriptor::{
-    DescriptorBinding, DescriptorBindingNode, DescriptorBindingTerminator, DescriptorLayout,
-    DescriptorLayoutBuilder,
+    DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder,
 };
 
 pub struct TextureSamplers<M: Material> {
@@ -60,9 +60,6 @@ pub trait VulkanMaterial: Material {
 
 impl<T: Material> VulkanMaterial for T {
     type DescriptorLayout = DescriptorLayoutBuilder<
-        DescriptorBindingNode<
-            PodUniform<T::Uniform, FragmentStage>,
-            DescriptorBindingNode<TextureSamplers<T>, DescriptorBindingTerminator>,
-        >,
+        Cons<PodUniform<T::Uniform, FragmentStage>, Cons<TextureSamplers<T>, Nil>>,
     >;
 }
