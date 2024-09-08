@@ -2,10 +2,28 @@ use ash::vk;
 
 use crate::renderer::vulkan::device::framebuffer::{
     presets::AttachmentsGBuffer, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
-    AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, References, Transitions,
+    AttachmentTarget, AttachmentTerminator, AttachmentTransition, AttachmentTransitionBuilder,
+    References, Transitions,
 };
 
 use super::{RenderPassBuilder, Subpass, SubpassNode, SubpassTerminator, TransitionList};
+
+pub struct EmptyRenderPassTransitions {}
+
+impl TransitionList<AttachmentTerminator> for EmptyRenderPassTransitions {
+    fn transitions() -> Transitions<AttachmentTerminator> {
+        unreachable!()
+    }
+}
+
+pub struct EmptySubpass {}
+
+impl Subpass<AttachmentTerminator> for EmptySubpass {
+    fn references() -> References<AttachmentTerminator> {
+        unreachable!()
+    }
+}
+
 pub struct DeferedRenderPassTransitions<A: AttachmentList> {
     _phantom: std::marker::PhantomData<A>,
 }
@@ -173,6 +191,9 @@ impl Subpass<AttachmentsGBuffer> for GBufferSkyboxPass<AttachmentsGBuffer> {
             .push(None)
     }
 }
+
+pub type EmptyRenderPass =
+    RenderPassBuilder<SubpassTerminator<AttachmentTerminator>, EmptyRenderPassTransitions>;
 
 pub type DeferedRenderPass<A> = RenderPassBuilder<
     SubpassNode<

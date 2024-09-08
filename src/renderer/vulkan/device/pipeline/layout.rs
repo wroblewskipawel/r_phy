@@ -321,7 +321,13 @@ impl<L: Layout> From<PipelineLayoutRaw> for PipelineLayout<L> {
 #[derive(Debug, Clone, Copy)]
 pub struct PipelineLayout<L: Layout> {
     pub layout: vk::PipelineLayout,
-    _phantom: PhantomData<L>,
+    pub _phantom: PhantomData<L>,
+}
+
+impl<L: Layout> From<PipelineLayout<L>> for vk::PipelineLayout {
+    fn from(layout: PipelineLayout<L>) -> Self {
+        layout.layout
+    }
 }
 
 impl VulkanDevice {

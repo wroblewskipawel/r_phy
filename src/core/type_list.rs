@@ -43,3 +43,46 @@ impl<O, S, T: Marker, N: Contains<S, T>> Contains<S, There<T>> for Cons<O, N> {
         self.tail.get_mut()
     }
 }
+
+pub trait TypeList {
+    const LEN: usize;
+    type Item;
+    type Next: TypeList;
+}
+
+impl TypeList for Nil {
+    const LEN: usize = 0;
+    type Item = ();
+    type Next = Nil;
+}
+
+impl<T, N: TypeList> TypeList for Cons<T, N> {
+    const LEN: usize = 1;
+    type Item = T;
+    type Next = N;
+}
+
+pub trait Transmute<T> {
+    type Output;
+
+    fn transmute(self) -> Self::Output;
+}
+
+impl<T> Transmute<T> for Nil {
+    type Output = Nil;
+
+    fn transmute(self) -> Self::Output {
+        self
+    }
+}
+
+impl<O, T: Transmute<O>, N: Transmute<O>> Transmute<O> for Cons<T, N> {
+    type Output = Cons<T::Output, N::Output>;
+
+    fn transmute(self) -> Self::Output {
+        Cons {
+            head: self.head.transmute(),
+            tail: self.tail.transmute(),
+        }
+    }
+}

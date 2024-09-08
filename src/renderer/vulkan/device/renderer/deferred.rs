@@ -1,13 +1,7 @@
 mod commands;
 mod draw_graph;
 
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    error::Error,
-    marker::PhantomData,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, marker::PhantomData, path::Path};
 
 use ash::vk;
 
@@ -19,7 +13,7 @@ use crate::{
     renderer::{
         camera::CameraMatrices,
         model::{CommonVertex, Drawable, MeshBuilder},
-        shader::{ShaderHandle, ShaderType, ShaderTypeList},
+        shader::{ShaderHandle, ShaderType},
         vulkan::{
             core::Context,
             device::{
@@ -32,10 +26,13 @@ use crate::{
                 image::VulkanImage2D,
                 pipeline::{
                     GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
-                    GBufferWritePassPipeline, GraphicsPipeline, GraphicsPipelineTypeList,
-                    PipelineCollection, ShaderDirectory,
+                    GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
+                    GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
+                    ShaderDirectory, StatesDepthWriteDisabled,
                 },
-                render_pass::{DeferedRenderPass, GBufferShadingPass, RenderPass, Subpass},
+                render_pass::{
+                    DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
+                },
                 resources::{MaterialPackList, MeshPack, MeshPackList},
                 skybox::Skybox,
                 swapchain::VulkanSwapchain,
@@ -45,14 +42,28 @@ use crate::{
     },
 };
 
-impl<S: ShaderTypeList> GraphicsPipelineTypeList for S {
-    const LEN: usize = S::LEN;
-    type Pipeline = GBufferWritePassPipeline<
-        AttachmentsGBuffer,
-        <S::Item as ShaderType>::Material,
-        <S::Item as ShaderType>::Vertex,
-    >;
-    type Next = S::Next;
+pub struct DeferredShader<S: ShaderType> {
+    shader: S,
+}
+
+impl<S: ShaderType> GraphicsPipelineConfig for DeferredShader<S> {
+    type Attachments = AttachmentsGBuffer;
+    type Layout = PipelineLayoutMaterial<S::Material>;
+    type PipelineStates = StatesDepthWriteDisabled<S::Vertex>;
+    type RenderPass = DeferedRenderPass<AttachmentsGBuffer>;
+    type Subpass = GBufferWritePass<AttachmentsGBuffer>;
+}
+
+impl<S: ShaderType> From<S> for DeferredShader<S> {
+    fn from(shader: S) -> Self {
+        DeferredShader { shader }
+    }
+}
+
+impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
+    fn load<'a>(&self, device: &'a VulkanDevice) -> Result<Modules<'a>, Box<dyn Error>> {
+        ShaderDirectory::new(self.shader.source()).load(device)
+    }
 }
 
 pub struct GBuffer {
@@ -63,65 +74,56 @@ pub struct GBuffer {
     pub depth: VulkanImage2D,
 }
 
-pub struct Pipelines<S: ShaderTypeList> {
-    write_pass: PipelineCollection,
+struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
+    write_pass: P,
     depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
     shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
-    _phantom: PhantomData<S>,
+    _phantom: PhantomData<P>,
 }
 
-impl<S: ShaderTypeList> Pipelines<S> {
-    fn get_pipeline_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
-        if let Some(pipelines) =
-            self.write_pass
-                .try_get::<GBufferWritePassPipeline<AttachmentsGBuffer, T::Material, T::Vertex>>()
-        {
-            Some(
-                (0..pipelines.len())
-                    .map(|index| ShaderHandle {
-                        index,
-                        _phantom: PhantomData,
-                    })
-                    .collect(),
-            )
-        } else {
-            None
-        }
-    }
-}
-
-pub struct DeferredRenderer<S: ShaderTypeList> {
-    frames: FramePool<DeferredRenderer<S>>,
-    pipelines: Pipelines<S>,
-    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
-    descriptors: DescriptorPool<GBufferDescriptorSet>,
-    skybox: Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>,
-    mesh: MeshPack<CommonVertex>,
+struct DeferredRendererFrameData<P: GraphicsPipelinePackList> {
     g_buffer: GBuffer,
-    swapchain: VulkanSwapchain<<Self as Frame>::Attachments>,
+    frames: FramePool<DeferredRenderer<P>>,
+    descriptors: DescriptorPool<GBufferDescriptorSet>,
+    swapchain: VulkanSwapchain<DeferredRenderer<P>>,
+}
+
+struct DeferredRendererResources {
+    mesh: MeshPack<CommonVertex>,
+    skybox: Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>,
+}
+
+pub struct DeferredRenderer<P: GraphicsPipelinePackList> {
+    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
+    pipelines: DeferredRendererPipelines<P>,
+    resources: DeferredRendererResources,
+    frames: DeferredRendererFrameData<P>,
     current_frame: Option<FrameData<Self>>,
 }
 
-pub struct DeferredRendererFrameState<S: ShaderTypeList> {
-    commands: Commands<S>,
+pub struct DeferredRendererFrameState<P: GraphicsPipelinePackList> {
+    commands: Commands<P>,
     draw_graph: DrawGraph,
 }
 
-impl<T: ShaderTypeList> Frame for DeferredRenderer<T> {
-    const REQUIRED_COMMANDS: usize = 3 + T::LEN;
+impl<P: GraphicsPipelinePackList> Frame for DeferredRenderer<P> {
+    const REQUIRED_COMMANDS: usize = P::LEN + 3;
     type Attachments = AttachmentsGBuffer;
-    type State = DeferredRendererFrameState<T>;
+    type State = DeferredRendererFrameState<P>;
 
     fn begin_frame(
         &mut self,
         device: &VulkanDevice,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
-        let (index, primary_command) = self.frames.primary_commands.next();
+        let (index, primary_command) = self.frames.frames.primary_commands.next();
         let primary_command = device.begin_primary_command(primary_command)?;
-        let swapchain_frame = device.get_frame(&self.swapchain, self.frames.image_sync[index])?;
-        let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
-        self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
+        let swapchain_frame = self
+            .frames
+            .swapchain
+            .get_frame(self.frames.frames.image_sync[index])?;
+        let camera_descriptor = self.frames.frames.camera_uniform.descriptors.get(index);
+        self.frames.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
         let commands =
             self.prepare_commands(device, &swapchain_frame, camera_descriptor, camera_matrices)?;
         let draw_graph = DrawGraph::new();
@@ -163,12 +165,24 @@ impl<T: ShaderTypeList> Frame for DeferredRenderer<T> {
         let commands = self.record_draw_calls(device, renderer_state, &swapchain_frame)?;
         let primary_command =
             self.record_primary_command(device, primary_command, commands, &swapchain_frame)?;
-        device.present_frame(&self.swapchain, primary_command, swapchain_frame)?;
+        device.present_frame(&self.frames.swapchain, primary_command, swapchain_frame)?;
         Ok(())
     }
 
     fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-        self.pipelines.get_pipeline_handles()
+        if let Some(pack) = self.pipelines.write_pass.try_get::<DeferredShader<S>>() {
+            let len = pack.len();
+            Some(
+                (0..len)
+                    .map(|index| ShaderHandle {
+                        index,
+                        _phantom: PhantomData,
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        }
     }
 }
 
@@ -187,60 +201,57 @@ impl GBuffer {
     }
 }
 
-fn adapt_shader_source_map<S: ShaderTypeList>(
-    mut adapted: HashMap<TypeId, Vec<PathBuf>>,
-    shaders: &S,
-) -> HashMap<TypeId, Vec<PathBuf>> {
-    if S::LEN > 0 {
-        adapted.insert(
-            TypeId::of::<
-                GBufferWritePassPipeline<
-                    AttachmentsGBuffer,
-                    <S::Item as ShaderType>::Material,
-                    <S::Item as ShaderType>::Vertex,
-                >,
-            >(),
-            shaders
-                .shaders()
-                .iter()
-                .map(|s| s.source().into())
-                .collect(),
-        );
-        adapt_shader_source_map::<S::Next>(adapted, shaders.next())
-    } else {
-        adapted
-    }
-}
-
 impl Context {
-    pub fn create_deferred_renderer<B: ShaderTypeList>(
+    fn create_pipelines<P: GraphicsPipelineListBuilder>(
         &mut self,
-        shaders: &B,
-    ) -> Result<DeferredRenderer<B>, Box<dyn Error>> {
+        pipelines: &P,
+    ) -> Result<DeferredRendererPipelines<P::Pack>, Box<dyn Error>> {
+        let write_pass = pipelines.build(&self)?;
+        let depth_prepass = self.create_graphics_pipeline(
+            self.get_pipeline_layout()?,
+            &ShaderDirectory::new(Path::new("shaders/spv/deferred/depth_prepass")),
+        )?;
+        let shading_pass = self.create_graphics_pipeline(
+            self.get_pipeline_layout()?,
+            &ShaderDirectory::new(Path::new("shaders/spv/deferred/gbuffer_combine")),
+        )?;
+        Ok(DeferredRendererPipelines {
+            write_pass,
+            depth_prepass,
+            shading_pass,
+            _phantom: PhantomData,
+        })
+    }
+
+    fn create_frame_data<P: GraphicsPipelinePackList>(
+        &mut self,
+    ) -> Result<DeferredRendererFrameData<P>, Box<dyn Error>> {
         let g_buffer = self.create_g_buffer()?;
-        // TODO: Consider revamping the module hierarchy
-        let swapchain = self.create_swapchain::<AttachmentsGBuffer>(
-            &self.instance,
-            &self.surface,
-            |swapchain_image, extent| {
-                self.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
-                    g_buffer.get_framebuffer_builder(swapchain_image),
-                    extent,
-                )
-            },
-        )?;
-        let frames = self.create_frame_pool(&swapchain)?;
-        let render_pass = self.get_render_pass()?;
-        let pipelines = self.create_pipelines(shaders)?;
-        let skybox = self.create_skybox(
-            Path::new("assets/skybox/skybox"),
-            ShaderDirectory::new(Path::new("shaders/spv/skybox")),
-        )?;
+        let swapchain = self.create_swapchain(|swapchain_image, extent| {
+            self.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
+                g_buffer.get_framebuffer_builder(swapchain_image),
+                extent,
+            )
+        })?;
         let descriptors = self.create_descriptor_pool(
             DescriptorSetWriter::<GBufferDescriptorSet>::new(1).write_images::<InputAttachment, _>(
                 &GBufferShadingPass::<AttachmentsGBuffer>::references()
                     .get_input_attachments(&swapchain.framebuffers[0]),
             ),
+        )?;
+        let frames = self.create_frame_pool(&swapchain)?;
+        Ok(DeferredRendererFrameData {
+            g_buffer,
+            frames,
+            descriptors,
+            swapchain,
+        })
+    }
+
+    fn create_renderer_resources(&mut self) -> Result<DeferredRendererResources, Box<dyn Error>> {
+        let skybox = self.create_skybox(
+            Path::new("assets/skybox/skybox"),
+            ShaderDirectory::new(Path::new("shaders/spv/skybox")),
         )?;
         let mesh = self.load_mesh_pack(
             &[MeshBuilder::plane_subdivided(
@@ -255,59 +266,61 @@ impl Context {
             usize::MAX,
         )?;
 
+        Ok(DeferredRendererResources { mesh, skybox })
+    }
+
+    pub fn create_deferred_renderer<B: GraphicsPipelineListBuilder>(
+        &mut self,
+        pipelines: &B,
+    ) -> Result<DeferredRenderer<B::Pack>, Box<dyn Error>> {
+        let frames = self.create_frame_data()?;
+        let render_pass = self.get_render_pass()?;
+        let pipelines = self.create_pipelines(pipelines)?;
+        let resources = self.create_renderer_resources()?;
+
         Ok(DeferredRenderer {
             frames,
             pipelines,
             render_pass,
-            descriptors,
-            mesh,
-            skybox,
-            swapchain,
-            g_buffer,
+            resources,
             current_frame: None,
         })
     }
 
-    pub fn destroy_deferred_renderer<S: ShaderTypeList>(&self, renderer: &mut DeferredRenderer<S>) {
-        self.destroy_frame_pool(&mut renderer.frames);
-        self.destroy_pipelines(&mut renderer.pipelines);
-        self.destroy_descriptor_pool(&mut renderer.descriptors);
-        self.destroy_mesh_pack(&mut renderer.mesh);
-        self.destroy_skybox(&mut renderer.skybox);
-        self.destroy_swapchain(&mut renderer.swapchain);
-        self.destroy_g_buffer(&mut renderer.g_buffer);
-    }
-
-    fn create_pipelines<B: ShaderTypeList>(
+    fn destroy_pipelines<P: GraphicsPipelinePackList>(
         &self,
-        shaders: &B,
-    ) -> Result<Pipelines<B>, Box<dyn Error>> {
-        let image_extent = self.physical_device.surface_properties.get_current_extent();
-        let write_pass =
-            self.create_pipeline_list::<B>(&adapt_shader_source_map::<B>(HashMap::new(), shaders))?;
-        let depth_prepass = self.create_graphics_pipeline(
-            ShaderDirectory::new(Path::new("shaders/spv/deferred/depth_prepass")),
-            image_extent,
-        )?;
-        let shading_pass = self.create_graphics_pipeline(
-            ShaderDirectory::new(Path::new("shaders/spv/deferred/gbuffer_combine")),
-            image_extent,
-        )?;
-        Ok(Pipelines {
-            write_pass,
-            depth_prepass,
-            shading_pass,
-            _phantom: PhantomData,
-        })
-    }
-
-    fn destroy_pipelines<S: ShaderTypeList>(&self, pipelines: &mut Pipelines<S>) {
-        self.destory_pipeline_list(&mut pipelines.write_pass);
+        pipelines: &mut DeferredRendererPipelines<P>,
+    ) {
+        pipelines.write_pass.destroy(&self);
         self.destroy_pipeline(&mut pipelines.depth_prepass);
         self.destroy_pipeline(&mut pipelines.shading_pass);
     }
 
-    pub fn create_g_buffer(&mut self) -> Result<GBuffer, Box<dyn Error>> {
+    fn destroy_frame_state<P: GraphicsPipelinePackList>(
+        &self,
+        frames: &mut DeferredRendererFrameData<P>,
+    ) {
+        self.destroy_frame_pool(&mut frames.frames);
+        self.destroy_descriptor_pool(&mut frames.descriptors);
+        self.destroy_swapchain(&mut frames.swapchain);
+        self.destroy_g_buffer(&mut frames.g_buffer);
+    }
+
+    fn destroy_renderer_resources(&self, resources: &mut DeferredRendererResources) {
+        self.destroy_mesh_pack(&mut resources.mesh);
+        self.destroy_skybox(&mut resources.skybox);
+    }
+
+    pub fn destroy_deferred_renderer<P: GraphicsPipelinePackList>(
+        &self,
+        renderer: &mut DeferredRenderer<P>,
+    ) {
+        self.destroy_renderer_resources(&mut renderer.resources);
+        self.destroy_frame_state(&mut renderer.frames);
+        self.destroy_pipelines(&mut renderer.pipelines);
+    }
+
+    fn create_g_buffer(&mut self) -> Result<GBuffer, Box<dyn Error>> {
         let combined = self.create_color_attachment_image()?;
         let albedo = self.create_color_attachment_image()?;
         let normal = self.create_color_attachment_image()?;
@@ -322,7 +335,7 @@ impl Context {
         })
     }
 
-    pub fn destroy_g_buffer(&self, g_buffer: &mut GBuffer) {
+    fn destroy_g_buffer(&self, g_buffer: &mut GBuffer) {
         self.destroy_image(&mut g_buffer.combined);
         self.destroy_image(&mut g_buffer.albedo);
         self.destroy_image(&mut g_buffer.normal);

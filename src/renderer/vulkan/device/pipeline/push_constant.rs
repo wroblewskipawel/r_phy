@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use bytemuck::Pod;
+use bytemuck::{AnyBitPattern, Pod};
 
 use ash::vk;
 
@@ -13,7 +13,7 @@ pub struct PushConstantRangeMapper {
 
 impl PushConstantRangeMapper {
     pub fn new<C: GraphicsPipelineConfig>(pipeline: &GraphicsPipeline<C>) -> Self {
-        let layout = pipeline.layout.layout;
+        let layout = pipeline.layout().into();
         let ranges = Self::get_ranges::<<C::Layout as Layout>::PushConstants>();
         Self { layout, ranges }
     }
@@ -54,20 +54,20 @@ impl PushConstantRangeMapper {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PushConstantDataRef<'a, T: PushConstant + Pod> {
+pub struct PushConstantDataRef<'a, T: PushConstant + AnyBitPattern> {
     pub layout: vk::PipelineLayout,
     pub range: vk::PushConstantRange,
     pub data: &'a T,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PushConstantData<T: PushConstant + Pod> {
+pub struct PushConstantData<T: PushConstant + AnyBitPattern> {
     pub layout: vk::PipelineLayout,
     pub range: vk::PushConstantRange,
     pub data: T,
 }
 
-impl<'a, T: PushConstant + Pod, N: PushConstant + Pod + From<&'a T>>
+impl<'a, T: PushConstant + AnyBitPattern, N: PushConstant + AnyBitPattern + From<&'a T>>
     From<PushConstantDataRef<'a, T>> for PushConstantData<N>
 {
     fn from(value: PushConstantDataRef<'a, T>) -> Self {
@@ -80,7 +80,9 @@ impl<'a, T: PushConstant + Pod, N: PushConstant + Pod + From<&'a T>>
     }
 }
 
-impl<'a, T: PushConstant + Pod> From<&'a PushConstantData<T>> for PushConstantDataRef<'a, T> {
+impl<'a, T: PushConstant + AnyBitPattern> From<&'a PushConstantData<T>>
+    for PushConstantDataRef<'a, T>
+{
     fn from(value: &'a PushConstantData<T>) -> Self {
         Self {
             layout: value.layout,

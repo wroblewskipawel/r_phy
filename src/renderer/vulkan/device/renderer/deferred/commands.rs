@@ -4,7 +4,6 @@ use ash::vk;
 
 use crate::renderer::{
     camera::CameraMatrices,
-    shader::ShaderTypeList,
     vulkan::device::{
         command::{
             level::{Primary, Secondary},
@@ -15,6 +14,7 @@ use crate::renderer::{
         framebuffer::{
             presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
         },
+        pipeline::GraphicsPipelinePackList,
         render_pass::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
         swapchain::SwapchainFrame,
         VulkanDevice,
@@ -23,24 +23,24 @@ use crate::renderer::{
 
 use super::DeferredRenderer;
 
-pub(super) struct Commands<S: ShaderTypeList> {
+pub(super) struct Commands<P: GraphicsPipelinePackList> {
     pub write_pass: Vec<BeginCommand<Persistent, Secondary, Graphics>>,
     pub depth_prepass: BeginCommand<Persistent, Secondary, Graphics>,
     pub shading_pass: BeginCommand<Persistent, Secondary, Graphics>,
     pub skybox_pass: BeginCommand<Persistent, Secondary, Graphics>,
-    pub _phantom: PhantomData<S>,
+    pub _phantom: PhantomData<P>,
 }
 
-impl<S: ShaderTypeList> DeferredRenderer<S> {
+impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
     pub(super) fn prepare_commands(
         &mut self,
         device: &VulkanDevice,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+        swapchain_frame: &SwapchainFrame<Self>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
-    ) -> Result<Commands<S>, Box<dyn Error>> {
+    ) -> Result<Commands<P>, Box<dyn Error>> {
         let depth_prepass = {
-            let (_, command) = self.frames.secondary_commands.next();
+            let (_, command) = self.frames.frames.secondary_commands.next();
             device.record_command(
                 device.begin_secondary_command::<_, _, _, GBufferDepthPrepas<AttachmentsGBuffer>>(
                     command,
@@ -58,7 +58,7 @@ impl<S: ShaderTypeList> DeferredRenderer<S> {
                 },
             )
         };
-        let (_, shading_pass) = self.frames.secondary_commands.next();
+        let (_, shading_pass) = self.frames.frames.secondary_commands.next();
         let shading_pass = device.begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
             shading_pass,
             self.render_pass,
@@ -69,24 +69,25 @@ impl<S: ShaderTypeList> DeferredRenderer<S> {
                 .bind_pipeline(&self.pipelines.shading_pass)
                 .bind_descriptor_set(
                     &self
+                        .frames
                         .descriptors
                         .get(0)
                         .get_binding_data(&self.pipelines.shading_pass)
                         .unwrap(),
                 )
-                .bind_mesh_pack(&self.mesh)
-                .draw_mesh(self.mesh.get(0))
+                .bind_mesh_pack(&self.resources.mesh)
+                .draw_mesh(self.resources.mesh.get(0))
         });
-        let (_, skybox_pass) = self.frames.secondary_commands.next();
+        let (_, skybox_pass) = self.frames.frames.secondary_commands.next();
         let skybox_pass = device.begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
             skybox_pass,
             self.render_pass,
             swapchain_frame.framebuffer,
         )?;
         let skybox_pass = device.record_command(skybox_pass, |command| {
-            command.draw_skybox(&self.skybox, *camera_matrices)
+            command.draw_skybox(&self.resources.skybox, *camera_matrices)
         });
-        let write_pass = Vec::with_capacity(S::LEN);
+        let write_pass = Vec::with_capacity(P::LEN);
         Ok(Commands {
             write_pass,
             depth_prepass,
@@ -100,8 +101,8 @@ impl<S: ShaderTypeList> DeferredRenderer<S> {
         &self,
         device: &VulkanDevice,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
-        commands: Commands<S>,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+        commands: Commands<P>,
+        swapchain_frame: &SwapchainFrame<Self>,
     ) -> Result<FinishedCommand<Persistent, Primary, Graphics>, Box<dyn Error>> {
         let Commands {
             write_pass,

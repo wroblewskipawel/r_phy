@@ -40,8 +40,8 @@ impl VulkanDevice {
             DescriptorSetWriter::<TextureDescriptorSet>::new(1)
                 .write_images::<Texture2D, _>(std::slice::from_ref(&texture)),
         )?;
-        let image_extent = self.physical_device.surface_properties.get_current_extent();
-        let pipeline = self.create_graphics_pipeline(modules, image_extent)?;
+        let layout = self.get_pipeline_layout::<L::Layout>()?;
+        let pipeline = self.create_graphics_pipeline(layout, &modules)?;
         let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()], usize::MAX)?;
         Ok(Skybox {
             texture,

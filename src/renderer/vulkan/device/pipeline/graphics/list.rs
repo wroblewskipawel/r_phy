@@ -1,110 +1,112 @@
-use std::{any::TypeId, collections::HashMap, error::Error, marker::PhantomData, path::PathBuf};
+use std::error::Error;
 
-use crate::renderer::vulkan::device::{
-    framebuffer::presets::AttachmentsGBuffer, pipeline::ShaderDirectory, VulkanDevice,
+use crate::{
+    core::{Cons, Nil},
+    renderer::vulkan::device::{pipeline::ModuleLoader, VulkanDevice},
 };
 
 use super::{
-    GBufferDepthPrepasPipeline, GraphicsPipeline, GraphicsPipelineConfig,
-    GraphicsPipelineTypeErased,
+    EmptyPipeline, GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut,
 };
 
-pub trait GraphicsPipelineTypeList {
+pub trait GraphicsPipelineTypeList: 'static {
     const LEN: usize;
-    type Pipeline: GraphicsPipelineConfig;
+    type Item: GraphicsPipelineConfig;
     type Next: GraphicsPipelineTypeList;
 }
 
-pub struct GraphicsPipelineTerminator;
+pub trait GraphicsPipelineListBuilder: GraphicsPipelineTypeList {
+    type Pack: GraphicsPipelinePackList;
 
-impl GraphicsPipelineTypeList for GraphicsPipelineTerminator {
+    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
+}
+
+impl GraphicsPipelineTypeList for Nil {
     const LEN: usize = 0;
-    type Pipeline = GBufferDepthPrepasPipeline<AttachmentsGBuffer>;
-    type Next = Self;
+    type Item = EmptyPipeline;
+    type Next = Nil;
 }
 
-pub struct PipelineCollection {
-    pipelines: HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>,
-}
+impl GraphicsPipelineListBuilder for Nil {
+    type Pack = Nil;
 
-pub struct PipelineListRef<'a, C: GraphicsPipelineConfig> {
-    pipelines: &'a Vec<GraphicsPipelineTypeErased>,
-    _phantom: PhantomData<C>,
-}
-
-impl<'a, T: GraphicsPipelineConfig> PipelineListRef<'a, T> {
-    pub fn get(&self, index: usize) -> GraphicsPipeline<T> {
-        self.pipelines[index].try_into().unwrap()
-    }
-
-    pub fn len(&self) -> usize {
-        self.pipelines.len()
+    fn build(&self, _device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+        Ok(Nil {})
     }
 }
 
-impl<'a, T: GraphicsPipelineConfig> IntoIterator for PipelineListRef<'a, T> {
-    type Item = GraphicsPipeline<T>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.pipelines
-            .iter()
-            .map(|&p| p.try_into().unwrap())
-            .collect::<Vec<_>>()
-            .into_iter()
-    }
+impl<T: GraphicsPipelineConfig, N: GraphicsPipelineListBuilder> GraphicsPipelineTypeList
+    for Cons<Vec<T>, N>
+{
+    const LEN: usize = N::LEN + 1;
+    type Item = T;
+    type Next = N;
 }
 
-impl PipelineCollection {
-    pub fn try_get<T: GraphicsPipelineConfig>(&self) -> Option<PipelineListRef<T>> {
-        if let Some(pipelines) = self.pipelines.get(&TypeId::of::<T>()) {
-            Some(PipelineListRef {
-                pipelines,
-                _phantom: PhantomData,
-            })
-        } else {
-            None
-        }
-    }
+impl<T: GraphicsPipelineConfig, N: GraphicsPipelinePackList> GraphicsPipelineTypeList
+    for Cons<PipelinePack<T>, N>
+{
+    const LEN: usize = N::LEN + 1;
+    type Item = T;
+    type Next = N;
 }
 
-impl VulkanDevice {
-    fn insert_pipeline<C: GraphicsPipelineTypeList>(
-        &self,
-        mut pipelines: HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>,
-        shaders: &HashMap<TypeId, Vec<PathBuf>>,
-    ) -> Result<HashMap<TypeId, Vec<GraphicsPipelineTypeErased>>, Box<dyn Error>> {
-        if C::LEN > 0 {
-            let type_erased = shaders
-                .get(&TypeId::of::<C::Pipeline>())
-                .ok_or("No shader found for pipeline!")?
-                .iter()
-                .flat_map(|shader_source| {
-                    self.create_graphics_pipeline::<C::Pipeline>(
-                        ShaderDirectory::new(&shader_source),
-                        self.physical_device.surface_properties.get_current_extent(),
-                    )
-                    .map(|pipeline| pipeline.into())
-                })
-                .collect();
-            pipelines.insert(TypeId::of::<C::Pipeline>(), type_erased);
-            self.insert_pipeline::<C::Next>(pipelines, shaders)
-        } else {
-            Ok(pipelines)
-        }
-    }
+impl<T: GraphicsPipelineConfig + ModuleLoader, N: GraphicsPipelineListBuilder>
+    GraphicsPipelineListBuilder for Cons<Vec<T>, N>
+{
+    type Pack = Cons<PipelinePack<T>, N::Pack>;
 
-    pub fn create_pipeline_list<C: GraphicsPipelineTypeList>(
-        &self,
-        shaders: &HashMap<TypeId, Vec<PathBuf>>,
-    ) -> Result<PipelineCollection, Box<dyn Error>> {
-        Ok(PipelineCollection {
-            pipelines: self.insert_pipeline::<C>(HashMap::new(), shaders)?,
+    fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+        let mut pack = device.create_pipeline_pack()?;
+        device.load_pipelines(&mut pack, &self.head)?;
+        Ok(Cons {
+            head: pack,
+            tail: self.tail.build(device)?,
         })
     }
-    pub fn destory_pipeline_list(&self, list: &mut PipelineCollection) {
-        list.pipelines
-            .iter_mut()
-            .for_each(|(_, pipelines)| pipelines.iter_mut().for_each(|p| self.destroy_pipeline(p)));
+}
+
+pub trait GraphicsPipelinePackList: GraphicsPipelineTypeList {
+    fn destroy(&mut self, device: &VulkanDevice);
+
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>>;
+
+    fn try_get_mut<P: GraphicsPipelineConfig>(&mut self) -> Option<PipelinePackRefMut<P>>;
+}
+
+impl GraphicsPipelinePackList for Nil {
+    fn destroy(&mut self, _device: &VulkanDevice) {}
+
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
+        None
+    }
+
+    fn try_get_mut<P: GraphicsPipelineConfig>(&mut self) -> Option<PipelinePackRefMut<P>> {
+        None
+    }
+}
+
+impl<T: GraphicsPipelineConfig, N: GraphicsPipelinePackList> GraphicsPipelinePackList
+    for Cons<PipelinePack<T>, N>
+{
+    fn destroy(&mut self, device: &VulkanDevice) {
+        device.destory_pipeline_pack(&mut self.head);
+        self.tail.destroy(device);
+    }
+
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
+        if let Ok(pipelines) = (&self.head).try_into() {
+            Some(pipelines)
+        } else {
+            self.tail.try_get::<P>()
+        }
+    }
+
+    fn try_get_mut<P: GraphicsPipelineConfig>(&mut self) -> Option<PipelinePackRefMut<P>> {
+        if let Ok(pipelines) = (&mut self.head).try_into() {
+            Some(pipelines)
+        } else {
+            self.tail.try_get_mut::<P>()
+        }
     }
 }

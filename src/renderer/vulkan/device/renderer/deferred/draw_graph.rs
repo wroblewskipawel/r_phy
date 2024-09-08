@@ -7,12 +7,12 @@ use crate::{
     math::types::Matrix4,
     renderer::{
         model::{Drawable, Material, MaterialHandle, MeshHandle, Vertex},
-        shader::{ShaderHandle, ShaderType, ShaderTypeList},
+        shader::{ShaderHandle, ShaderType},
         vulkan::device::{
             descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
             framebuffer::presets::AttachmentsGBuffer,
             pipeline::{
-                GBufferWritePassPipeline, GraphicsPipeline, ModelMatrix, ModelNormalMatrix,
+                GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
                 PipelineBindData, PushConstantRangeMapper,
             },
             render_pass::GBufferWritePass,
@@ -26,7 +26,7 @@ use crate::{
     },
 };
 
-use super::{Commands, DeferredRenderer, DeferredRendererFrameState};
+use super::{Commands, DeferredRenderer, DeferredRendererFrameState, DeferredShader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModelIndex {
@@ -121,7 +121,7 @@ pub struct DrawGraph {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
-impl<T: ShaderTypeList> DeferredRenderer<T> {
+impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
     pub(super) fn append_draw_call<
         S: ShaderType,
         D: Drawable,
@@ -186,9 +186,9 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
     pub(super) fn record_draw_calls(
         &mut self,
         device: &VulkanDevice,
-        state: DeferredRendererFrameState<T>,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
-    ) -> Result<Commands<T>, Box<dyn Error>> {
+        state: DeferredRendererFrameState<P>,
+        swapchain_frame: &SwapchainFrame<Self>,
+    ) -> Result<Commands<P>, Box<dyn Error>> {
         let DeferredRendererFrameState {
             commands:
                 Commands {
@@ -241,7 +241,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
         });
 
         for (_, pipeline_state) in draw_graph.pipeline_states {
-            let (_, command) = self.frames.secondary_commands.next();
+            let (_, command) = self.frames.frames.secondary_commands.next();
             let command = device.record_command(
                 device.begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
                     command,
@@ -302,9 +302,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
             index: pipeline_index,
             ..
         } = shader;
-        let pipeline: GraphicsPipeline<
-            GBufferWritePassPipeline<AttachmentsGBuffer, S::Material, S::Vertex>,
-        > = self
+        let pipeline: GraphicsPipeline<DeferredShader<S>> = self
             .pipelines
             .write_pass
             .try_get()
@@ -326,9 +324,7 @@ impl<T: ShaderTypeList> DeferredRenderer<T> {
             index: pipeline_index,
             ..
         } = shader;
-        let pipeline: GraphicsPipeline<
-            GBufferWritePassPipeline<AttachmentsGBuffer, S::Material, S::Vertex>,
-        > = self
+        let pipeline: GraphicsPipeline<DeferredShader<S>> = self
             .pipelines
             .write_pass
             .try_get()

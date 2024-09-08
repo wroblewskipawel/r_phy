@@ -11,6 +11,7 @@ use crate::{
         camera::CameraMatrices,
         model::Drawable,
         shader::{ShaderHandle, ShaderType},
+        vulkan::core::Context,
     },
 };
 
@@ -64,7 +65,7 @@ pub struct CameraUniform {
 }
 
 pub struct FrameData<C: Frame> {
-    pub swapchain_frame: SwapchainFrame<C::Attachments>,
+    pub swapchain_frame: SwapchainFrame<C>,
     pub primary_command: BeginCommand<Persistent, Primary, Graphics>,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     pub renderer_state: C::State,
@@ -78,7 +79,7 @@ pub struct FramePool<F: Frame> {
     _phantom: PhantomData<F>,
 }
 
-impl VulkanDevice {
+impl Context {
     fn create_camera_uniform(
         &mut self,
         num_images: usize,
@@ -101,7 +102,7 @@ impl VulkanDevice {
 
     pub fn create_frame_pool<F: Frame>(
         &mut self,
-        swapchain: &VulkanSwapchain<F::Attachments>,
+        swapchain: &VulkanSwapchain<F>,
     ) -> Result<FramePool<F>, Box<dyn Error>> {
         let image_sync = self.create_swapchain_image_sync(swapchain)?;
         let primary_commands = self.create_persistent_command_pool(swapchain.num_images)?;

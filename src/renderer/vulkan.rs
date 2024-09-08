@@ -19,11 +19,15 @@ use core::Context;
 use super::{
     camera::Camera,
     model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
-    shader::{ShaderHandle, ShaderType, ShaderTypeList},
+    shader::{ShaderHandle, ShaderType},
     Renderer, RendererBuilder,
 };
 use ash::vk;
-use device::frame::Frame;
+use device::{
+    frame::Frame,
+    pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
+    renderer::deferred::DeferredShader,
+};
 use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
 
@@ -60,7 +64,7 @@ impl VulkanRendererConfigBuilder {
 pub struct VulkanRendererBuilder<
     M: MaterialPackListBuilder,
     V: MeshPackListBuilder,
-    S: ShaderTypeList,
+    S: GraphicsPipelineListBuilder,
 > {
     materials: M,
     meshes: V,
@@ -85,7 +89,7 @@ impl VulkanRendererBuilder<Nil, Nil, Nil> {
     }
 }
 
-impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
     VulkanRendererBuilder<M, V, S>
 {
     pub fn with_material_type<N: Material>(self) -> VulkanRendererBuilder<Cons<Vec<N>, M>, V, S> {
@@ -127,7 +131,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
     pub fn with_shader_type<N: ShaderType, T: Marker, O: Marker>(
         self,
         _shader_type: PhantomData<N>,
-    ) -> VulkanRendererBuilder<M, V, Cons<Vec<N>, S>>
+    ) -> VulkanRendererBuilder<M, V, Cons<Vec<DeferredShader<N>>, S>>
     where
         M: Contains<Vec<N::Material>, T>,
         V: Contains<Vec<Mesh<N::Vertex>>, O>,
@@ -172,17 +176,19 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList>
 
     pub fn with_shaders<N: ShaderType, T: Marker>(mut self, shaders: Vec<N>) -> Self
     where
-        S: Contains<Vec<N>, T>,
+        S: Contains<Vec<DeferredShader<N>>, T>,
     {
-        self.shaders.get_mut().extend(shaders);
+        self.shaders
+            .get_mut()
+            .extend(shaders.into_iter().map(Into::<DeferredShader<N>>::into));
         self
     }
 }
 
-impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList> RendererBuilder
-    for VulkanRendererBuilder<M, V, S>
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
+    RendererBuilder for VulkanRendererBuilder<M, V, S>
 {
-    type Renderer = VulkanRenderer<M::Pack, V::Pack, S>;
+    type Renderer = VulkanRenderer<M::Pack, V::Pack, S::Pack>;
 
     fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
         let renderer = VulkanRenderer::new(
@@ -196,7 +202,7 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: ShaderTypeList> Rend
     }
 }
 
-pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> {
+pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> {
     materials: MaterialPacks<M>,
     meshes: MeshPacks<V>,
     renderer: DeferredRenderer<S>,
@@ -209,12 +215,12 @@ pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: ShaderTypeLis
 // TODO: User should be able to load custom shareds,
 // while also some preset of preconfigured one should be available
 // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> VulkanRenderer<M, V, S> {
+impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> VulkanRenderer<M, V, S> {
     pub fn new(
         window: &Window,
         materials: &impl MaterialPackListBuilder<Pack = M>,
         meshes: &impl MeshPackListBuilder<Pack = V>,
-        shaders: &S,
+        shaders: &impl GraphicsPipelineListBuilder<Pack = S>,
         config: &VulkanRendererConfig,
     ) -> Result<Self, Box<dyn Error>> {
         let mut context = Context::build(window, config)?;
@@ -230,7 +236,9 @@ impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> VulkanRenderer<M, 
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> Drop for VulkanRenderer<M, V, S> {
+impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Drop
+    for VulkanRenderer<M, V, S>
+{
     fn drop(&mut self) {
         let _ = self.context.wait_idle();
         self.context.destroy_materials(&mut self.materials);
@@ -239,7 +247,9 @@ impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> Drop for VulkanRen
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: ShaderTypeList> Renderer for VulkanRenderer<M, V, S> {
+impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
+    for VulkanRenderer<M, V, S>
+{
     type Materials = M;
     type Meshes = V;
 

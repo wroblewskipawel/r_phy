@@ -126,7 +126,7 @@ impl<T: DescriptorLayout> Descriptor<T> {
         Ok(DescriptorBindingData {
             set_index,
             set: self.set,
-            pipeline_layout: pipeline.layout.layout,
+            pipeline_layout: pipeline.layout().into(),
         })
     }
 }

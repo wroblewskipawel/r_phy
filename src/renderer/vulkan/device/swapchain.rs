@@ -1,17 +1,17 @@
 use ash::{
     extensions::khr::Swapchain,
     vk::{self, Extent2D, SurfaceFormatKHR},
-    Instance,
 };
 use std::{error::Error, ffi::CStr};
 
-use crate::renderer::vulkan::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
+use crate::renderer::vulkan::{core::Context, surface::PhysicalDeviceSurfaceProperties};
 
 use super::{
     command::{
         level::Primary, operation::Graphics, FinishedCommand, Persistent, SubmitSemaphoreState,
     },
-    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
+    frame::Frame,
+    framebuffer::{Framebuffer, FramebufferHandle},
     VulkanDevice,
 };
 #[derive(Debug, Clone, Copy)]
@@ -20,8 +20,8 @@ pub struct SwapchainImageSync {
     draw_finished: vk::Semaphore,
 }
 
-pub struct SwapchainFrame<A: AttachmentList> {
-    pub framebuffer: FramebufferHandle<A>,
+pub struct SwapchainFrame<F: Frame> {
+    pub framebuffer: FramebufferHandle<F::Attachments>,
     pub render_area: vk::Rect2D,
     image_index: u32,
     image_sync: SwapchainImageSync,
@@ -32,10 +32,10 @@ struct SwapchainImage {
     view: vk::ImageView,
 }
 
-pub struct VulkanSwapchain<A: AttachmentList> {
+pub struct VulkanSwapchain<F: Frame> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
-    pub framebuffers: Vec<Framebuffer<A>>, // This shouldn't be pub
+    pub framebuffers: Vec<Framebuffer<F::Attachments>>, // This shouldn't be pub
     images: Vec<SwapchainImage>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
@@ -46,10 +46,74 @@ pub const fn required_extensions() -> &'static [&'static CStr; 1] {
     REQUIRED_DEVICE_EXTENSIONS
 }
 
-impl VulkanDevice {
-    pub fn create_swapchain_image_sync<A: AttachmentList>(
+impl<F: Frame> VulkanSwapchain<F> {
+    pub fn get_frame(
         &self,
-        swapchain: &VulkanSwapchain<A>,
+        image_sync: SwapchainImageSync,
+    ) -> Result<SwapchainFrame<F>, Box<dyn Error>> {
+        let (image_index, _) = unsafe {
+            self.loader.acquire_next_image(
+                self.handle,
+                u64::MAX,
+                image_sync.draw_ready,
+                vk::Fence::null(),
+            )?
+        };
+        let framebuffer = (&self.framebuffers[image_index as usize]).into();
+        let render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: self.extent,
+        };
+        Ok(SwapchainFrame {
+            framebuffer,
+            render_area,
+            image_index,
+            image_sync,
+        })
+    }
+}
+
+impl VulkanDevice {
+    pub fn present_frame<F: Frame>(
+        &self,
+        swapchain: &VulkanSwapchain<F>,
+        command: FinishedCommand<Persistent, Primary, Graphics>,
+        frame: SwapchainFrame<F>,
+    ) -> Result<(), Box<dyn Error>> {
+        let SwapchainFrame {
+            image_index,
+            image_sync,
+            ..
+        } = frame;
+        unsafe {
+            self.submit_command(
+                command,
+                SubmitSemaphoreState {
+                    semaphores: &[image_sync.draw_ready],
+                    masks: &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+                },
+                &[image_sync.draw_finished],
+            )?;
+            swapchain.loader.queue_present(
+                self.device_queues.graphics,
+                &vk::PresentInfoKHR {
+                    wait_semaphore_count: 1,
+                    p_wait_semaphores: [image_sync.draw_finished].as_ptr(),
+                    swapchain_count: 1,
+                    p_swapchains: [swapchain.handle].as_ptr(),
+                    p_image_indices: [image_index].as_ptr(),
+                    ..Default::default()
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl Context {
+    pub fn create_swapchain_image_sync<F: Frame>(
+        &self,
+        swapchain: &VulkanSwapchain<F>,
     ) -> Result<Vec<SwapchainImageSync>, Box<dyn Error>> {
         unsafe {
             swapchain
@@ -77,12 +141,13 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_swapchain<A: AttachmentList>(
+    pub fn create_swapchain<F: Frame>(
         &self,
-        instance: &Instance,
-        surface: &VulkanSurface,
-        framebuffer_builder: impl Fn(vk::ImageView, Extent2D) -> Result<Framebuffer<A>, Box<dyn Error>>,
-    ) -> Result<VulkanSwapchain<A>, Box<dyn Error>> {
+        framebuffer_builder: impl Fn(
+            vk::ImageView,
+            Extent2D,
+        ) -> Result<Framebuffer<F::Attachments>, Box<dyn Error>>,
+    ) -> Result<VulkanSwapchain<F>, Box<dyn Error>> {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
                 vk::SurfaceCapabilitiesKHR {
@@ -109,8 +174,8 @@ impl VulkanDevice {
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .clipped(true)
             .image_array_layers(1)
-            .surface(surface.into());
-        let loader = Swapchain::new(instance, &self.device);
+            .surface((&self.surface).into());
+        let loader = Swapchain::new(&self.instance, &self.device);
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let images = unsafe {
             loader
@@ -162,7 +227,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut VulkanSwapchain<A>) {
+    pub fn destroy_swapchain<F: Frame>(&self, swapchain: &mut VulkanSwapchain<F>) {
         swapchain.framebuffers.iter_mut().for_each(|framebuffer| {
             self.destroy_framebuffer(framebuffer);
         });
@@ -173,66 +238,5 @@ impl VulkanDevice {
                 .for_each(|image| self.device.destroy_image_view(image.view, None));
             swapchain.loader.destroy_swapchain(swapchain.handle, None);
         }
-    }
-
-    pub fn get_frame<A: AttachmentList>(
-        &self,
-        swapchain: &VulkanSwapchain<A>,
-        image_sync: SwapchainImageSync,
-    ) -> Result<SwapchainFrame<A>, Box<dyn Error>> {
-        let (image_index, _) = unsafe {
-            swapchain.loader.acquire_next_image(
-                swapchain.handle,
-                u64::MAX,
-                image_sync.draw_ready,
-                vk::Fence::null(),
-            )?
-        };
-        let framebuffer = (&swapchain.framebuffers[image_index as usize]).into();
-        let render_area = vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: swapchain.extent,
-        };
-        Ok(SwapchainFrame {
-            framebuffer,
-            render_area,
-            image_index,
-            image_sync,
-        })
-    }
-
-    pub fn present_frame<A: AttachmentList>(
-        &self,
-        swapchain: &VulkanSwapchain<A>,
-        command: FinishedCommand<Persistent, Primary, Graphics>,
-        frame: SwapchainFrame<A>,
-    ) -> Result<(), Box<dyn Error>> {
-        let SwapchainFrame {
-            image_index,
-            image_sync,
-            ..
-        } = frame;
-        unsafe {
-            self.submit_command(
-                command,
-                SubmitSemaphoreState {
-                    semaphores: &[image_sync.draw_ready],
-                    masks: &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                },
-                &[image_sync.draw_finished],
-            )?;
-            swapchain.loader.queue_present(
-                self.device_queues.graphics,
-                &vk::PresentInfoKHR {
-                    wait_semaphore_count: 1,
-                    p_wait_semaphores: [image_sync.draw_finished].as_ptr(),
-                    swapchain_count: 1,
-                    p_swapchains: [swapchain.handle].as_ptr(),
-                    p_image_indices: [image_index].as_ptr(),
-                    ..Default::default()
-                },
-            )?;
-        }
-        Ok(())
     }
 }

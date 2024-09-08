@@ -51,7 +51,9 @@ pub trait ShaderTypeList: 'static {
     fn next(&self) -> &Self::Next;
 }
 
-impl ShaderType for Nil {
+pub struct ShaderTypeNil {}
+
+impl ShaderType for ShaderTypeNil {
     type Vertex = VertexNone;
     type Material = EmptyMaterial;
 
@@ -62,7 +64,7 @@ impl ShaderType for Nil {
 
 impl ShaderTypeList for Nil {
     const LEN: usize = 0;
-    type Item = Self;
+    type Item = ShaderTypeNil;
     type Next = Self;
 
     fn shaders(&self) -> &[Self::Item] {
