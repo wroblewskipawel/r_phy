@@ -3,8 +3,8 @@ use ash::vk;
 use crate::renderer::vulkan::device::AttachmentProperties;
 
 use super::{
-    Attachment, AttachmentFormatInfo, AttachmentNode, Nil, ClearColor,
-    ClearDeptStencil, ClearNone,
+    Attachment, AttachmentFormatInfo, AttachmentImage, ClearColor, ClearDeptStencil, ClearNone,
+    Cons, Nil,
 };
 
 pub struct ColorMultisampled {}
@@ -46,17 +46,17 @@ impl Attachment for Resolve {
     }
 }
 
-pub type AttachmentsGBuffer = AttachmentNode<
-    ColorMultisampled, // Combined
-    AttachmentNode<
-        ColorMultisampled, // Albedo
-        AttachmentNode<
-            ColorMultisampled, // Normal
-            AttachmentNode<
-                ColorMultisampled, // Position
-                AttachmentNode<
-                    DepthStencilMultisampled,
-                    AttachmentNode<Resolve, Nil>,
+pub type AttachmentsGBuffer = Cons<
+    AttachmentImage<ColorMultisampled>, // Combined
+    Cons<
+        AttachmentImage<ColorMultisampled>, // Albedo
+        Cons<
+            AttachmentImage<ColorMultisampled>, // Normal
+            Cons<
+                AttachmentImage<ColorMultisampled>, // Position
+                Cons<
+                    AttachmentImage<DepthStencilMultisampled>,
+                    Cons<AttachmentImage<Resolve>, Nil>,
                 >,
             >,
         >,

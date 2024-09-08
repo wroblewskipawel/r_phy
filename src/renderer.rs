@@ -12,12 +12,12 @@ use crate::{core::Nil, math::types::Matrix4};
 
 use self::{
     camera::Camera,
-    model::{Drawable, MaterialTypeList, MeshList},
+    model::{Drawable, MaterialTypeList, MeshTypeList},
 };
 
 pub trait Renderer: 'static {
     type Materials: MaterialTypeList;
-    type Meshes: MeshList;
+    type Meshes: MeshTypeList;
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>>;
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>>;

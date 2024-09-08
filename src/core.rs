@@ -27,7 +27,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-struct DrawCommand<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>> {
+pub struct DrawCommand<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>> {
     shader: ShaderHandle<S>,
     model: D,
     transform: Matrix4,
@@ -204,21 +204,19 @@ impl DrawableTypeList for Nil {
     type Next = Self;
 }
 
-pub struct DrawableObjectNode<
+pub struct DrawableContainer<
     S: ShaderType,
     D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
-    N: DrawableTypeList,
 > {
     shader: ShaderHandle<S>,
     objects: Vec<Object<D>>,
-    next: N,
 }
 
 impl<
         S: ShaderType,
         D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
         N: DrawableTypeList,
-    > DrawableTypeList for DrawableObjectNode<S, D, N>
+    > DrawableTypeList for Cons<DrawableContainer<S, D>, N>
 {
     const LEN: usize = N::LEN + 1;
     type Drawable = D;
@@ -233,20 +231,11 @@ impl DrawCommandCollection for Nil {
     fn draw<R: Renderer>(self, _renderer: &mut R) {}
 }
 
-pub struct DrawCommandNode<
-    S: ShaderType,
-    D: Drawable<Material = S::Material, Vertex = S::Vertex>,
-    N: DrawCommandCollection,
-> {
-    draw: Vec<DrawCommand<S, D>>,
-    next: N,
-}
-
 impl<
         S: ShaderType,
         D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
         N: DrawCommandCollection,
-    > DrawableTypeList for DrawCommandNode<S, D, N>
+    > DrawableTypeList for Cons<Vec<DrawCommand<S, D>>, N>
 {
     const LEN: usize = N::LEN + 1;
     type Drawable = D;
@@ -257,18 +246,18 @@ impl<
         S: ShaderType,
         D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
         N: DrawCommandCollection,
-    > DrawCommandCollection for DrawCommandNode<S, D, N>
+    > DrawCommandCollection for Cons<Vec<DrawCommand<S, D>>, N>
 {
     fn draw<R: Renderer>(self, renderer: &mut R) {
         for DrawCommand {
             shader,
             model,
             transform,
-        } in self.draw
+        } in self.head
         {
             let _ = renderer.draw(shader, &model, &transform);
         }
-        self.next.draw(renderer);
+        self.tail.draw(renderer);
     }
 }
 
@@ -288,18 +277,20 @@ impl<
         S: ShaderType,
         D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
         N: DrawableCollection,
-    > DrawableCollection for DrawableObjectNode<S, D, N>
+    > DrawableCollection for Cons<DrawableContainer<S, D>, N>
 {
-    type DrawCommands = DrawCommandNode<S, D, N::DrawCommands>;
+    type DrawCommands = Cons<Vec<DrawCommand<S, D>>, N::DrawCommands>;
+
     fn update(&mut self, elapsed_time: f32) -> Self::DrawCommands {
         let draw = self
+            .head
             .objects
             .iter_mut()
-            .map(|object| object.update(self.shader, elapsed_time))
+            .map(|object| object.update(self.head.shader, elapsed_time))
             .collect();
-        DrawCommandNode {
-            draw,
-            next: self.next.update(elapsed_time),
+        Cons {
+            head: draw,
+            tail: self.tail.update(elapsed_time),
         }
     }
 }
@@ -335,12 +326,11 @@ impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
         self,
         shader: ShaderHandle<S>,
         objects: Vec<Object<T>>,
-    ) -> Scene<DrawableObjectNode<S, T, D>, L> {
+    ) -> Scene<Cons<DrawableContainer<S, T>, D>, L> {
         Scene {
-            objects: DrawableObjectNode {
-                shader,
-                objects,
-                next: self.objects,
+            objects: Cons {
+                head: DrawableContainer { shader, objects },
+                tail: self.objects,
             },
             _loop: PhantomData,
         }

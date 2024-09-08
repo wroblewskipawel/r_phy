@@ -4,16 +4,18 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
-    core::Nil, math::types::{Matrix3, Matrix4}, renderer::{
+    core::{Cons, Nil},
+    math::types::{Matrix3, Matrix4},
+    renderer::{
         camera::CameraMatrices,
         vulkan::device::{
             descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
             resources::VulkanMaterial,
         },
-    }
+    },
 };
 
-use super::{DescriptorLayoutNode, PipelineLayoutBuilder, PushConstant, PushConstantNode};
+use super::{PipelineLayoutBuilder, PushConstant};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
@@ -67,22 +69,14 @@ impl PushConstant for CameraMatrices {
 }
 
 pub type PipelineLayoutMaterial<M> = PipelineLayoutBuilder<
-    DescriptorLayoutNode<
-        <M as VulkanMaterial>::DescriptorLayout,
-        DescriptorLayoutNode<CameraDescriptorSet, Nil>,
-    >,
-    PushConstantNode<ModelNormalMatrix, Nil>,
+    Cons<<M as VulkanMaterial>::DescriptorLayout, Cons<CameraDescriptorSet, Nil>>,
+    Cons<ModelNormalMatrix, Nil>,
 >;
 
-pub type PipelineLayoutSkybox = PipelineLayoutBuilder<
-    DescriptorLayoutNode<TextureDescriptorSet, Nil>,
-    PushConstantNode<CameraMatrices, Nil>,
->;
+pub type PipelineLayoutSkybox =
+    PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
-pub type PipelineLayoutNoMaterial = PipelineLayoutBuilder<
-    DescriptorLayoutNode<CameraDescriptorSet, Nil>,
-    PushConstantNode<ModelMatrix, Nil>,
->;
+pub type PipelineLayoutNoMaterial =
+    PipelineLayoutBuilder<Cons<CameraDescriptorSet, Nil>, Cons<ModelMatrix, Nil>>;
 
-pub type PipelineLayoutGBuffer =
-    PipelineLayoutBuilder<DescriptorLayoutNode<GBufferDescriptorSet, Nil>, Nil>;
+pub type PipelineLayoutGBuffer = PipelineLayoutBuilder<Cons<GBufferDescriptorSet, Nil>, Nil>;

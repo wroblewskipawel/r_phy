@@ -6,9 +6,8 @@ use crate::renderer::{
 };
 
 use super::{
-    Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,
-    VertexAssembly, VertexBindingBuilder, VertexBindingNode, Nil, Viewport,
-    ViewportInfo,
+    Blend, ColorBlendBuilder, Cons, DepthStencil, Multisample, Nil, PipelineStatesBuilder,
+    Rasterization, VertexAssembly, VertexBindingBuilder, Viewport, ViewportInfo,
 };
 
 pub struct TriangleList {}
@@ -226,7 +225,7 @@ impl Multisample for Multisampled {
     }
 }
 
-pub type MeshVertexInput<V> = VertexBindingBuilder<VertexBindingNode<V, Nil>>;
+pub type MeshVertexInput<V> = VertexBindingBuilder<Cons<V, Nil>>;
 
 pub type StatesSkybox = PipelineStatesBuilder<
     MeshVertexInput<CommonVertex>,

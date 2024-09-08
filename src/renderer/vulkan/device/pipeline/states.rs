@@ -6,7 +6,7 @@ use ash::vk::{self, Extent2D};
 pub use presets::*;
 
 use crate::{
-    core::Nil,
+    core::{Cons, Nil},
     renderer::{
         model::Vertex,
         vulkan::device::{
@@ -122,11 +122,7 @@ impl VertexBindingList for Nil {
     }
 }
 
-pub struct VertexBindingNode<B: VertexBinding, N: VertexBindingList> {
-    _phantom: PhantomData<(B, N)>,
-}
-
-impl<B: VertexBinding, N: VertexBindingList> VertexBindingList for VertexBindingNode<B, N> {
+impl<B: VertexBinding, N: VertexBindingList> VertexBindingList for Cons<B, N> {
     type Item = B;
     type Next = N;
 

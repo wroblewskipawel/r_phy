@@ -12,9 +12,10 @@ use std::{
 
 use ash::vk;
 
-use crate::{core::TypedNil, renderer::vulkan::device::{
-    framebuffer::AttachmentList, AttachmentProperties, VulkanDevice,
-}};
+use crate::{
+    core::{Cons, TypedNil},
+    renderer::vulkan::device::{framebuffer::AttachmentList, AttachmentProperties, VulkanDevice},
+};
 
 use super::framebuffer::{
     AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,
@@ -263,11 +264,7 @@ impl<A: AttachmentList> SubpassList for TypedNil<A> {
     }
 }
 
-pub struct SubpassNode<S: Subpass<L::Attachments>, L: SubpassList> {
-    _phantom: PhantomData<(S, L)>,
-}
-
-impl<L: SubpassList, S: Subpass<L::Attachments>> SubpassList for SubpassNode<S, L> {
+impl<L: SubpassList, S: Subpass<L::Attachments>> SubpassList for Cons<S, L> {
     const LEN: usize = Self::Next::LEN + 1;
     type Attachments = L::Attachments;
     type Item = S;

@@ -322,18 +322,18 @@ impl Vertex for VertexNone {
     }
 }
 
-pub trait MeshList: 'static {
+pub trait MeshTypeList: 'static {
     const LEN: usize;
     type Vertex: Vertex;
-    type Next: MeshList;
+    type Next: MeshTypeList;
 }
 
-pub trait MeshCollection: MeshList {
+pub trait MeshCollection: MeshTypeList {
     fn get(&self) -> &[Mesh<Self::Vertex>];
     fn next(&self) -> &Self::Next;
 }
 
-impl MeshList for Nil {
+impl MeshTypeList for Nil {
     const LEN: usize = 0;
     type Vertex = VertexNone;
     type Next = Self;
@@ -349,13 +349,13 @@ impl MeshCollection for Nil {
     }
 }
 
-impl<V: Vertex, N: MeshList> MeshList for Cons<Vec<Mesh<V>>, N> {
+impl<V: Vertex, N: MeshTypeList> MeshTypeList for Cons<Vec<Mesh<V>>, N> {
     const LEN: usize = N::LEN + 1;
     type Vertex = V;
     type Next = N;
 }
 
-impl<V: Vertex, N: MeshList> MeshCollection for Cons<Vec<Mesh<V>>, N> {
+impl<V: Vertex, N: MeshTypeList> MeshCollection for Cons<Vec<Mesh<V>>, N> {
     fn get(&self) -> &[Mesh<Self::Vertex>] {
         &self.head
     }
@@ -364,7 +364,7 @@ impl<V: Vertex, N: MeshList> MeshCollection for Cons<Vec<Mesh<V>>, N> {
         &self.tail
     }
 }
-pub struct Meshes<L: MeshList> {
+pub struct Meshes<L: MeshTypeList> {
     list: L,
 }
 
@@ -380,7 +380,7 @@ impl Meshes<Nil> {
     }
 }
 
-impl<L: MeshList> Meshes<L> {
+impl<L: MeshTypeList> Meshes<L> {
     pub fn push<V: Vertex>(self, meshes: Vec<Mesh<V>>) -> Meshes<Cons<Vec<Mesh<V>>, L>> {
         Meshes {
             list: Cons {
@@ -391,7 +391,7 @@ impl<L: MeshList> Meshes<L> {
     }
 }
 
-impl<L: MeshList> Deref for Meshes<L> {
+impl<L: MeshTypeList> Deref for Meshes<L> {
     type Target = L;
 
     fn deref(&self) -> &Self::Target {

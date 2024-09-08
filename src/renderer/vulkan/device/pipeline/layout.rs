@@ -12,7 +12,10 @@ use std::{
 
 use ash::vk;
 
-use crate::{core::Nil, renderer::vulkan::device::{descriptor::DescriptorLayout, VulkanDevice}};
+use crate::{
+    core::{Cons, Nil},
+    renderer::vulkan::device::{descriptor::DescriptorLayout, VulkanDevice},
+};
 
 // TODO: Create macro to avoid code repetition
 fn get_pipeline_layout_map() -> &'static RwLock<HashMap<std::any::TypeId, vk::PipelineLayout>> {
@@ -72,12 +75,7 @@ impl PushConstantList for Nil {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PushConstantNode<P: PushConstant, N: PushConstantList> {
-    _phantom: PhantomData<(P, N)>,
-}
-
-impl<P: PushConstant, N: PushConstantList> PushConstantList for PushConstantNode<P, N> {
+impl<P: PushConstant, N: PushConstantList> PushConstantList for Cons<P, N> {
     type Item = P;
     type Next = N;
 
@@ -110,7 +108,7 @@ impl<N: PushConstantList> PushConstantRanges<N> {
         }
     }
 
-    pub fn push<P: PushConstant>(self) -> PushConstantRanges<PushConstantNode<P, N>> {
+    pub fn push<P: PushConstant>(self) -> PushConstantRanges<Cons<P, N>> {
         PushConstantRanges {
             _phantom: PhantomData,
         }
@@ -195,14 +193,7 @@ impl DescriptorLayout for Nil {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DescriptorLayoutNode<L: DescriptorLayout, N: DescriptorLayoutList> {
-    _phantom: PhantomData<(L, N)>,
-}
-
-impl<L: DescriptorLayout, N: DescriptorLayoutList> DescriptorLayoutList
-    for DescriptorLayoutNode<L, N>
-{
+impl<L: DescriptorLayout, N: DescriptorLayoutList> DescriptorLayoutList for Cons<L, N> {
     type Item = L;
     type Next = N;
 
@@ -264,18 +255,14 @@ impl<T: DescriptorLayoutList, P: PushConstantList> PipelineLayoutBuilder<T, P> {
         }
     }
 
-    pub fn with_push_constant<C: PushConstant>(
-        self,
-    ) -> PipelineLayoutBuilder<T, PushConstantNode<C, P>> {
-        PipelineLayoutBuilder::<T, PushConstantNode<C, P>> {
+    pub fn with_push_constant<C: PushConstant>(self) -> PipelineLayoutBuilder<T, Cons<C, P>> {
+        PipelineLayoutBuilder::<T, Cons<C, P>> {
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_descriptor_set<D: DescriptorLayout>(
-        self,
-    ) -> PipelineLayoutBuilder<DescriptorLayoutNode<D, T>, P> {
-        PipelineLayoutBuilder::<DescriptorLayoutNode<D, T>, P> {
+    pub fn with_descriptor_set<D: DescriptorLayout>(self) -> PipelineLayoutBuilder<Cons<D, T>, P> {
+        PipelineLayoutBuilder::<Cons<D, T>, P> {
             _phantom: PhantomData,
         }
     }

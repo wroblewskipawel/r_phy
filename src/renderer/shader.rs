@@ -46,9 +46,6 @@ pub trait ShaderTypeList: 'static {
     const LEN: usize;
     type Item: ShaderType;
     type Next: ShaderTypeList;
-
-    fn shaders(&self) -> &[Self::Item];
-    fn next(&self) -> &Self::Next;
 }
 
 pub struct ShaderTypeNil {}
@@ -66,33 +63,12 @@ impl ShaderTypeList for Nil {
     const LEN: usize = 0;
     type Item = ShaderTypeNil;
     type Next = Self;
-
-    fn shaders(&self) -> &[Self::Item] {
-        unreachable!()
-    }
-
-    fn next(&self) -> &Self::Next {
-        unreachable!()
-    }
 }
-
-// pub struct ShaderTypeNode<S: ShaderType, N: ShaderTypeList> {
-//     pub shader_sources: Vec<S>,
-//     pub next: N,
-// }
 
 impl<S: ShaderType, N: ShaderTypeList> ShaderTypeList for Cons<Vec<S>, N> {
     const LEN: usize = N::LEN + 1;
     type Item = S;
     type Next = N;
-
-    fn shaders(&self) -> &[Self::Item] {
-        &self.head
-    }
-
-    fn next(&self) -> &Self::Next {
-        &self.tail
-    }
 }
 
 #[derive(Debug)]

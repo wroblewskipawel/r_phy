@@ -3,14 +3,14 @@ use std::{error::Error, marker::PhantomData};
 use crate::{
     core::{Cons, Nil},
     renderer::{
-        model::{Mesh, MeshCollection, MeshHandle, MeshList, Vertex},
+        model::{Mesh, MeshCollection, MeshHandle, MeshTypeList, Vertex},
         vulkan::device::VulkanDevice,
     },
 };
 
 use super::{MeshPack, MeshPackRef};
 
-pub trait MeshPackList: MeshList {
+pub trait MeshPackList: MeshTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
 
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
@@ -18,12 +18,13 @@ pub trait MeshPackList: MeshList {
 
 impl MeshPackList for Nil {
     fn destroy(&mut self, _device: &VulkanDevice) {}
+
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
         None
     }
 }
 
-impl<V: Vertex, N: MeshPackList> MeshList for Cons<MeshPack<V>, N> {
+impl<V: Vertex, N: MeshPackList> MeshTypeList for Cons<MeshPack<V>, N> {
     const LEN: usize = N::LEN + 1;
     type Vertex = V;
     type Next = N;
@@ -44,7 +45,7 @@ impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<MeshPack<V>, N> {
     }
 }
 
-pub trait MeshPackListBuilder: MeshList {
+pub trait MeshPackListBuilder: MeshTypeList {
     type Pack: MeshPackList;
 
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;

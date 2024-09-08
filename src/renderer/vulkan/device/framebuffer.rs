@@ -5,7 +5,7 @@ use std::{error::Error, marker::PhantomData, usize};
 use ash::vk::{self, Extent2D};
 
 use crate::{
-    core::Nil,
+    core::{Cons, Nil},
     renderer::vulkan::device::{AttachmentProperties, VulkanDevice},
 };
 
@@ -91,22 +91,17 @@ impl ClearValueList for Nil {
     }
 }
 
-pub struct ClearValueNode<C: ClearValue, N: ClearValueList> {
-    value: C,
-    next: N,
-}
-
-impl<C: ClearValue, N: ClearValueList> ClearValueList for ClearValueNode<C, N> {
+impl<C: ClearValue, N: ClearValueList> ClearValueList for Cons<C, N> {
     const LEN: usize = Self::Next::LEN + 1;
     type Item = C;
     type Next = N;
 
     fn get(&self) -> Option<vk::ClearValue> {
-        self.value.get()
+        self.head.get()
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 }
 
@@ -129,12 +124,12 @@ impl ClearValueBuilder<Nil> {
 }
 
 impl<V: ClearValueList> ClearValueBuilder<V> {
-    pub fn push<N: ClearValue>(self, value: N) -> ClearValueBuilder<ClearValueNode<N, V>> {
+    pub fn push<N: ClearValue>(self, value: N) -> ClearValueBuilder<Cons<N, V>> {
         let Self { clear_values } = self;
         ClearValueBuilder {
-            clear_values: ClearValueNode {
-                value,
-                next: clear_values,
+            clear_values: Cons {
+                head: value,
+                tail: clear_values,
             },
         }
     }
@@ -214,11 +209,6 @@ impl AttachmentReferenceList for Nil {
     }
 }
 
-pub struct AttachmentReferenceNode<N: AttachmentReferenceList> {
-    reference: Option<AttachmentReference>,
-    next: N,
-}
-
 fn write_references<N: AttachmentReferenceList + ?Sized>(
     node: &N,
     offset: usize,
@@ -238,7 +228,7 @@ fn write_references<N: AttachmentReferenceList + ?Sized>(
     }
 }
 
-impl<N: AttachmentReferenceList> AttachmentReferenceList for AttachmentReferenceNode<N> {
+impl<N: AttachmentReferenceList> AttachmentReferenceList for Cons<Option<AttachmentReference>, N> {
     const LEN: usize = Self::Next::LEN + 1;
     type Next = N;
 
@@ -247,11 +237,11 @@ impl<N: AttachmentReferenceList> AttachmentReferenceList for AttachmentReference
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 
     fn get_value(&self) -> Option<AttachmentReference> {
-        self.reference
+        self.head
     }
 }
 
@@ -275,12 +265,12 @@ impl<A: AttachmentList> AttachmentReferenceBuilder<A> {
     pub fn push<N: Attachment>(
         self,
         reference: Option<AttachmentReference>,
-    ) -> AttachmentReferenceBuilder<AttachmentNode<N, A>> {
+    ) -> AttachmentReferenceBuilder<Cons<AttachmentImage<N>, A>> {
         let Self { references } = self;
         AttachmentReferenceBuilder {
-            references: AttachmentReferenceNode {
-                reference,
-                next: references,
+            references: Cons {
+                head: reference,
+                tail: references,
             },
         }
     }
@@ -363,11 +353,6 @@ impl AttachmentTransitionList for Nil {
     }
 }
 
-pub struct AttachmentTransitionNode<N: AttachmentTransitionList> {
-    transition: AttachmentTransition,
-    next: N,
-}
-
 fn write_transitions<N: AttachmentTransitionList + ?Sized>(
     node: &N,
     mut vec: Vec<AttachmentTransition>,
@@ -380,7 +365,7 @@ fn write_transitions<N: AttachmentTransitionList + ?Sized>(
     }
 }
 
-impl<N: AttachmentTransitionList> AttachmentTransitionList for AttachmentTransitionNode<N> {
+impl<N: AttachmentTransitionList> AttachmentTransitionList for Cons<AttachmentTransition, N> {
     const LEN: usize = Self::Next::LEN + 1;
     type Next = N;
 
@@ -389,11 +374,11 @@ impl<N: AttachmentTransitionList> AttachmentTransitionList for AttachmentTransit
     }
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 
     fn get_value(&self) -> AttachmentTransition {
-        self.transition
+        self.head
     }
 }
 
@@ -419,12 +404,12 @@ impl<A: AttachmentTransitionList> AttachmentTransitionBuilder<A> {
     pub fn push(
         self,
         transition: AttachmentTransition,
-    ) -> AttachmentTransitionBuilder<AttachmentTransitionNode<A>> {
+    ) -> AttachmentTransitionBuilder<Cons<AttachmentTransition, A>> {
         let Self { transitions } = self;
         AttachmentTransitionBuilder {
-            transitions: AttachmentTransitionNode {
-                transition,
-                next: transitions,
+            transitions: Cons {
+                head: transition,
+                tail: transitions,
             },
         }
     }
@@ -529,26 +514,25 @@ impl AttachmentList for Nil {
     }
 }
 
-pub struct AttachmentNode<A: Attachment, N: AttachmentList> {
+pub struct AttachmentImage<A: Attachment> {
     view: vk::ImageView,
-    next: N,
     _phantom: PhantomData<A>,
 }
 
-impl<A: Attachment, N: AttachmentList> AttachmentList for AttachmentNode<A, N> {
+impl<A: Attachment, N: AttachmentList> AttachmentList for Cons<AttachmentImage<A>, N> {
     const LEN: usize = N::LEN + 1;
     type Item = A;
     type Next = N;
-    type ClearListType = ClearValueNode<A::Clear, N::ClearListType>;
-    type ReferenceListType = AttachmentReferenceNode<N::ReferenceListType>;
-    type TransitionListType = AttachmentTransitionNode<N::TransitionListType>;
+    type ClearListType = Cons<A::Clear, N::ClearListType>;
+    type ReferenceListType = Cons<Option<AttachmentReference>, N::ReferenceListType>;
+    type TransitionListType = Cons<AttachmentTransition, N::TransitionListType>;
 
     fn next(&self) -> &Self::Next {
-        &self.next
+        &self.tail
     }
 
     fn view(&self) -> vk::ImageView {
-        self.view
+        self.head.view
     }
 }
 
@@ -574,13 +558,16 @@ impl<A: AttachmentList> AttachmentsBuilder<A> {
     pub fn push<N: Attachment>(
         self,
         view: vk::ImageView,
-    ) -> AttachmentsBuilder<AttachmentNode<N, A>> {
+    ) -> AttachmentsBuilder<Cons<AttachmentImage<N>, A>> {
         let Self { attachments } = self;
         AttachmentsBuilder {
-            attachments: AttachmentNode {
-                view,
-                next: attachments,
-                _phantom: PhantomData,
+            attachments: Cons {
+                head: AttachmentImage {
+                    view,
+                    _phantom: PhantomData,
+                },
+
+                tail: attachments,
             },
         }
     }
