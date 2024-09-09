@@ -177,21 +177,21 @@ impl<P: GraphicsPipelinePackList> Frame for DeferredRenderer<P> {
         Ok(())
     }
 
-    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-        if let Some(pack) = self.pipelines.write_pass.try_get::<DeferredShader<S>>() {
-            let len = pack.len();
-            Some(
-                (0..len)
-                    .map(|index| ShaderHandle {
-                        index,
-                        _phantom: PhantomData,
-                    })
-                    .collect(),
-            )
-        } else {
-            None
-        }
-    }
+    // fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
+    //     if let Some(pack) = self.pipelines.write_pass.try_get::<DeferredShader<S>>() {
+    //         let len = pack.len();
+    //         Some(
+    //             (0..len)
+    //                 .map(|index| ShaderHandle {
+    //                     index,
+    //                     _phantom: PhantomData,
+    //                 })
+    //                 .collect(),
+    //         )
+    //     } else {
+    //         None
+    //     }
+    // }
 }
 
 impl GBuffer {

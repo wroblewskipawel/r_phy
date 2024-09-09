@@ -345,17 +345,17 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
         }
     }
 
-    pub fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>> {
-        self.renderer.get_mesh_handles()
-    }
+    // pub fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>> {
+    //     self.renderer.get_mesh_handles()
+    // }
 
-    pub fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
-        self.renderer.get_material_handles()
-    }
+    // pub fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
+    //     self.renderer.get_material_handles()
+    // }
 
-    pub fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-        self.renderer.get_shader_handles()
-    }
+    // pub fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
+    //     self.renderer.get_shader_handles()
+    // }
 
     pub fn run<D: DrawableCollection>(
         self,

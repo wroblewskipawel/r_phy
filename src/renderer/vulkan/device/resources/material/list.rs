@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::{MaterialPack, MaterialPackRef, VulkanMaterial};
+use super::{MaterialPack, MaterialPackData, MaterialPackRef, VulkanMaterial};
 
 pub trait MaterialPackList: MaterialTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
@@ -23,24 +23,25 @@ impl MaterialPackList for Nil {
     }
 }
 
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialTypeList for Cons<MaterialPack<M>, N> {
+impl<M: VulkanMaterial, N: MaterialPackList> MaterialTypeList for Cons<Option<MaterialPack<M>>, N> {
     const LEN: usize = N::LEN + 1;
     type Item = M;
     type Next = N;
 }
 
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for Cons<MaterialPack<M>, N> {
+impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for Cons<Option<MaterialPack<M>>, N> {
     fn destroy(&mut self, device: &VulkanDevice) {
-        device.destroy_material_pack(&mut self.head);
+        if let Some(material_pack) = &mut self.head {
+            device.destroy_material_pack(material_pack);
+        }
         self.tail.destroy(device);
     }
 
     fn try_get<T: VulkanMaterial>(&self) -> Option<MaterialPackRef<T>> {
-        if let Ok(material_pack_ref) = (&self.head).try_into() {
-            Some(material_pack_ref)
-        } else {
-            self.tail.try_get::<T>()
-        }
+        self.head
+            .as_ref()
+            .and_then(|pack| pack.try_into().ok())
+            .or_else(|| self.tail.try_get::<T>())
     }
 }
 
@@ -50,10 +51,15 @@ pub trait MaterialPackListBuilder: MaterialTypeList + 'static {
 }
 
 impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
-    type Pack = Cons<MaterialPack<Self::Item>, N::Pack>;
+    type Pack = Cons<Option<MaterialPack<Self::Item>>, N::Pack>;
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+        let materials = self.get();
         Ok(Cons {
-            head: device.load_material_pack(self.get(), Self::LEN)?,
+            head: if !materials.is_empty() {
+                Some(device.load_material_pack(materials, Self::LEN)?)
+            } else {
+                None
+            },
             tail: self.next().build(device)?,
         })
     }

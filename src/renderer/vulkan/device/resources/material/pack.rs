@@ -68,13 +68,13 @@ impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
         self.descriptors.get(index)
     }
 
-    pub fn get_handles(&self) -> Vec<MaterialHandle<M>> {
-        (0..self.descriptors.len())
-            .map(|material_index| {
-                VulkanMaterialHandle::new(self.index as u32, material_index as u32).into()
-            })
-            .collect()
-    }
+    // pub fn get_handles(&self) -> Vec<MaterialHandle<M>> {
+    //     (0..self.descriptors.len())
+    //         .map(|material_index| {
+    //             VulkanMaterialHandle::new(self.index as u32, material_index as u32).into()
+    //         })
+    //         .collect()
+    // }
 }
 
 impl VulkanDevice {
@@ -108,11 +108,11 @@ impl VulkanDevice {
         Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
         Box<dyn Error>,
     > {
-        if let Some(uniform_data) = materials
+        let uniform_data = materials
             .iter()
-            .map(|material| material.uniform())
-            .collect::<Option<Vec<_>>>()
-        {
+            .filter_map(|material| material.uniform())
+            .collect::<Vec<_>>();
+        if !uniform_data.is_empty() {
             let mut uniform_buffer = self
                 .create_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics>(
                     materials.len(),

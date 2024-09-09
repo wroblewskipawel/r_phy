@@ -24,24 +24,25 @@ impl MeshPackList for Nil {
     }
 }
 
-impl<V: Vertex, N: MeshPackList> MeshTypeList for Cons<MeshPack<V>, N> {
+impl<V: Vertex, N: MeshPackList> MeshTypeList for Cons<Option<MeshPack<V>>, N> {
     const LEN: usize = N::LEN + 1;
     type Vertex = V;
     type Next = N;
 }
 
-impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<MeshPack<V>, N> {
+impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
     fn destroy(&mut self, device: &VulkanDevice) {
-        device.destroy_mesh_pack(&mut self.head);
+        if let Some(mesh_pack) = &mut self.head {
+            device.destroy_mesh_pack(mesh_pack);
+        }
         self.tail.destroy(device);
     }
 
     fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
-        if let Ok(mesh_pack_ref) = (&self.head).try_into() {
-            Some(mesh_pack_ref)
-        } else {
-            self.tail.try_get::<T>()
-        }
+        self.head
+            .as_ref()
+            .and_then(|pack| pack.try_into().ok())
+            .or_else(|| self.tail.try_get::<T>())
     }
 }
 
@@ -60,11 +61,17 @@ impl MeshPackListBuilder for Nil {
 }
 
 impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
-    type Pack = Cons<MeshPack<V>, N::Pack>;
+    type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
 
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+        let meshes = self.get();
+        let pack = if !meshes.is_empty() {
+            Some(device.load_mesh_pack(self.get(), Self::LEN)?)
+        } else {
+            None
+        };
         Ok(Cons {
-            head: device.load_mesh_pack(self.get(), Self::LEN)?.into(),
+            head: pack,
             tail: self.next().build(device)?,
         })
     }

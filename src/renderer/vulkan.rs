@@ -158,31 +158,31 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineList
         self
     }
 
-    pub fn with_meshes<N: Vertex, T: Marker>(mut self, meshes: Vec<Mesh<N>>) -> Self
-    where
-        V: Contains<Vec<Mesh<N>>, T>,
-    {
-        self.meshes.get_mut().extend(meshes);
-        self
-    }
+    // pub fn with_meshes<N: Vertex, T: Marker>(mut self, meshes: Vec<Mesh<N>>) -> Self
+    // where
+    //     V: Contains<Vec<Mesh<N>>, T>,
+    // {
+    //     self.meshes.get_mut().extend(meshes);
+    //     self
+    // }
 
-    pub fn with_materials<N: Material, T: Marker>(mut self, materials: Vec<N>) -> Self
-    where
-        M: Contains<Vec<N>, T>,
-    {
-        self.materials.get_mut().extend(materials);
-        self
-    }
+    // pub fn with_materials<N: Material, T: Marker>(mut self, materials: Vec<N>) -> Self
+    // where
+    //     M: Contains<Vec<N>, T>,
+    // {
+    //     self.materials.get_mut().extend(materials);
+    //     self
+    // }
 
-    pub fn with_shaders<N: ShaderType, T: Marker>(mut self, shaders: Vec<N>) -> Self
-    where
-        S: Contains<Vec<DeferredShader<N>>, T>,
-    {
-        self.shaders
-            .get_mut()
-            .extend(shaders.into_iter().map(Into::<DeferredShader<N>>::into));
-        self
-    }
+    // pub fn with_shaders<N: ShaderType, T: Marker>(mut self, shaders: Vec<N>) -> Self
+    // where
+    //     S: Contains<Vec<DeferredShader<N>>, T>,
+    // {
+    //     self.shaders
+    //         .get_mut()
+    //         .extend(shaders.into_iter().map(Into::<DeferredShader<N>>::into));
+    //     self
+    // }
 }
 
 impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
@@ -281,15 +281,15 @@ impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
         Ok(())
     }
 
-    fn get_mesh_handles<T: Vertex>(&self) -> Option<Vec<MeshHandle<T>>> {
-        Some(self.meshes.packs.try_get()?.get_handles())
-    }
+    // fn get_mesh_handles<T: Vertex>(&self) -> Option<Vec<MeshHandle<T>>> {
+    //     Some(self.meshes.packs.try_get()?.get_handles())
+    // }
 
-    fn get_material_handles<T: Material>(&self) -> Option<Vec<MaterialHandle<T>>> {
-        Some(self.materials.packs.try_get()?.get_handles())
-    }
+    // fn get_material_handles<T: Material>(&self) -> Option<Vec<MaterialHandle<T>>> {
+    //     Some(self.materials.packs.try_get()?.get_handles())
+    // }
 
-    fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
-        self.renderer.get_shader_handles()
-    }
+    // fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
+    //     self.renderer.get_shader_handles()
+    // }
 }

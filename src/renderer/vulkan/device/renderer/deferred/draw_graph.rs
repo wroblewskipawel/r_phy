@@ -148,16 +148,20 @@ impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
                 .descriptor_states
                 .entry(descriptor_index)
                 .or_insert_with(|| {
-                    let material_descriptor = material_packs
-                        .try_get::<D::Material>()
-                        .unwrap()
-                        .get_descriptor(descriptor_index.material_index as usize);
                     let material_binding_data =
-                        self.get_descriptor_binding_data(material_descriptor, shader);
-                    let camera_binding_data =
-                        self.get_descriptor_binding_data(current_frame.camera_descriptor, shader);
+                        material_packs.try_get::<D::Material>().map(|pack| {
+                            let material_descriptor =
+                                pack.get_descriptor(descriptor_index.material_index as usize);
+                            self.get_descriptor_binding_data(material_descriptor, shader)
+                        });
+                    let camera_binding_data = Some(
+                        self.get_descriptor_binding_data(current_frame.camera_descriptor, shader),
+                    );
                     DescriptorState {
-                        sets: vec![material_binding_data, camera_binding_data],
+                        sets: [material_binding_data, camera_binding_data]
+                            .into_iter()
+                            .flatten()
+                            .collect(),
                         buffer_states: HashMap::new(),
                     }
                 });

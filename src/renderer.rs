@@ -28,9 +28,9 @@ pub trait Renderer: 'static {
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>>;
-    fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>>;
-    fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>>;
-    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>>;
+    // fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>>;
+    // fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>>;
+    // fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>>;
 }
 
 pub trait RendererBuilder: 'static {
@@ -62,17 +62,17 @@ impl Renderer for RendererNone {
         unimplemented!()
     }
 
-    fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>> {
-        unimplemented!()
-    }
+    // fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>> {
+    //     unimplemented!()
+    // }
 
-    fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
-        unimplemented!()
-    }
+    // fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
+    //     unimplemented!()
+    // }
 
-    fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-        unimplemented!()
-    }
+    // fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
+    //     unimplemented!()
+    // }
 }
 
 impl RendererBuilder for RendererNone {

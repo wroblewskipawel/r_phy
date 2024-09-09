@@ -55,16 +55,16 @@ impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
 }
 
 impl<'a, V: Vertex> MeshPackRef<'a, V> {
-    pub fn get_handles(&self) -> Vec<MeshHandle<V>> {
-        self.data
-            .meshes
-            .iter()
-            .enumerate()
-            .map(|(mesh_index, _)| {
-                VulkanMeshHandle::new(self.index as u32, mesh_index as u32).into()
-            })
-            .collect()
-    }
+    // pub fn get_handles(&self) -> Vec<MeshHandle<V>> {
+    //     self.data
+    //         .meshes
+    //         .iter()
+    //         .enumerate()
+    //         .map(|(mesh_index, _)| {
+    //             VulkanMeshHandle::new(self.index as u32, mesh_index as u32).into()
+    //         })
+    //         .collect()
+    // }
 
     pub fn get(&self, index: usize) -> MeshRange<V> {
         MeshRange {
