@@ -46,6 +46,14 @@ pub struct DeferredShader<S: ShaderType> {
     shader: S,
 }
 
+impl<S: ShaderType> ShaderType for DeferredShader<S> {
+    type Material = S::Material;
+    type Vertex = S::Vertex;
+
+    fn source(&self) -> &Path {
+        self.shader.source()
+    }
+}
 impl<S: ShaderType> GraphicsPipelineConfig for DeferredShader<S> {
     type Attachments = AttachmentsGBuffer;
     type Layout = PipelineLayoutMaterial<S::Material>;

@@ -195,7 +195,7 @@ impl Subpass<AttachmentsGBuffer> for GBufferSkyboxPass<AttachmentsGBuffer> {
     }
 }
 
-pub type EmptyRenderPass = RenderPassBuilder<TypedNil<Nil>, EmptyRenderPassTransitions>;
+// pub type EmptyRenderPass = RenderPassBuilder<TypedNil<Nil>, EmptyRenderPassTransitions>;
 
 pub type DeferedRenderPass<A> = RenderPassBuilder<
     Cons<

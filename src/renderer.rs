@@ -4,7 +4,7 @@ pub mod shader;
 pub mod vulkan;
 
 use model::{Material, MaterialHandle, MeshHandle, Vertex};
-use shader::{ShaderHandle, ShaderType};
+use shader::{ShaderHandle, ShaderType, ShaderTypeList};
 use std::error::Error;
 use winit::window::Window;
 
@@ -16,6 +16,7 @@ use self::{
 };
 
 pub trait Renderer: 'static {
+    type Shaders: ShaderTypeList;
     type Materials: MaterialTypeList;
     type Meshes: MeshTypeList;
 
@@ -40,6 +41,7 @@ pub trait RendererBuilder: 'static {
 pub struct RendererNone;
 
 impl Renderer for RendererNone {
+    type Shaders = Nil;
     type Materials = Nil;
     type Meshes = Nil;
 

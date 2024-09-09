@@ -1,25 +1,24 @@
 use crate::renderer::{
-    model::{CommonVertex, VertexNone},
+    model::CommonVertex,
     vulkan::device::{
         pipeline::{
             PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox,
             StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox,
         },
         render_pass::{
-            DeferedRenderPass, EmptyRenderPass, EmptySubpass, GBufferDepthPrepas,
-            GBufferShadingPass, GBufferSkyboxPass,
+            DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
         },
     },
 };
 
 use super::GraphicsPipelineBuilder;
 
-pub type EmptyPipeline = GraphicsPipelineBuilder<
-    PipelineLayoutNoMaterial,
-    StatesDepthWriteDisabled<VertexNone>,
-    EmptyRenderPass,
-    EmptySubpass,
->;
+// pub type EmptyPipeline = GraphicsPipelineBuilder<
+//     PipelineLayoutNoMaterial,
+//     StatesDepthWriteDisabled<VertexNone>,
+//     EmptyRenderPass,
+//     EmptySubpass,
+// >;
 
 pub type GBufferSkyboxPipeline<A> = GraphicsPipelineBuilder<
     PipelineLayoutSkybox,

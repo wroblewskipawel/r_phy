@@ -250,6 +250,7 @@ impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Drop
 impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
     for VulkanRenderer<M, V, S>
 {
+    type Shaders = S;
     type Materials = M;
     type Meshes = V;
 

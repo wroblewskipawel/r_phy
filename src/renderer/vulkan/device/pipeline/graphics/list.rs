@@ -2,30 +2,27 @@ use std::error::Error;
 
 use crate::{
     core::{Cons, Nil},
-    renderer::vulkan::device::{pipeline::ModuleLoader, VulkanDevice},
+    renderer::{
+        shader::{ShaderType, ShaderTypeList},
+        vulkan::device::{pipeline::ModuleLoader, VulkanDevice},
+    },
 };
 
-use super::{
-    EmptyPipeline, GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut,
-};
+use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut};
 
-pub trait GraphicsPipelineTypeList: 'static {
-    const LEN: usize;
-    type Item: GraphicsPipelineConfig;
-    type Next: GraphicsPipelineTypeList;
-}
+// pub trait GraphicsPipelineTypeList: ShaderTypeList {
+//     type Pipeline: GraphicsPipelineConfig;
+// }
 
-pub trait GraphicsPipelineListBuilder: GraphicsPipelineTypeList {
+pub trait GraphicsPipelineListBuilder: 'static {
     type Pack: GraphicsPipelinePackList;
 
     fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
-impl GraphicsPipelineTypeList for Nil {
-    const LEN: usize = 0;
-    type Item = EmptyPipeline;
-    type Next = Nil;
-}
+// impl GraphicsPipelineTypeList for Nil {
+//     type Pipeline = EmptyPipeline;
+// }
 
 impl GraphicsPipelineListBuilder for Nil {
     type Pack = Nil;
@@ -35,15 +32,13 @@ impl GraphicsPipelineListBuilder for Nil {
     }
 }
 
-impl<T: GraphicsPipelineConfig, N: GraphicsPipelineListBuilder> GraphicsPipelineTypeList
-    for Cons<Vec<T>, N>
-{
-    const LEN: usize = N::LEN + 1;
-    type Item = T;
-    type Next = N;
-}
+// impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelineTypeList> GraphicsPipelineTypeList
+//     for Cons<Vec<T>, N>
+// {
+//     type Pipeline = T;
+// }
 
-impl<T: GraphicsPipelineConfig, N: GraphicsPipelinePackList> GraphicsPipelineTypeList
+impl<T: GraphicsPipelineConfig + ShaderType, N: ShaderTypeList> ShaderTypeList
     for Cons<PipelinePack<T>, N>
 {
     const LEN: usize = N::LEN + 1;
@@ -51,7 +46,13 @@ impl<T: GraphicsPipelineConfig, N: GraphicsPipelinePackList> GraphicsPipelineTyp
     type Next = N;
 }
 
-impl<T: GraphicsPipelineConfig + ModuleLoader, N: GraphicsPipelineListBuilder>
+// impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> GraphicsPipelineTypeList
+//     for Cons<PipelinePack<T>, N>
+// {
+//     type Pipeline = T;
+// }
+
+impl<T: GraphicsPipelineConfig + ModuleLoader + ShaderType, N: GraphicsPipelineListBuilder>
     GraphicsPipelineListBuilder for Cons<Vec<T>, N>
 {
     type Pack = Cons<PipelinePack<T>, N::Pack>;
@@ -66,7 +67,7 @@ impl<T: GraphicsPipelineConfig + ModuleLoader, N: GraphicsPipelineListBuilder>
     }
 }
 
-pub trait GraphicsPipelinePackList: GraphicsPipelineTypeList {
+pub trait GraphicsPipelinePackList: ShaderTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>>;
@@ -86,7 +87,7 @@ impl GraphicsPipelinePackList for Nil {
     }
 }
 
-impl<T: GraphicsPipelineConfig, N: GraphicsPipelinePackList> GraphicsPipelinePackList
+impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> GraphicsPipelinePackList
     for Cons<PipelinePack<T>, N>
 {
     fn destroy(&mut self, device: &VulkanDevice) {
