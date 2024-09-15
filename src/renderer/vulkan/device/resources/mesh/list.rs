@@ -1,9 +1,9 @@
-use std::{error::Error, marker::PhantomData};
+use std::error::Error;
 
 use crate::{
     core::{Cons, Nil},
     renderer::{
-        model::{Mesh, MeshCollection, MeshHandle, MeshTypeList, Vertex},
+        model::{Mesh, MeshCollection, MeshTypeList, Vertex},
         vulkan::device::VulkanDevice,
     },
 };
@@ -66,7 +66,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
     fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
         let meshes = self.get();
         let pack = if !meshes.is_empty() {
-            Some(device.load_mesh_pack(self.get(), Self::LEN)?)
+            Some(device.load_mesh_pack(self.get())?)
         } else {
             None
         };
@@ -93,40 +93,5 @@ impl VulkanDevice {
 
     pub fn destroy_meshes<M: MeshPackList>(&self, packs: &mut MeshPacks<M>) {
         packs.packs.destroy(self);
-    }
-}
-
-pub struct VulkanMeshHandle<V: Vertex> {
-    pub mesh_pack_index: u32,
-    pub mesh_index: u32,
-    _phantom: PhantomData<V>,
-}
-
-impl<V: Vertex> VulkanMeshHandle<V> {
-    pub fn new(mesh_pack_index: u32, mesh_index: u32) -> Self {
-        Self {
-            mesh_pack_index,
-            mesh_index,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<V: Vertex> From<MeshHandle<V>> for VulkanMeshHandle<V> {
-    fn from(value: MeshHandle<V>) -> Self {
-        Self {
-            mesh_pack_index: ((0xFFFFFFF0000000 & value.0) >> 32) as u32,
-            mesh_index: (0x00000000FFFFFFFF & value.0) as u32,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<V: Vertex> From<VulkanMeshHandle<V>> for MeshHandle<V> {
-    fn from(value: VulkanMeshHandle<V>) -> Self {
-        Self(
-            ((value.mesh_pack_index as u64) << 32) + value.mesh_index as u64,
-            PhantomData,
-        )
     }
 }

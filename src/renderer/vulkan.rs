@@ -18,18 +18,19 @@ use core::Context;
 
 use super::{
     camera::Camera,
-    model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
+    model::{Drawable, Material, Mesh, Vertex},
     shader::{ShaderHandle, ShaderType},
-    Renderer, RendererBuilder,
+    Renderer, RendererBuilder, RendererContext, RendererContextBuilder,
 };
 use ash::vk;
 use device::{
     frame::Frame,
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
-    renderer::deferred::DeferredShader,
 };
-use std::{error::Error, marker::PhantomData};
+use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
 use winit::window::Window;
+
+pub use device::renderer::deferred::DeferredShader;
 
 #[derive(Debug)]
 pub struct VulkanRendererConfig {
@@ -66,9 +67,7 @@ pub struct VulkanRendererBuilder<
     V: MeshPackListBuilder,
     S: GraphicsPipelineListBuilder,
 > {
-    materials: M,
-    meshes: V,
-    shaders: S,
+    resources: PhantomData<(M, V, S)>,
     config: Option<VulkanRendererConfig>,
 }
 
@@ -81,9 +80,7 @@ impl Default for VulkanRendererBuilder<Nil, Nil, Nil> {
 impl VulkanRendererBuilder<Nil, Nil, Nil> {
     pub fn new() -> Self {
         Self {
-            materials: Nil {},
-            meshes: Nil {},
-            shaders: Nil {},
+            resources: PhantomData,
             config: None,
         }
     }
@@ -93,38 +90,18 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineList
     VulkanRendererBuilder<M, V, S>
 {
     pub fn with_material_type<N: Material>(self) -> VulkanRendererBuilder<Cons<Vec<N>, M>, V, S> {
-        let Self {
-            materials,
-            meshes,
-            shaders,
-            config: configuration,
-        } = self;
+        let Self { config, .. } = self;
         VulkanRendererBuilder {
-            materials: Cons {
-                head: vec![],
-                tail: materials,
-            },
-            meshes,
-            shaders,
-            config: configuration,
+            resources: PhantomData,
+            config,
         }
     }
 
     pub fn with_vertex_type<N: Vertex>(self) -> VulkanRendererBuilder<M, Cons<Vec<Mesh<N>>, V>, S> {
-        let Self {
-            materials,
-            meshes,
-            shaders,
-            config: configuration,
-        } = self;
+        let Self { config, .. } = self;
         VulkanRendererBuilder {
-            meshes: Cons {
-                head: vec![],
-                tail: meshes,
-            },
-            materials,
-            shaders,
-            config: configuration,
+            resources: PhantomData,
+            config,
         }
     }
 
@@ -136,20 +113,10 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineList
         M: Contains<Vec<N::Material>, T>,
         V: Contains<Vec<Mesh<N::Vertex>>, O>,
     {
-        let Self {
-            materials,
-            meshes,
-            shaders,
-            config: configuration,
-        } = self;
+        let Self { config, .. } = self;
         VulkanRendererBuilder {
-            shaders: Cons {
-                head: vec![],
-                tail: shaders,
-            },
-            materials,
-            meshes,
-            config: configuration,
+            resources: PhantomData,
+            config,
         }
     }
 
@@ -157,56 +124,69 @@ impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineList
         self.config = Some(config);
         self
     }
-
-    // pub fn with_meshes<N: Vertex, T: Marker>(mut self, meshes: Vec<Mesh<N>>) -> Self
-    // where
-    //     V: Contains<Vec<Mesh<N>>, T>,
-    // {
-    //     self.meshes.get_mut().extend(meshes);
-    //     self
-    // }
-
-    // pub fn with_materials<N: Material, T: Marker>(mut self, materials: Vec<N>) -> Self
-    // where
-    //     M: Contains<Vec<N>, T>,
-    // {
-    //     self.materials.get_mut().extend(materials);
-    //     self
-    // }
-
-    // pub fn with_shaders<N: ShaderType, T: Marker>(mut self, shaders: Vec<N>) -> Self
-    // where
-    //     S: Contains<Vec<DeferredShader<N>>, T>,
-    // {
-    //     self.shaders
-    //         .get_mut()
-    //         .extend(shaders.into_iter().map(Into::<DeferredShader<N>>::into));
-    //     self
-    // }
 }
 
-impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
-    RendererBuilder for VulkanRendererBuilder<M, V, S>
+impl<
+        M: MaterialPackListBuilder + Default,
+        V: MeshPackListBuilder + Default,
+        S: GraphicsPipelineListBuilder + Default,
+    > RendererBuilder for VulkanRendererBuilder<M, V, S>
 {
-    type Renderer = VulkanRenderer<M::Pack, V::Pack, S::Pack>;
+    type Renderer = VulkanRenderer<M, V, S>;
 
     fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
-        let renderer = VulkanRenderer::new(
-            window,
-            &self.materials,
-            &self.meshes,
-            &self.shaders,
-            &self.config.ok_or("Configuration not provided")?,
-        )?;
+        let renderer =
+            VulkanRenderer::new(window, &self.config.ok_or("Configuration not provided")?)?;
         Ok(renderer)
     }
 }
 
-pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> {
+pub struct VulkanRenderer<
+    M: MaterialPackListBuilder,
+    V: MeshPackListBuilder,
+    S: GraphicsPipelineListBuilder,
+> {
+    // TODO: Temporary RefCell to allow for shareable mutable reference
+    context: Rc<RefCell<Context>>,
+    _phantom: PhantomData<(M, V, S)>,
+}
+
+pub struct VulkanResourcePack<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> {
     materials: MaterialPacks<M>,
     meshes: MeshPacks<V>,
     renderer: DeferredRenderer<S>,
-    context: Context,
+}
+
+impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList>
+    VulkanResourcePack<M, V, S>
+{
+    fn load(
+        context: &mut Context,
+        materials: &impl MaterialPackListBuilder<Pack = M>,
+        meshes: &impl MeshPackListBuilder<Pack = V>,
+        renderer: &impl GraphicsPipelineListBuilder<Pack = S>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let materials = context.load_materials(materials)?;
+        let meshes = context.load_meshes(meshes)?;
+        let renderer = context.create_deferred_renderer(renderer)?;
+        Ok(Self {
+            materials,
+            meshes,
+            renderer,
+        })
+    }
+
+    fn destroy(&mut self, context: &Context) {
+        context.destroy_materials(&mut self.materials);
+        context.destroy_meshes(&mut self.meshes);
+        context.destroy_deferred_renderer(&mut self.renderer);
+    }
+}
+
+pub struct VulkanRendererContext<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList>
+{
+    context: Rc<RefCell<Context>>,
+    resources: VulkanResourcePack<M, V, S>,
 }
 
 // TODO: Error handling should be improved - currently when shader source files are missing,
@@ -215,53 +195,71 @@ pub struct VulkanRenderer<M: MaterialPackList, V: MeshPackList, S: GraphicsPipel
 // TODO: User should be able to load custom shareds,
 // while also some preset of preconfigured one should be available
 // API for user-defined shaders should be based on PipelineLayoutBuilder type-list
-impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> VulkanRenderer<M, V, S> {
-    pub fn new(
-        window: &Window,
-        materials: &impl MaterialPackListBuilder<Pack = M>,
-        meshes: &impl MeshPackListBuilder<Pack = V>,
-        shaders: &impl GraphicsPipelineListBuilder<Pack = S>,
-        config: &VulkanRendererConfig,
-    ) -> Result<Self, Box<dyn Error>> {
-        let mut context = Context::build(window, config)?;
-        let renderer = context.create_deferred_renderer(shaders)?;
-        let materials = context.load_materials(materials)?;
-        let meshes = context.load_meshes(meshes)?;
+impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
+    VulkanRenderer<M, V, S>
+{
+    pub fn new(window: &Window, config: &VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
+        let context = Rc::new(RefCell::new(Context::build(window, config)?));
         Ok(Self {
-            materials,
-            meshes,
-            renderer,
             context,
+            _phantom: PhantomData,
         })
     }
 }
 
 impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Drop
-    for VulkanRenderer<M, V, S>
+    for VulkanRendererContext<M, V, S>
 {
     fn drop(&mut self) {
-        let _ = self.context.wait_idle();
-        self.context.destroy_materials(&mut self.materials);
-        self.context.destroy_meshes(&mut self.meshes);
-        self.context.destroy_deferred_renderer(&mut self.renderer);
+        let context = self.context.borrow();
+        let _ = self.context.borrow().wait_idle();
+        self.resources.destroy(&context);
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
-    for VulkanRenderer<M, V, S>
+impl<
+        M: MaterialPackListBuilder + Default,
+        V: MeshPackListBuilder + Default,
+        S: GraphicsPipelineListBuilder + Default,
+    > Renderer for VulkanRenderer<M, V, S>
+{
+    type Builder = RendererContextBuilder<S, M, V>;
+    type Context = VulkanRendererContext<M::Pack, V::Pack, S::Pack>;
+
+    fn load_context(&mut self, builder: Self::Builder) -> Result<Self::Context, Box<dyn Error>> {
+        let mut context = self.context.borrow_mut();
+        let resources = VulkanResourcePack::load(
+            &mut context,
+            &builder.materials,
+            &builder.meshes,
+            &builder.shaders,
+        )?;
+        Ok(VulkanRendererContext {
+            context: self.context.clone(),
+            resources,
+        })
+    }
+}
+
+impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> RendererContext
+    for VulkanRendererContext<M, V, S>
 {
     type Shaders = S;
     type Materials = M;
     type Meshes = V;
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
+        let context = self.context.borrow();
         let camera_matrices = camera.get_matrices();
-        self.renderer.begin_frame(&self.context, &camera_matrices)?;
+        self.resources
+            .renderer
+            .begin_frame(&context, &camera_matrices)?;
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        self.renderer.end_frame(&self.context)?;
+        let context = self.context.borrow();
+        self.resources.renderer.end_frame(&context)?;
         Ok(())
     }
 
@@ -271,25 +269,13 @@ impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
-        self.renderer.draw(
+        self.resources.renderer.draw(
             shader,
             drawable,
             transform,
-            &self.materials.packs,
-            &self.meshes.packs,
+            &self.resources.materials.packs,
+            &self.resources.meshes.packs,
         );
         Ok(())
     }
-
-    // fn get_mesh_handles<T: Vertex>(&self) -> Option<Vec<MeshHandle<T>>> {
-    //     Some(self.meshes.packs.try_get()?.get_handles())
-    // }
-
-    // fn get_material_handles<T: Material>(&self) -> Option<Vec<MaterialHandle<T>>> {
-    //     Some(self.materials.packs.try_get()?.get_handles())
-    // }
-
-    // fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>> {
-    //     self.renderer.get_shader_handles()
-    // }
 }

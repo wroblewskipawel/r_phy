@@ -6,7 +6,7 @@ use std::{
 use crate::{
     math::types::Matrix4,
     renderer::{
-        model::{Drawable, Material, MaterialHandle, MeshHandle, Vertex},
+        model::{Drawable, Material, MaterialHandle, Vertex},
         shader::{ShaderHandle, ShaderType},
         vulkan::device::{
             descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
@@ -16,10 +16,7 @@ use crate::{
                 PipelineBindData, PushConstantRangeMapper,
             },
             render_pass::GBufferWritePass,
-            resources::{
-                MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData,
-                VulkanMaterialHandle, VulkanMeshHandle,
-            },
+            resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
             swapchain::SwapchainFrame,
             VulkanDevice,
         },
@@ -35,7 +32,7 @@ pub struct ModelIndex {
 
 impl ModelIndex {
     fn get<D: Drawable>(drawable: &D) -> Self {
-        let VulkanMeshHandle { mesh_index, .. } = drawable.mesh().into();
+        let mesh_index = drawable.mesh().index();
         Self { mesh_index }
     }
 }
@@ -47,14 +44,12 @@ pub struct ModelState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BufferIndex {
-    mesh_pack_index: u32,
+    mesh_pack_index: TypeId,
 }
 
 impl BufferIndex {
-    fn get<V: Vertex>(handle: MeshHandle<V>) -> Self {
-        let VulkanMeshHandle {
-            mesh_pack_index, ..
-        } = handle.into();
+    fn get<V: Vertex>() -> Self {
+        let mesh_pack_index = TypeId::of::<V>();
         Self { mesh_pack_index }
     }
 }
@@ -66,17 +61,14 @@ pub struct BufferState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DescriptorIndex {
-    material_pack_index: u32,
+    material_pack_index: TypeId,
     material_index: u32,
 }
 
 impl DescriptorIndex {
     pub fn get<M: Material>(handle: MaterialHandle<M>) -> Self {
-        let VulkanMaterialHandle {
-            material_pack_index,
-            material_index,
-            ..
-        } = handle.into();
+        let material_pack_index = TypeId::of::<M>();
+        let material_index = handle.index();
         Self {
             material_pack_index,
             material_index,
@@ -98,10 +90,7 @@ pub struct PipelineIndex {
 
 impl PipelineIndex {
     pub fn get<S: ShaderType>(shader: ShaderHandle<S>) -> Self {
-        let ShaderHandle {
-            index: pipeline_index,
-            ..
-        } = shader;
+        let pipeline_index = shader.index() as usize;
         Self {
             vertex_type: TypeId::of::<S::Vertex>(),
             material_type: TypeId::of::<S::Material>(),
@@ -166,7 +155,7 @@ impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
                     }
                 });
             let mesh_pack = LazyCell::new(|| mesh_packs.try_get::<D::Vertex>().unwrap());
-            let buffer_index = BufferIndex::get(drawable.mesh());
+            let buffer_index = BufferIndex::get::<D::Vertex>();
             let buffer_state = descriptor_state
                 .buffer_states
                 .entry(buffer_index)
@@ -302,10 +291,7 @@ impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
     }
 
     fn get_pipeline_state<S: ShaderType>(&self, shader: ShaderHandle<S>) -> PipelineState {
-        let ShaderHandle {
-            index: pipeline_index,
-            ..
-        } = shader;
+        let pipeline_index = shader.index() as usize;
         let pipeline: GraphicsPipeline<DeferredShader<S>> = self
             .pipelines
             .write_pass
@@ -324,10 +310,7 @@ impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
         descriptor: Descriptor<L>,
         shader: ShaderHandle<S>,
     ) -> DescriptorBindingData {
-        let ShaderHandle {
-            index: pipeline_index,
-            ..
-        } = shader;
+        let pipeline_index = shader.index() as usize;
         let pipeline: GraphicsPipeline<DeferredShader<S>> = self
             .pipelines
             .write_pass

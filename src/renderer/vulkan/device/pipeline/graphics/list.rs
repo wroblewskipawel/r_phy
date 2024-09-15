@@ -14,7 +14,7 @@ use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackR
 //     type Pipeline: GraphicsPipelineConfig;
 // }
 
-pub trait GraphicsPipelineListBuilder: 'static {
+pub trait GraphicsPipelineListBuilder: ShaderTypeList {
     type Pack: GraphicsPipelinePackList;
 
     fn build(&self, device: &VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;

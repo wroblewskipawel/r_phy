@@ -34,8 +34,6 @@ pub trait Frame: Sized {
     type Attachments: AttachmentList;
     type State;
 
-    // fn get_shader_handles<T: ShaderType>(&self) -> Option<Vec<ShaderHandle<T>>>;
-
     fn begin_frame(
         &mut self,
         device: &VulkanDevice,

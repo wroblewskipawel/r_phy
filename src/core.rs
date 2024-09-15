@@ -17,12 +17,9 @@ use crate::{
     math::{transform::Transform, types::Matrix4},
     renderer::{
         camera::{Camera, CameraBuilder, CameraNone},
-        model::{
-            Drawable, DrawableType, EmptyMaterial, Material, MaterialHandle, MeshHandle, Vertex,
-            VertexNone,
-        },
+        model::{Drawable, DrawableType, EmptyMaterial, MaterialHandle, MeshHandle, VertexNone},
         shader::{ShaderHandle, ShaderType},
-        Renderer, RendererBuilder, RendererNone,
+        Renderer, RendererBuilder, RendererContext,
     },
 };
 
@@ -104,13 +101,13 @@ pub struct LoopBuilder<R: RendererBuilder, C: CameraBuilder> {
     window: Option<WindowBuilder>,
 }
 
-impl Default for LoopBuilder<RendererNone, CameraNone> {
+impl Default for LoopBuilder<Nil, CameraNone> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LoopBuilder<RendererNone, CameraNone> {
+impl LoopBuilder<Nil, CameraNone> {
     pub fn new() -> Self {
         Self {
             camera: None,
@@ -224,11 +221,11 @@ impl<
 }
 
 pub trait DrawCommandCollection: DrawableTypeList {
-    fn draw<R: Renderer>(self, renderer: &mut R);
+    fn draw<R: RendererContext>(self, renderer: &mut R);
 }
 
 impl DrawCommandCollection for Nil {
-    fn draw<R: Renderer>(self, _renderer: &mut R) {}
+    fn draw<R: RendererContext>(self, _renderer: &mut R) {}
 }
 
 impl<
@@ -248,7 +245,7 @@ impl<
         N: DrawCommandCollection,
     > DrawCommandCollection for Cons<Vec<DrawCommand<S, D>>, N>
 {
-    fn draw<R: Renderer>(self, renderer: &mut R) {
+    fn draw<R: RendererContext>(self, renderer: &mut R) {
         for DrawCommand {
             shader,
             model,
@@ -314,6 +311,7 @@ impl<R: Renderer, C: Camera> LoopTypes for Loop<R, C> {
 }
 
 pub struct Scene<D: DrawableCollection, L: LoopTypes> {
+    builder: <L::Renderer as Renderer>::Builder,
     objects: D,
     _loop: PhantomData<L>,
 }
@@ -328,6 +326,7 @@ impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
         objects: Vec<Object<T>>,
     ) -> Scene<Cons<DrawableContainer<S, T>, D>, L> {
         Scene {
+            builder: self.builder,
             objects: Cons {
                 head: DrawableContainer { shader, objects },
                 tail: self.objects,
@@ -338,24 +337,17 @@ impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
 }
 
 impl<R: Renderer, C: Camera> Loop<R, C> {
-    pub fn scene(&self) -> Scene<Nil, Self> {
-        Scene {
-            objects: Nil {},
-            _loop: PhantomData,
-        }
+    pub fn context_builder(&self) -> R::Builder {
+        R::Builder::default()
     }
 
-    // pub fn get_mesh_handles<V: Vertex>(&self) -> Option<Vec<MeshHandle<V>>> {
-    //     self.renderer.get_mesh_handles()
-    // }
-
-    // pub fn get_material_handles<M: Material>(&self) -> Option<Vec<MaterialHandle<M>>> {
-    //     self.renderer.get_material_handles()
-    // }
-
-    // pub fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-    //     self.renderer.get_shader_handles()
-    // }
+    pub fn scene(&self, builder: R::Builder) -> Result<Scene<Nil, Self>, Box<dyn Error>> {
+        Ok(Scene {
+            builder,
+            objects: Nil {},
+            _loop: PhantomData,
+        })
+    }
 
     pub fn run<D: DrawableCollection>(
         self,
@@ -368,6 +360,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
             mut input_handler,
             camera,
         } = self;
+        let mut context = renderer.load_context(scene.builder)?;
         let cursor_state = Rc::new(RefCell::new(CursorState::new()));
         let shared_cursor_state = cursor_state.clone();
         let shared_window = window.clone();
@@ -413,11 +406,11 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
                 }
                 Event::AboutToWait => {
                     let camera: &C = &(*camera).borrow();
-                    let _ = renderer.begin_frame(camera);
+                    let _ = context.begin_frame(camera);
                     if let Some(draw_commands) = draw_commands.take() {
-                        draw_commands.draw(&mut renderer);
+                        draw_commands.draw(&mut context);
                     }
-                    let _ = renderer.end_frame();
+                    let _ = context.end_frame();
                 }
                 _ => (),
             }

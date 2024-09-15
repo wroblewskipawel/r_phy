@@ -98,10 +98,6 @@ impl<'a, T: DescriptorLayout> DescriptorPoolRef<'a, T> {
             _phantom: PhantomData,
         }
     }
-
-    pub fn len(&self) -> usize {
-        self.data.sets.len()
-    }
 }
 
 #[derive(Debug)]

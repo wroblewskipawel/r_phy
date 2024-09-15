@@ -1,20 +1,17 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
-use crate::renderer::{
-    model::MaterialHandle,
-    vulkan::device::{
-        buffer::UniformBuffer,
-        command::operation::Graphics,
-        descriptor::{
-            Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
-            PodUniform,
-        },
-        image::Texture2D,
-        VulkanDevice,
+use crate::renderer::vulkan::device::{
+    buffer::UniformBuffer,
+    command::operation::Graphics,
+    descriptor::{
+        Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
+        PodUniform,
     },
+    image::Texture2D,
+    VulkanDevice,
 };
 
-use super::{TextureSamplers, VulkanMaterial, VulkanMaterialHandle};
+use super::{TextureSamplers, VulkanMaterial};
 
 pub struct MaterialPackData<M: VulkanMaterial> {
     textures: Option<Vec<Texture2D>>,
@@ -23,7 +20,6 @@ pub struct MaterialPackData<M: VulkanMaterial> {
 }
 
 pub struct MaterialPack<M: VulkanMaterial> {
-    index: usize,
     data: MaterialPackData<M>,
 }
 
@@ -40,7 +36,6 @@ impl<'a, M: VulkanMaterial> From<&'a mut MaterialPack<M>> for &'a mut MaterialPa
 }
 
 pub struct MaterialPackRef<'a, M: VulkanMaterial> {
-    index: usize,
     descriptors: DescriptorPoolRef<'a, M::DescriptorLayout>,
     _phantom: PhantomData<M>,
 }
@@ -53,7 +48,6 @@ impl<'a, M: VulkanMaterial, T: VulkanMaterial> TryFrom<&'a MaterialPack<M>>
     fn try_from(value: &'a MaterialPack<M>) -> Result<Self, Self::Error> {
         if TypeId::of::<M>() == TypeId::of::<T>() {
             Ok(Self {
-                index: value.index,
                 descriptors: (&value.data.descriptors).try_into().unwrap(),
                 _phantom: PhantomData,
             })
@@ -67,14 +61,6 @@ impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
     pub fn get_descriptor(&self, index: usize) -> Descriptor<M::DescriptorLayout> {
         self.descriptors.get(index)
     }
-
-    // pub fn get_handles(&self) -> Vec<MaterialHandle<M>> {
-    //     (0..self.descriptors.len())
-    //         .map(|material_index| {
-    //             VulkanMaterialHandle::new(self.index as u32, material_index as u32).into()
-    //         })
-    //         .collect()
-    // }
 }
 
 impl VulkanDevice {
@@ -129,7 +115,6 @@ impl VulkanDevice {
     pub fn load_material_pack<M: VulkanMaterial>(
         &mut self,
         materials: &[M],
-        index: usize,
     ) -> Result<MaterialPack<M>, Box<dyn Error>> {
         let textures = self.load_material_pack_textures(materials)?;
         let uniforms = self.load_material_pack_uniforms(materials)?;
@@ -150,7 +135,7 @@ impl VulkanDevice {
             uniforms,
             descriptors,
         };
-        Ok(MaterialPack { index, data })
+        Ok(MaterialPack { data })
     }
 }
 

@@ -73,8 +73,8 @@ impl<S: ShaderType, N: ShaderTypeList> ShaderTypeList for Cons<Vec<S>, N> {
 
 #[derive(Debug)]
 pub struct ShaderHandle<S: ShaderType> {
-    pub index: usize,
-    pub _phantom: PhantomData<S>,
+    index: u32,
+    _phantom: PhantomData<S>,
 }
 
 impl<S: ShaderType> Clone for ShaderHandle<S> {
@@ -84,3 +84,16 @@ impl<S: ShaderType> Clone for ShaderHandle<S> {
 }
 
 impl<S: ShaderType> Copy for ShaderHandle<S> {}
+
+impl<S: ShaderType> ShaderHandle<S> {
+    pub fn new(index: u32) -> Self {
+        Self {
+            index,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+}

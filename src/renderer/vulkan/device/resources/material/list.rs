@@ -1,14 +1,14 @@
-use std::{error::Error, marker::PhantomData};
+use std::error::Error;
 
 use crate::{
     core::{Cons, Nil},
     renderer::{
-        model::{MaterialCollection, MaterialHandle, MaterialTypeList},
+        model::{MaterialCollection, MaterialTypeList},
         vulkan::device::VulkanDevice,
     },
 };
 
-use super::{MaterialPack, MaterialPackData, MaterialPackRef, VulkanMaterial};
+use super::{MaterialPack, MaterialPackRef, VulkanMaterial};
 
 pub trait MaterialPackList: MaterialTypeList {
     fn destroy(&mut self, device: &VulkanDevice);
@@ -56,7 +56,7 @@ impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for 
         let materials = self.get();
         Ok(Cons {
             head: if !materials.is_empty() {
-                Some(device.load_material_pack(materials, Self::LEN)?)
+                Some(device.load_material_pack(materials)?)
             } else {
                 None
             },
@@ -89,40 +89,5 @@ impl VulkanDevice {
 
     pub fn destroy_materials<M: MaterialPackList>(&self, packs: &mut MaterialPacks<M>) {
         packs.packs.destroy(self)
-    }
-}
-
-pub struct VulkanMaterialHandle<M: VulkanMaterial> {
-    pub material_pack_index: u32,
-    pub material_index: u32,
-    _phantom: PhantomData<M>,
-}
-
-impl<M: VulkanMaterial> VulkanMaterialHandle<M> {
-    pub fn new(material_pack_index: u32, material_index: u32) -> Self {
-        Self {
-            material_pack_index,
-            material_index,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<M: VulkanMaterial> From<MaterialHandle<M>> for VulkanMaterialHandle<M> {
-    fn from(value: MaterialHandle<M>) -> Self {
-        Self {
-            material_pack_index: ((0xFFFFFFF0000000 & value.0) >> 32) as u32,
-            material_index: (0x00000000FFFFFFFF & value.0) as u32,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<M: VulkanMaterial> From<VulkanMaterialHandle<M>> for MaterialHandle<M> {
-    fn from(value: VulkanMaterialHandle<M>) -> Self {
-        Self(
-            ((value.material_pack_index as u64) << 32) + value.material_index as u64,
-            PhantomData,
-        )
     }
 }

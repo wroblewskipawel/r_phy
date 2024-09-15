@@ -19,7 +19,10 @@ pub trait Vertex: Pod + Zeroable {
 }
 
 #[derive(Debug)]
-pub struct MeshHandle<V: Vertex>(pub u64, pub PhantomData<V>);
+pub struct MeshHandle<V: Vertex> {
+    index: u32,
+    _marker: PhantomData<V>,
+}
 
 impl<V: Vertex> Clone for MeshHandle<V> {
     fn clone(&self) -> Self {
@@ -28,6 +31,19 @@ impl<V: Vertex> Clone for MeshHandle<V> {
 }
 
 impl<V: Vertex> Copy for MeshHandle<V> {}
+
+impl<V: Vertex> MeshHandle<V> {
+    pub fn new(index: u32) -> Self {
+        Self {
+            index,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]

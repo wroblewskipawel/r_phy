@@ -1,7 +1,7 @@
 mod commands;
 mod draw_graph;
 
-use std::{error::Error, marker::PhantomData, path::Path};
+use std::{error::Error, path::Path};
 
 use ash::vk;
 
@@ -86,7 +86,6 @@ struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
     write_pass: P,
     depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
     shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
-    _phantom: PhantomData<P>,
 }
 
 struct DeferredRendererFrameData<P: GraphicsPipelinePackList> {
@@ -176,22 +175,6 @@ impl<P: GraphicsPipelinePackList> Frame for DeferredRenderer<P> {
         device.present_frame(&self.frames.swapchain, primary_command, swapchain_frame)?;
         Ok(())
     }
-
-    // fn get_shader_handles<S: ShaderType>(&self) -> Option<Vec<ShaderHandle<S>>> {
-    //     if let Some(pack) = self.pipelines.write_pass.try_get::<DeferredShader<S>>() {
-    //         let len = pack.len();
-    //         Some(
-    //             (0..len)
-    //                 .map(|index| ShaderHandle {
-    //                     index,
-    //                     _phantom: PhantomData,
-    //                 })
-    //                 .collect(),
-    //         )
-    //     } else {
-    //         None
-    //     }
-    // }
 }
 
 impl GBuffer {
@@ -227,7 +210,6 @@ impl Context {
             write_pass,
             depth_prepass,
             shading_pass,
-            _phantom: PhantomData,
         })
     }
 
@@ -261,18 +243,15 @@ impl Context {
             Path::new("assets/skybox/skybox"),
             ShaderDirectory::new(Path::new("shaders/spv/skybox")),
         )?;
-        let mesh = self.load_mesh_pack(
-            &[MeshBuilder::plane_subdivided(
-                0,
-                2.0 * Vector3::y(),
-                2.0 * Vector3::x(),
-                Vector3::zero(),
-                false,
-            )
-            .offset(Vector3::new(-1.0, -1.0, 0.0))
-            .build()],
-            usize::MAX,
-        )?;
+        let mesh = self.load_mesh_pack(&[MeshBuilder::plane_subdivided(
+            0,
+            2.0 * Vector3::y(),
+            2.0 * Vector3::x(),
+            Vector3::zero(),
+            false,
+        )
+        .offset(Vector3::new(-1.0, -1.0, 0.0))
+        .build()])?;
 
         Ok(DeferredRendererResources { mesh, skybox })
     }

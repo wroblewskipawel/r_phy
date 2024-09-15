@@ -17,7 +17,7 @@ pub trait Contains<T, M: Marker> {
     fn get_mut(&mut self) -> &mut T;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Nil {}
 
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +25,7 @@ pub struct TypedNil<T> {
     _phantom: PhantomData<T>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Cons<H, T> {
     pub(crate) head: H,
     pub(crate) tail: T,

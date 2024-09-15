@@ -38,7 +38,7 @@ impl VulkanDevice {
         )?;
         let layout = self.get_pipeline_layout::<L::Layout>()?;
         let pipeline = self.create_graphics_pipeline(layout, &modules)?;
-        let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()], usize::MAX)?;
+        let mesh_pack = self.load_mesh_pack(&[shape::Cube::new(1.0).into()])?;
         Ok(Skybox {
             texture,
             mesh_pack,

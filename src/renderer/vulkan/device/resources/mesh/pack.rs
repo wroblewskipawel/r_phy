@@ -3,7 +3,7 @@ use std::{any::TypeId, error::Error, marker::PhantomData};
 use ash::vk;
 
 use crate::renderer::{
-    model::{Mesh, MeshHandle, Vertex},
+    model::{Mesh, Vertex},
     vulkan::device::{
         buffer::{Range, StagingBufferBuilder},
         command::operation::{self, Operation},
@@ -11,20 +11,16 @@ use crate::renderer::{
     },
 };
 
-use super::{
-    BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, VulkanMeshHandle,
-};
+use super::{BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData};
 
 #[derive(Debug)]
 pub struct MeshPack<V: Vertex> {
-    pub index: usize,
     pub data: MeshPackData,
     _phantom: PhantomData<V>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct MeshPackRef<'a, V: Vertex> {
-    pub index: usize,
     pub data: &'a MeshPackData,
     pub _phantom: PhantomData<V>,
 }
@@ -35,7 +31,6 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
     fn try_from(value: &'a MeshPack<V>) -> Result<Self, Self::Error> {
         if TypeId::of::<T>() == TypeId::of::<V>() {
             Ok(Self {
-                index: value.index,
                 data: &value.data,
                 _phantom: PhantomData,
             })
@@ -55,17 +50,6 @@ impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
 }
 
 impl<'a, V: Vertex> MeshPackRef<'a, V> {
-    // pub fn get_handles(&self) -> Vec<MeshHandle<V>> {
-    //     self.data
-    //         .meshes
-    //         .iter()
-    //         .enumerate()
-    //         .map(|(mesh_index, _)| {
-    //             VulkanMeshHandle::new(self.index as u32, mesh_index as u32).into()
-    //         })
-    //         .collect()
-    // }
-
     pub fn get(&self, index: usize) -> MeshRange<V> {
         MeshRange {
             vertices: self.data.meshes[index].vertices.into(),
@@ -130,7 +114,6 @@ impl VulkanDevice {
     pub fn load_mesh_pack<V: Vertex>(
         &mut self,
         meshes: &[Mesh<V>],
-        index: usize,
     ) -> Result<MeshPack<V>, Box<dyn Error>> {
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
@@ -177,7 +160,6 @@ impl VulkanDevice {
             meshes,
         };
         Ok(MeshPack {
-            index,
             data,
             _phantom: PhantomData,
         })

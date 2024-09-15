@@ -30,7 +30,10 @@ pub enum Image {
 }
 
 #[derive(Debug)]
-pub struct MaterialHandle<M: Material>(pub u64, pub PhantomData<M>);
+pub struct MaterialHandle<M: Material> {
+    index: u32,
+    _phantom: PhantomData<M>,
+}
 
 impl<M: Material> Clone for MaterialHandle<M> {
     fn clone(&self) -> Self {
@@ -39,6 +42,19 @@ impl<M: Material> Clone for MaterialHandle<M> {
 }
 
 impl<M: Material> Copy for MaterialHandle<M> {}
+
+impl<M: Material> MaterialHandle<M> {
+    pub fn new(index: u32) -> Self {
+        Self {
+            index,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+}
 
 pub struct UnlitMaterialBuilder {
     albedo: Option<Image>,
