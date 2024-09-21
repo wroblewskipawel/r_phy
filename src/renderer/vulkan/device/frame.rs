@@ -24,6 +24,7 @@ use super::{
     },
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
+    memory::{Allocator, DefaultAllocator},
     resources::{MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
@@ -41,10 +42,11 @@ pub trait Frame: Sized {
     ) -> Result<(), Box<dyn Error>>;
 
     fn draw<
+        A: Allocator,
         S: ShaderType,
         D: Drawable<Material = S::Material, Vertex = S::Vertex>,
-        M: MaterialPackList,
-        V: MeshPackList,
+        M: MaterialPackList<A>,
+        V: MeshPackList<A>,
     >(
         &mut self,
         shader: ShaderHandle<S>,
@@ -59,7 +61,7 @@ pub trait Frame: Sized {
 
 pub struct CameraUniform {
     pub descriptors: DescriptorPool<CameraDescriptorSet>,
-    pub uniform_buffer: UniformBuffer<CameraMatrices, Graphics>,
+    pub uniform_buffer: UniformBuffer<CameraMatrices, Graphics, DefaultAllocator>,
 }
 
 pub struct FrameData<C: Frame> {
@@ -82,7 +84,10 @@ impl Context {
         &mut self,
         num_images: usize,
     ) -> Result<CameraUniform, Box<dyn Error>> {
-        let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics>(num_images)?;
+        let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics, _>(
+            &mut DefaultAllocator {},
+            num_images,
+        )?;
         let descriptors = self.create_descriptor_pool(
             DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
                 .write_buffer(&uniform_buffer),
@@ -95,7 +100,7 @@ impl Context {
 
     fn destroy_camera_uniform(&self, camera: &mut CameraUniform) {
         self.destroy_descriptor_pool(&mut camera.descriptors);
-        self.destroy_uniform_buffer(&mut camera.uniform_buffer);
+        self.destroy_uniform_buffer(&mut camera.uniform_buffer, &mut DefaultAllocator {});
     }
 
     pub fn create_frame_pool<F: Frame>(

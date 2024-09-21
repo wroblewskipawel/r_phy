@@ -11,6 +11,7 @@ use crate::{
         vulkan::device::{
             descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
             framebuffer::presets::AttachmentsGBuffer,
+            memory::Allocator,
             pipeline::{
                 GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
                 PipelineBindData, PushConstantRangeMapper,
@@ -110,12 +111,13 @@ pub struct DrawGraph {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
-impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
+impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
     pub(super) fn append_draw_call<
+        T: Allocator,
         S: ShaderType,
         D: Drawable,
-        M: MaterialPackList,
-        V: MeshPackList,
+        M: MaterialPackList<T>,
+        V: MeshPackList<T>,
     >(
         &mut self,
         material_packs: &M,

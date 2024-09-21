@@ -17,6 +17,7 @@ use super::{
     frame::Frame,
     framebuffer::{Clear, FramebufferHandle},
     image::VulkanImage2D,
+    memory::{Allocator, MemoryProperties},
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
     resources::{BufferType, MeshPackBinding, MeshRangeBindData},
@@ -433,10 +434,17 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn copy_buffer<'b, 'c>(
+    pub fn copy_buffer<
+        'b,
+        'c,
+        S: MemoryProperties,
+        D: MemoryProperties,
+        A1: Allocator,
+        A2: Allocator,
+    >(
         self,
-        src: impl Into<&'b Buffer>,
-        dst: impl Into<&'c mut Buffer>,
+        src: impl Into<&'b Buffer<S, A1>>,
+        dst: impl Into<&'c mut Buffer<D, A2>>,
         ranges: &[vk::BufferCopy],
     ) -> Self {
         let RecordingCommand(command, device) = self;
@@ -448,9 +456,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn change_layout<'b, 'c>(
+    pub fn change_layout<'b, 'c, M: MemoryProperties, A: Allocator>(
         self,
-        image: impl Into<&'c mut VulkanImage2D>,
+        image: impl Into<&'c mut VulkanImage2D<M, A>>,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
         array_layer: u32,
@@ -498,9 +506,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn generate_mip<'b, 'c>(
+    pub fn generate_mip<'b, 'c, M: MemoryProperties, A: Allocator>(
         self,
-        image: impl Into<&'c mut VulkanImage2D>,
+        image: impl Into<&'c mut VulkanImage2D<M, A>>,
         array_layer: u32,
     ) -> Self {
         let image = image.into();
@@ -633,10 +641,17 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn copy_image<'b, 'c>(
+    pub fn copy_image<
+        'b,
+        'c,
+        S: MemoryProperties,
+        D: MemoryProperties,
+        A1: Allocator,
+        A2: Allocator,
+    >(
         self,
-        src: impl Into<&'b Buffer>,
-        dst: impl Into<&'c mut VulkanImage2D>,
+        src: impl Into<&'b Buffer<S, A1>>,
+        dst: impl Into<&'c mut VulkanImage2D<D, A2>>,
         dst_layer: u32,
     ) -> Self {
         let RecordingCommand(command, device) = self;
@@ -736,9 +751,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn draw_skybox<C: GraphicsPipelineConfig<Layout = LayoutSkybox>>(
+    pub fn draw_skybox<A: Allocator, C: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>>(
         self,
-        skybox: &Skybox<C>,
+        skybox: &Skybox<A, C>,
         mut camera_matrices: CameraMatrices,
     ) -> Self {
         camera_matrices.view[3] = Vector4::w();

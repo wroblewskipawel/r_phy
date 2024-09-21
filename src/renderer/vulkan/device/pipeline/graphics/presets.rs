@@ -20,11 +20,11 @@ use super::GraphicsPipelineBuilder;
 //     EmptySubpass,
 // >;
 
-pub type GBufferSkyboxPipeline<A> = GraphicsPipelineBuilder<
-    PipelineLayoutSkybox,
+pub type GBufferSkyboxPipeline<At, Al> = GraphicsPipelineBuilder<
+    PipelineLayoutSkybox<Al>,
     StatesSkybox,
-    DeferedRenderPass<A>,
-    GBufferSkyboxPass<A>,
+    DeferedRenderPass<At>,
+    GBufferSkyboxPass<At>,
 >;
 
 pub type GBufferDepthPrepasPipeline<A> = GraphicsPipelineBuilder<

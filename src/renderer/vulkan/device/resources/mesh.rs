@@ -11,6 +11,7 @@ use strum::EnumCount;
 
 use crate::renderer::model::Vertex;
 use crate::renderer::vulkan::device::buffer::Buffer;
+use crate::renderer::vulkan::device::memory::{Allocator, DeviceLocal};
 use crate::renderer::vulkan::device::{
     buffer::{ByteRange, DeviceLocalBuffer},
     VulkanDevice,
@@ -73,21 +74,25 @@ impl<V: Vertex> From<MeshByteRange> for MeshRange<V> {
 }
 
 #[derive(Debug)]
-pub struct MeshPackData {
-    pub buffer: DeviceLocalBuffer,
+pub struct MeshPackData<A: Allocator> {
+    pub buffer: DeviceLocalBuffer<A>,
     pub buffer_ranges: BufferRanges,
     pub meshes: Vec<MeshByteRange>,
 }
 
-impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer {
-    fn from(value: &'a mut MeshPackData) -> Self {
+impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLocal, A> {
+    fn from(value: &'a mut MeshPackData<A>) -> Self {
         (&mut value.buffer).into()
     }
 }
 
 impl VulkanDevice {
-    pub fn destroy_mesh_pack<'a>(&self, pack: impl Into<&'a mut MeshPackData>) {
-        self.destroy_buffer((&mut pack.into().buffer).into());
+    pub fn destroy_mesh_pack<'a, A: Allocator>(
+        &self,
+        pack: impl Into<&'a mut MeshPackData<A>>,
+        allocator: &mut A,
+    ) {
+        self.destroy_buffer((&mut pack.into().buffer).into(), allocator);
     }
 }
 
@@ -97,8 +102,8 @@ pub struct MeshPackBinding {
     pub buffer_ranges: BufferRanges,
 }
 
-impl<'a> From<&'a MeshPackData> for MeshPackBinding {
-    fn from(value: &'a MeshPackData) -> Self {
+impl<'a, A: Allocator> From<&'a MeshPackData<A>> for MeshPackBinding {
+    fn from(value: &'a MeshPackData<A>) -> Self {
         Self {
             // TODO: Improve buffer aggregation scheme and naming
             buffer: value.buffer.buffer.buffer,

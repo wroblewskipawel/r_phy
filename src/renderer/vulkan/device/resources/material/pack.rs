@@ -8,29 +8,34 @@ use crate::renderer::vulkan::device::{
         PodUniform,
     },
     image::Texture2D,
+    memory::{Allocator, HostCoherent, HostVisibleMemory},
     VulkanDevice,
 };
 
 use super::{TextureSamplers, VulkanMaterial};
 
-pub struct MaterialPackData<M: VulkanMaterial> {
-    textures: Option<Vec<Texture2D>>,
-    uniforms: Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
+pub struct MaterialPackData<M: VulkanMaterial, A: Allocator> {
+    textures: Option<Vec<Texture2D<A>>>,
+    uniforms: Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
     descriptors: DescriptorPool<M::DescriptorLayout>,
 }
 
-pub struct MaterialPack<M: VulkanMaterial> {
-    data: MaterialPackData<M>,
+pub struct MaterialPack<M: VulkanMaterial, A: Allocator> {
+    data: MaterialPackData<M, A>,
 }
 
-impl<'a, M: VulkanMaterial> From<&'a MaterialPack<M>> for &'a MaterialPackData<M> {
-    fn from(pack: &'a MaterialPack<M>) -> Self {
+impl<'a, M: VulkanMaterial, A: Allocator> From<&'a MaterialPack<M, A>>
+    for &'a MaterialPackData<M, A>
+{
+    fn from(pack: &'a MaterialPack<M, A>) -> Self {
         &pack.data
     }
 }
 
-impl<'a, M: VulkanMaterial> From<&'a mut MaterialPack<M>> for &'a mut MaterialPackData<M> {
-    fn from(pack: &'a mut MaterialPack<M>) -> Self {
+impl<'a, M: VulkanMaterial, A: Allocator> From<&'a mut MaterialPack<M, A>>
+    for &'a mut MaterialPackData<M, A>
+{
+    fn from(pack: &'a mut MaterialPack<M, A>) -> Self {
         &mut pack.data
     }
 }
@@ -40,12 +45,12 @@ pub struct MaterialPackRef<'a, M: VulkanMaterial> {
     _phantom: PhantomData<M>,
 }
 
-impl<'a, M: VulkanMaterial, T: VulkanMaterial> TryFrom<&'a MaterialPack<M>>
+impl<'a, A: Allocator, M: VulkanMaterial, T: VulkanMaterial> TryFrom<&'a MaterialPack<M, A>>
     for MaterialPackRef<'a, T>
 {
     type Error = &'static str;
 
-    fn try_from(value: &'a MaterialPack<M>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a MaterialPack<M, A>) -> Result<Self, Self::Error> {
         if TypeId::of::<M>() == TypeId::of::<T>() {
             Ok(Self {
                 descriptors: (&value.data.descriptors).try_into().unwrap(),
@@ -64,10 +69,11 @@ impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
 }
 
 impl VulkanDevice {
-    fn load_material_pack_textures<M: VulkanMaterial>(
-        &mut self,
+    fn load_material_pack_textures<M: VulkanMaterial, A: Allocator>(
+        &self,
+        allocator: &mut A,
         materials: &[M],
-    ) -> Result<Option<Vec<Texture2D>>, Box<dyn Error>> {
+    ) -> Result<Option<Vec<Texture2D<A>>>, Box<dyn Error>> {
         if M::NUM_IMAGES > 0 {
             let textures = materials
                 .iter()
@@ -77,7 +83,7 @@ impl VulkanDevice {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| self.load_texture(image))
+                        .map(|image| self.load_texture(allocator, image))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -87,20 +93,25 @@ impl VulkanDevice {
         }
     }
 
-    fn load_material_pack_uniforms<M: VulkanMaterial>(
-        &mut self,
+    fn load_material_pack_uniforms<M: VulkanMaterial, A: Allocator>(
+        &self,
+        allocator: &mut A,
         materials: &[M],
     ) -> Result<
-        Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
+        Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
         Box<dyn Error>,
-    > {
+    >
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
         let uniform_data = materials
             .iter()
             .filter_map(|material| material.uniform())
             .collect::<Vec<_>>();
         if !uniform_data.is_empty() {
             let mut uniform_buffer = self
-                .create_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics>(
+                .create_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics, _>(
+                    allocator,
                     materials.len(),
                 )?;
             for (index, uniform) in uniform_data.into_iter().enumerate() {
@@ -112,12 +123,16 @@ impl VulkanDevice {
         }
     }
 
-    pub fn load_material_pack<M: VulkanMaterial>(
-        &mut self,
+    pub fn load_material_pack<M: VulkanMaterial, A: Allocator>(
+        &self,
+        allocator: &mut A,
         materials: &[M],
-    ) -> Result<MaterialPack<M>, Box<dyn Error>> {
-        let textures = self.load_material_pack_textures(materials)?;
-        let uniforms = self.load_material_pack_uniforms(materials)?;
+    ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
+        let textures = self.load_material_pack_textures(allocator, materials)?;
+        let uniforms = self.load_material_pack_uniforms(allocator, materials)?;
         let writer = DescriptorSetWriter::<M::DescriptorLayout>::new(materials.len());
         let writer = if let Some(textures) = &textures {
             writer.write_images::<TextureSamplers<M>, _>(textures)
@@ -140,18 +155,21 @@ impl VulkanDevice {
 }
 
 impl VulkanDevice {
-    pub fn destroy_material_pack<'a, M: VulkanMaterial>(
+    pub fn destroy_material_pack<'a, M: VulkanMaterial, A: Allocator>(
         &self,
-        pack: impl Into<&'a mut MaterialPackData<M>>,
-    ) {
+        pack: impl Into<&'a mut MaterialPackData<M, A>>,
+        allocator: &mut A,
+    ) where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
         let data = pack.into();
         if let Some(textures) = data.textures.as_mut() {
             textures
                 .iter_mut()
-                .for_each(|texture| self.destroy_texture(texture));
+                .for_each(|texture| self.destroy_texture(texture, allocator));
         }
         if let Some(uniforms) = data.uniforms.as_mut() {
-            self.destroy_uniform_buffer(uniforms);
+            self.destroy_uniform_buffer(uniforms, allocator);
         }
         self.destroy_descriptor_pool(&mut data.descriptors);
     }

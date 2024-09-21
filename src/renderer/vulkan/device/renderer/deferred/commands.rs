@@ -14,6 +14,7 @@ use crate::renderer::{
         framebuffer::{
             presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
         },
+        memory::Allocator,
         pipeline::GraphicsPipelinePackList,
         render_pass::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
         swapchain::SwapchainFrame,
@@ -31,7 +32,7 @@ pub(super) struct Commands<P: GraphicsPipelinePackList> {
     pub _phantom: PhantomData<P>,
 }
 
-impl<P: GraphicsPipelinePackList> DeferredRenderer<P> {
+impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
     pub(super) fn prepare_commands(
         &mut self,
         device: &VulkanDevice,

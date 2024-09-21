@@ -6,7 +6,7 @@ use std::{
 use bytemuck::AnyBitPattern;
 
 use crate::{
-    core::{Cons, Nil},
+    core::{Cons, Nil, TypedNil},
     math::types::{Vector3, Vector4},
 };
 
@@ -235,6 +235,12 @@ pub trait MaterialCollection: MaterialTypeList {
 }
 
 impl MaterialTypeList for Nil {
+    const LEN: usize = 0;
+    type Item = EmptyMaterial;
+    type Next = Self;
+}
+
+impl<T: 'static> MaterialTypeList for TypedNil<T> {
     const LEN: usize = 0;
     type Item = EmptyMaterial;
     type Next = Self;

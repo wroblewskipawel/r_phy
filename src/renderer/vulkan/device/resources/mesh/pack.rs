@@ -5,8 +5,9 @@ use ash::vk;
 use crate::renderer::{
     model::{Mesh, Vertex},
     vulkan::device::{
-        buffer::{Range, StagingBufferBuilder},
+        buffer::{BufferInfo, Range, StagingBufferBuilder},
         command::operation::{self, Operation},
+        memory::Allocator,
         VulkanDevice,
     },
 };
@@ -14,21 +15,29 @@ use crate::renderer::{
 use super::{BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData};
 
 #[derive(Debug)]
-pub struct MeshPack<V: Vertex> {
-    pub data: MeshPackData,
+pub struct MeshPack<V: Vertex, A: Allocator> {
+    pub data: MeshPackData<A>,
     _phantom: PhantomData<V>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct MeshPackRef<'a, V: Vertex> {
-    pub data: &'a MeshPackData,
+#[derive(Debug)]
+pub struct MeshPackRef<'a, V: Vertex, A: Allocator> {
+    pub data: &'a MeshPackData<A>,
     pub _phantom: PhantomData<V>,
 }
 
-impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
+impl<'a, V: Vertex, A: Allocator> Clone for MeshPackRef<'a, V, A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, V: Vertex, A: Allocator> Copy for MeshPackRef<'a, V, A> {}
+
+impl<'a, V: Vertex, T: Vertex, A: Allocator> TryFrom<&'a MeshPack<V, A>> for MeshPackRef<'a, T, A> {
     type Error = &'static str;
 
-    fn try_from(value: &'a MeshPack<V>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a MeshPack<V, A>) -> Result<Self, Self::Error> {
         if TypeId::of::<T>() == TypeId::of::<V>() {
             Ok(Self {
                 data: &value.data,
@@ -40,8 +49,8 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
     }
 }
 
-impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
-    fn from(value: MeshPackRef<'a, V>) -> Self {
+impl<'a, V: Vertex, A: Allocator> From<MeshPackRef<'a, V, A>> for MeshPackBinding {
+    fn from(value: MeshPackRef<'a, V, A>) -> Self {
         MeshPackBinding {
             buffer: value.data.buffer.buffer.buffer,
             buffer_ranges: value.data.buffer_ranges,
@@ -49,7 +58,7 @@ impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
     }
 }
 
-impl<'a, V: Vertex> MeshPackRef<'a, V> {
+impl<'a, V: Vertex, A: Allocator> MeshPackRef<'a, V, A> {
     pub fn get(&self, index: usize) -> MeshRange<V> {
         MeshRange {
             vertices: self.data.meshes[index].vertices.into(),
@@ -57,30 +66,30 @@ impl<'a, V: Vertex> MeshPackRef<'a, V> {
         }
     }
 
-    pub fn as_raw(&self) -> &MeshPackData {
+    pub fn as_raw(&self) -> &MeshPackData<A> {
         self.data
     }
 }
 
-impl<'a, V: Vertex> From<&'a MeshPack<V>> for &'a MeshPackData {
-    fn from(value: &'a MeshPack<V>) -> Self {
+impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for &'a MeshPackData<A> {
+    fn from(value: &'a MeshPack<V, A>) -> Self {
         &value.data
     }
 }
 
-impl<'a, V: Vertex> From<&'a mut MeshPack<V>> for &'a mut MeshPackData {
-    fn from(value: &'a mut MeshPack<V>) -> Self {
+impl<'a, V: Vertex, A: Allocator> From<&'a mut MeshPack<V, A>> for &'a mut MeshPackData<A> {
+    fn from(value: &'a mut MeshPack<V, A>) -> Self {
         &mut value.data
     }
 }
 
-impl<'a, V: Vertex> From<&'a MeshPack<V>> for MeshPackBinding {
-    fn from(value: &'a MeshPack<V>) -> Self {
+impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for MeshPackBinding {
+    fn from(value: &'a MeshPack<V, A>) -> Self {
         (&value.data).into()
     }
 }
 
-impl<V: Vertex> MeshPack<V> {
+impl<V: Vertex, A: Allocator> MeshPack<V, A> {
     pub fn get(&self, index: usize) -> MeshRange<V> {
         self.data.meshes[index].into()
     }
@@ -111,10 +120,11 @@ pub struct MeshRange<V: Vertex> {
 
 impl VulkanDevice {
     // TODO: Should &self be &mut? Consider renaming the function to create_mesh_pack
-    pub fn load_mesh_pack<V: Vertex>(
-        &mut self,
+    pub fn load_mesh_pack<V: Vertex, A: Allocator>(
+        &self,
+        allocator: &mut A,
         meshes: &[Mesh<V>],
-    ) -> Result<MeshPack<V>, Box<dyn Error>> {
+    ) -> Result<MeshPack<V, A>, Box<dyn Error>> {
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -124,12 +134,15 @@ impl VulkanDevice {
         buffer_ranges.set(BufferType::Vertex, vertex_range);
         buffer_ranges.set(BufferType::Index, index_range);
         let mut buffer = self.create_device_local_buffer(
-            buffer_ranges.get_rquired_buffer_size(),
-            vk::BufferUsageFlags::VERTEX_BUFFER
-                | vk::BufferUsageFlags::INDEX_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_DST,
-            vk::SharingMode::EXCLUSIVE,
-            &[operation::Graphics::get_queue_family_index(self)],
+            allocator,
+            BufferInfo {
+                size: buffer_ranges.get_rquired_buffer_size(),
+                usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+                sharing_mode: vk::SharingMode::EXCLUSIVE,
+                queue_families: &[operation::Graphics::get_queue_family_index(self)],
+            },
         )?;
         let (vertex_ranges, index_ranges) = {
             let mut staging_buffer = self.create_stagging_buffer(builder)?;

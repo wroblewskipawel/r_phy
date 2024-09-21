@@ -7,7 +7,7 @@ use crate::{
     core::{Cons, Nil},
     renderer::{
         camera::CameraMatrices,
-        vulkan::device::{framebuffer::InputAttachment, image::Texture2D},
+        vulkan::device::{framebuffer::InputAttachment, image::Texture2D, memory::Allocator},
     },
 };
 
@@ -137,7 +137,7 @@ impl DescriptorBinding for CameraMatrices {
     }
 }
 
-impl DescriptorBinding for Texture2D {
+impl<A: Allocator> DescriptorBinding for Texture2D<A> {
     fn has_data() -> bool {
         true
     }
@@ -205,7 +205,7 @@ impl DescriptorBinding for InputAttachment {
 
 pub type CameraDescriptorSet = DescriptorLayoutBuilder<Cons<CameraMatrices, Nil>>;
 
-pub type TextureDescriptorSet = DescriptorLayoutBuilder<Cons<Texture2D, Nil>>;
+pub type TextureDescriptorSet<A> = DescriptorLayoutBuilder<Cons<Texture2D<A>, Nil>>;
 
 pub type GBufferDescriptorSet = DescriptorLayoutBuilder<
     Cons<

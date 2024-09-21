@@ -1,40 +1,49 @@
 use std::error::Error;
 
 use crate::{
-    core::{Cons, Nil},
+    core::{Cons, Nil, TypedNil},
     renderer::{
         model::{MaterialCollection, MaterialTypeList},
-        vulkan::device::VulkanDevice,
+        vulkan::device::{
+            memory::{Allocator, HostCoherent, HostVisibleMemory},
+            VulkanDevice,
+        },
     },
 };
 
 use super::{MaterialPack, MaterialPackRef, VulkanMaterial};
 
-pub trait MaterialPackList: MaterialTypeList {
-    fn destroy(&mut self, device: &VulkanDevice);
+pub trait MaterialPackList<A: Allocator>: MaterialTypeList {
+    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A);
 
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>>;
 }
 
-impl MaterialPackList for Nil {
-    fn destroy(&mut self, _device: &VulkanDevice) {}
+impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
+    fn destroy(&mut self, _device: &VulkanDevice, _allocator: &mut A) {}
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>> {
         None
     }
 }
 
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialTypeList for Cons<Option<MaterialPack<M>>, N> {
+impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialTypeList
+    for Cons<Option<MaterialPack<M, A>>, N>
+{
     const LEN: usize = N::LEN + 1;
     type Item = M;
     type Next = N;
 }
 
-impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for Cons<Option<MaterialPack<M>>, N> {
-    fn destroy(&mut self, device: &VulkanDevice) {
+impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialPackList<A>
+    for Cons<Option<MaterialPack<M, A>>, N>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
+{
+    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A) {
         if let Some(material_pack) = &mut self.head {
-            device.destroy_material_pack(material_pack);
+            device.destroy_material_pack(material_pack, allocator);
         }
-        self.tail.destroy(device);
+        self.tail.destroy(device, allocator);
     }
 
     fn try_get<T: VulkanMaterial>(&self) -> Option<MaterialPackRef<T>> {
@@ -46,48 +55,72 @@ impl<M: VulkanMaterial, N: MaterialPackList> MaterialPackList for Cons<Option<Ma
 }
 
 pub trait MaterialPackListBuilder: MaterialTypeList + 'static {
-    type Pack: MaterialPackList;
-    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>>;
+    type Pack<A: Allocator>: MaterialPackList<A>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory;
+    fn build<A: Allocator>(
+        &self,
+        device: &VulkanDevice,
+        allocator: &mut A,
+    ) -> Result<Self::Pack<A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory;
 }
 
 impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
-    type Pack = Cons<Option<MaterialPack<Self::Item>>, N::Pack>;
-    fn build(&self, device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
+    type Pack<A: Allocator> = Cons<Option<MaterialPack<Self::Item, A>>, N::Pack<A>> where A::Allocation<HostCoherent>: HostVisibleMemory;
+    fn build<A: Allocator>(
+        &self,
+        device: &VulkanDevice,
+        allocator: &mut A,
+    ) -> Result<Self::Pack<A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
         let materials = self.get();
         Ok(Cons {
             head: if !materials.is_empty() {
-                Some(device.load_material_pack(materials)?)
+                Some(device.load_material_pack(allocator, materials)?)
             } else {
                 None
             },
-            tail: self.next().build(device)?,
+            tail: self.next().build(device, allocator)?,
         })
     }
 }
 
 impl MaterialPackListBuilder for Nil {
-    type Pack = Self;
+    type Pack<A: Allocator> = TypedNil<A> where A::Allocation<HostCoherent>: HostVisibleMemory;
 
-    fn build(&self, _device: &mut VulkanDevice) -> Result<Self::Pack, Box<dyn Error>> {
-        Ok(Nil {})
+    fn build<A: Allocator>(
+        &self,
+        _device: &VulkanDevice,
+        _allocator: &mut A,
+    ) -> Result<Self::Pack<A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
+        Ok(TypedNil::new())
     }
-}
-
-pub struct MaterialPacks<N: MaterialPackList> {
-    pub packs: N,
 }
 
 impl VulkanDevice {
-    pub fn load_materials<B: MaterialPackListBuilder>(
-        &mut self,
+    pub fn load_materials<A: Allocator, B: MaterialPackListBuilder>(
+        &self,
+        allocator: &mut A,
         material_types: &B,
-    ) -> Result<MaterialPacks<B::Pack>, Box<dyn Error>> {
-        Ok(MaterialPacks {
-            packs: material_types.build(self)?,
-        })
+    ) -> Result<B::Pack<A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
+        material_types.build(self, allocator)
     }
 
-    pub fn destroy_materials<M: MaterialPackList>(&self, packs: &mut MaterialPacks<M>) {
-        packs.packs.destroy(self)
+    pub fn destroy_materials<A: Allocator, M: MaterialPackList<A>>(
+        &self,
+        packs: &mut M,
+        allocator: &mut A,
+    ) {
+        packs.destroy(self, allocator)
     }
 }

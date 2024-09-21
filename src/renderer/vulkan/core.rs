@@ -8,7 +8,6 @@ use winit::window::Window;
 use super::debug::VulkanDebugUtils as DebugUtils;
 use super::device::VulkanDevice as Device;
 use super::surface::VulkanSurface as Surface;
-use super::VulkanRendererConfig;
 
 fn check_required_extension_support(
     entry: &Entry,
@@ -61,7 +60,7 @@ pub(super) struct Context {
 }
 
 impl Context {
-    pub fn build(window: &Window, config: &VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
+    pub fn build(window: &Window) -> Result<Self, Box<dyn Error>> {
         let entry = unsafe { Entry::load()? };
         let enabled_layer_names =
             check_required_layer_support(&entry, DebugUtils::required_layers().iter().copied())?;
@@ -85,7 +84,7 @@ impl Context {
         let instance = unsafe { entry.create_instance(&create_info, None)? };
         let debug_utils = DebugUtils::build(&entry, &instance)?;
         let surface = Surface::create(&entry, &instance, window)?;
-        let device = Device::create(&instance, &surface, config)?;
+        let device = Device::create(&instance, &surface)?;
 
         Ok(Self {
             device,

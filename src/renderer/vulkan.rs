@@ -5,10 +5,7 @@ mod surface;
 
 use self::device::{
     renderer::deferred::DeferredRenderer,
-    resources::{
-        MaterialPackList, MaterialPackListBuilder, MaterialPacks, MeshPackList,
-        MeshPackListBuilder, MeshPacks,
-    },
+    resources::{MaterialPackList, MaterialPackListBuilder, MeshPackList, MeshPackListBuilder},
 };
 use crate::{
     core::{Cons, Contains, Marker, Nil},
@@ -25,6 +22,7 @@ use super::{
 use ash::vk;
 use device::{
     frame::Frame,
+    memory::{Allocator, HostCoherent, HostVisibleMemory, StaticStackAllocator},
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
 };
 use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
@@ -32,7 +30,7 @@ use winit::window::Window;
 
 pub use device::renderer::deferred::DeferredShader;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct VulkanRendererConfig {
     pub page_size: vk::DeviceSize,
 }
@@ -136,7 +134,7 @@ impl<
 
     fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
         let renderer =
-            VulkanRenderer::new(window, &self.config.ok_or("Configuration not provided")?)?;
+            VulkanRenderer::new(window, self.config.ok_or("Configuration not provided")?)?;
         Ok(renderer)
     }
 }
@@ -148,45 +146,64 @@ pub struct VulkanRenderer<
 > {
     // TODO: Temporary RefCell to allow for shareable mutable reference
     context: Rc<RefCell<Context>>,
+    config: VulkanRendererConfig,
     _phantom: PhantomData<(M, V, S)>,
 }
 
-pub struct VulkanResourcePack<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> {
-    materials: MaterialPacks<M>,
-    meshes: MeshPacks<V>,
-    renderer: DeferredRenderer<S>,
+pub struct VulkanResourcePack<
+    A: Allocator,
+    M: MaterialPackList<A>,
+    V: MeshPackList<A>,
+    S: GraphicsPipelinePackList,
+> {
+    materials: M,
+    meshes: V,
+    renderer: DeferredRenderer<A, S>,
+    allocator: A,
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList>
-    VulkanResourcePack<M, V, S>
+impl<A: Allocator, M: MaterialPackList<A>, V: MeshPackList<A>, S: GraphicsPipelinePackList>
+    VulkanResourcePack<A, M, V, S>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
 {
     fn load(
         context: &mut Context,
-        materials: &impl MaterialPackListBuilder<Pack = M>,
-        meshes: &impl MeshPackListBuilder<Pack = V>,
+        config: &VulkanRendererConfig,
+        materials: &impl MaterialPackListBuilder<Pack<A> = M>,
+        meshes: &impl MeshPackListBuilder<Pack<A> = V>,
         renderer: &impl GraphicsPipelineListBuilder<Pack = S>,
     ) -> Result<Self, Box<dyn Error>> {
-        let materials = context.load_materials(materials)?;
-        let meshes = context.load_meshes(meshes)?;
-        let renderer = context.create_deferred_renderer(renderer)?;
+        let mut allocator = A::new(&context, &config);
+        let materials = context.load_materials(&mut allocator, materials)?;
+        let meshes = context.load_meshes(&mut allocator, meshes)?;
+        let renderer = context.create_deferred_renderer(&mut allocator, renderer)?;
         Ok(Self {
             materials,
             meshes,
             renderer,
+            allocator,
         })
     }
 
     fn destroy(&mut self, context: &Context) {
-        context.destroy_materials(&mut self.materials);
-        context.destroy_meshes(&mut self.meshes);
-        context.destroy_deferred_renderer(&mut self.renderer);
+        context.destroy_materials(&mut self.materials, &mut self.allocator);
+        context.destroy_meshes(&mut self.meshes, &mut self.allocator);
+        context.destroy_deferred_renderer(&mut self.renderer, &mut self.allocator);
+        self.allocator.destroy(&context)
     }
 }
 
-pub struct VulkanRendererContext<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList>
+pub struct VulkanRendererContext<
+    A: Allocator,
+    M: MaterialPackList<A>,
+    V: MeshPackList<A>,
+    S: GraphicsPipelinePackList,
+> where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
 {
     context: Rc<RefCell<Context>>,
-    resources: VulkanResourcePack<M, V, S>,
+    resources: VulkanResourcePack<A, M, V, S>,
 }
 
 // TODO: Error handling should be improved - currently when shader source files are missing,
@@ -198,17 +215,20 @@ pub struct VulkanRendererContext<M: MaterialPackList, V: MeshPackList, S: Graphi
 impl<M: MaterialPackListBuilder, V: MeshPackListBuilder, S: GraphicsPipelineListBuilder>
     VulkanRenderer<M, V, S>
 {
-    pub fn new(window: &Window, config: &VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
-        let context = Rc::new(RefCell::new(Context::build(window, config)?));
+    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
+        let context = Rc::new(RefCell::new(Context::build(window)?));
         Ok(Self {
             context,
+            config,
             _phantom: PhantomData,
         })
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Drop
-    for VulkanRendererContext<M, V, S>
+impl<A: Allocator, M: MaterialPackList<A>, V: MeshPackList<A>, S: GraphicsPipelinePackList> Drop
+    for VulkanRendererContext<A, M, V, S>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
 {
     fn drop(&mut self) {
         let context = self.context.borrow();
@@ -224,12 +244,18 @@ impl<
     > Renderer for VulkanRenderer<M, V, S>
 {
     type Builder = RendererContextBuilder<S, M, V>;
-    type Context = VulkanRendererContext<M::Pack, V::Pack, S::Pack>;
+    type Context = VulkanRendererContext<
+        StaticStackAllocator,
+        M::Pack<StaticStackAllocator>,
+        V::Pack<StaticStackAllocator>,
+        S::Pack,
+    >;
 
     fn load_context(&mut self, builder: Self::Builder) -> Result<Self::Context, Box<dyn Error>> {
         let mut context = self.context.borrow_mut();
         let resources = VulkanResourcePack::load(
             &mut context,
+            &self.config,
             &builder.materials,
             &builder.meshes,
             &builder.shaders,
@@ -241,8 +267,10 @@ impl<
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> RendererContext
-    for VulkanRendererContext<M, V, S>
+impl<A: Allocator, M: MaterialPackList<A>, V: MeshPackList<A>, S: GraphicsPipelinePackList>
+    RendererContext for VulkanRendererContext<A, M, V, S>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
 {
     type Shaders = S;
     type Materials = M;
@@ -273,8 +301,8 @@ impl<M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Renderer
             shader,
             drawable,
             transform,
-            &self.resources.materials.packs,
-            &self.resources.meshes.packs,
+            &self.resources.materials,
+            &self.resources.meshes,
         );
         Ok(())
     }

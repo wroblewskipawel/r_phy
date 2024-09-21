@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::renderer::vulkan::device::{
-    buffer::UniformBuffer, command::operation::Operation, VulkanDevice,
+    buffer::UniformBuffer, command::operation::Operation, memory::Allocator, VulkanDevice,
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};
@@ -44,9 +44,9 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         }
     }
 
-    pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation>(
+    pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation, A: Allocator>(
         mut self,
-        buffer: &UniformBuffer<U, O>,
+        buffer: &UniformBuffer<U, O, A>,
     ) -> Self {
         let writes = T::get_descriptor_writes::<U>();
         if writes.is_empty() {

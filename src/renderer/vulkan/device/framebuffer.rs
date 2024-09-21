@@ -9,7 +9,11 @@ use crate::{
     renderer::vulkan::device::{AttachmentProperties, VulkanDevice},
 };
 
-use super::{image::VulkanImage2D, render_pass::RenderPassConfig};
+use super::{
+    image::VulkanImage2D,
+    memory::{Allocator, DeviceLocal},
+    render_pass::RenderPassConfig,
+};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -152,8 +156,8 @@ pub struct InputAttachment {
     pub image_view: vk::ImageView,
 }
 
-impl From<VulkanImage2D> for InputAttachment {
-    fn from(image: VulkanImage2D) -> Self {
+impl<A: Allocator> From<VulkanImage2D<DeviceLocal, A>> for InputAttachment {
+    fn from(image: VulkanImage2D<DeviceLocal, A>) -> Self {
         Self {
             image_view: image.image_view,
         }

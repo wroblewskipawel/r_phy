@@ -14,10 +14,8 @@ pub(super) mod swapchain;
 
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
-use super::VulkanRendererConfig;
 use ash::{vk, Device, Instance};
 use colored::Colorize;
-use memory::MemoryAllocator;
 use std::ffi::c_char;
 use std::ops::Deref;
 use std::{
@@ -301,7 +299,6 @@ pub struct VulkanDevice {
     physical_device: VulkanPhysicalDevice,
     command_pools: TransientCommandPools,
     device_queues: DeviceQueues,
-    memory_allocator: MemoryAllocator,
     device: Device,
 }
 
@@ -373,7 +370,6 @@ impl VulkanDevice {
     pub fn create(
         instance: &Instance,
         surface: &VulkanSurface,
-        config: &VulkanRendererConfig,
     ) -> Result<VulkanDevice, Box<dyn Error>> {
         let physical_device = pick_physical_device(instance, surface)?;
         let queue_builder = DeviceQueueBuilder::new(physical_device.queue_families);
@@ -389,13 +385,10 @@ impl VulkanDevice {
         };
         let device_queues = queue_builder.get_device_queues(&device);
         let command_pools = TransientCommandPools::create(&device, physical_device.queue_families)?;
-        let memory_allocator =
-            MemoryAllocator::create(&physical_device.properties, config.page_size)?;
         Ok(Self {
             physical_device,
             command_pools,
             device_queues,
-            memory_allocator,
             device,
         })
     }
@@ -403,7 +396,6 @@ impl VulkanDevice {
     pub fn destroy(&mut self) {
         unsafe {
             self.command_pools.destroy(&self.device);
-            self.memory_allocator.destroy(&self.device);
             self.device.destroy_device(None);
         }
     }

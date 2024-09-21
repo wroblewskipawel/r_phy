@@ -3,7 +3,7 @@ use std::{marker::PhantomData, mem::offset_of, ops::Deref};
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
-    core::{Cons, Nil},
+    core::{Cons, Nil, TypedNil},
     math::types::{Vector2, Vector3, Vector4},
     physics::shape,
 };
@@ -350,6 +350,12 @@ pub trait MeshCollection: MeshTypeList {
 }
 
 impl MeshTypeList for Nil {
+    const LEN: usize = 0;
+    type Vertex = VertexNone;
+    type Next = Self;
+}
+
+impl<T: 'static> MeshTypeList for TypedNil<T> {
     const LEN: usize = 0;
     type Vertex = VertexNone;
     type Next = Self;

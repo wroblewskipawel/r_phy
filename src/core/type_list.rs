@@ -25,6 +25,20 @@ pub struct TypedNil<T> {
     _phantom: PhantomData<T>,
 }
 
+impl<T> Default for TypedNil<T> {
+    fn default() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> TypedNil<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Cons<H, T> {
     pub(crate) head: H,
