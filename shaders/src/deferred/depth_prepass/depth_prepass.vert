@@ -9,6 +9,8 @@ layout(location = 2) in vec3 norm;
 layout(location = 3) in vec2 uv;
 layout(location = 4) in vec4 tangent;
 
+const float DEPTH_BIAS = 1e-4;
+
 layout(push_constant) uniform transform { mat4 model; }
 m;
 
@@ -20,4 +22,5 @@ c;
 
 void main() {
   gl_Position = c.proj * c.view * m.model * vec4(pos, 1.0);
+  gl_Position.z += DEPTH_BIAS;
 }

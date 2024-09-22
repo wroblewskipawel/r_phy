@@ -67,15 +67,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         ));
     let scene = game_loop.scene(context_builder)?.with_objects(
         checker_shader,
-        vec![Object::new(
-            Model::new(cube_mesh, empty_material),
-            Transform::identity().translate(Vector3::new(4.0, 0.0, 0.0)),
-            Box::new(|elapsed_time, transform| {
-                Transform::identity()
-                    .rotate(Vector3::z(), elapsed_time * std::f32::consts::FRAC_PI_2)
-                    * transform
-            }),
-        )],
+        vec![
+            Object::new(
+                Model::new(cube_mesh, empty_material),
+                Transform::identity().translate(Vector3::new(4.0, 0.0, 0.0)),
+                Box::new(|elapsed_time, transform| {
+                    Transform::identity()
+                        .rotate(Vector3::z(), elapsed_time * std::f32::consts::FRAC_PI_2)
+                        * transform
+                }),
+            ),
+            Object::new(
+                Model::new(cube_mesh, empty_material),
+                Transform::identity().translate(Vector3::new(4.0, 2.0, 0.0)),
+                Box::new(|elapsed_time, transform| {
+                    Transform::identity()
+                        .rotate(Vector3::z(), elapsed_time * std::f32::consts::FRAC_PI_2)
+                        * transform
+                }),
+            ),
+        ],
     );
     game_loop.run(scene)?;
     Ok(())
