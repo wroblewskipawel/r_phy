@@ -9,13 +9,10 @@ use std::ops::Index;
 
 use strum::EnumCount;
 
-use crate::renderer::model::Vertex;
-use crate::renderer::vulkan::device::buffer::Buffer;
+use crate::renderer::model::{Mesh, Vertex};
+use crate::renderer::vulkan::device::buffer::{Buffer, BufferPartial};
 use crate::renderer::vulkan::device::memory::{Allocator, DeviceLocal};
-use crate::renderer::vulkan::device::{
-    buffer::{ByteRange, DeviceLocalBuffer},
-    VulkanDevice,
-};
+use crate::renderer::vulkan::device::{buffer::ByteRange, VulkanDevice};
 
 #[derive(strum::EnumCount)]
 pub enum BufferType {
@@ -73,9 +70,15 @@ impl<V: Vertex> From<MeshByteRange> for MeshRange<V> {
     }
 }
 
+pub struct MeshPackDataPartial<'a, V: Vertex> {
+    meshes: &'a [Mesh<V>],
+    buffer_ranges: BufferRanges,
+    buffer: BufferPartial<DeviceLocal>,
+}
+
 #[derive(Debug)]
 pub struct MeshPackData<A: Allocator> {
-    pub buffer: DeviceLocalBuffer<A>,
+    pub buffer: Buffer<DeviceLocal, A>,
     pub buffer_ranges: BufferRanges,
     pub meshes: Vec<MeshByteRange>,
 }
@@ -106,7 +109,7 @@ impl<'a, A: Allocator> From<&'a MeshPackData<A>> for MeshPackBinding {
     fn from(value: &'a MeshPackData<A>) -> Self {
         Self {
             // TODO: Improve buffer aggregation scheme and naming
-            buffer: value.buffer.buffer.buffer,
+            buffer: value.buffer.buffer,
             buffer_ranges: value.buffer_ranges,
         }
     }

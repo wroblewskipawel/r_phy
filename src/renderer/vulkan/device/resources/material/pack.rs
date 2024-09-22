@@ -1,23 +1,34 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
 use crate::renderer::vulkan::device::{
-    buffer::UniformBuffer,
+    buffer::{UniformBuffer, UniformBufferPartial},
     command::operation::Graphics,
     descriptor::{
         Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
         PodUniform,
     },
-    image::Texture2D,
+    image::{Texture2D, Texture2DPartial},
     memory::{Allocator, HostCoherent, HostVisibleMemory},
     VulkanDevice,
 };
 
 use super::{TextureSamplers, VulkanMaterial};
 
+struct MaterialUniformPartial<'a, M: VulkanMaterial> {
+    uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,
+    data: Vec<&'a M::Uniform>,
+}
+
 pub struct MaterialPackData<M: VulkanMaterial, A: Allocator> {
     textures: Option<Vec<Texture2D<A>>>,
     uniforms: Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
     descriptors: DescriptorPool<M::DescriptorLayout>,
+}
+
+pub struct MaterialPackPartial<'a, M: VulkanMaterial> {
+    textures: Option<Vec<Texture2DPartial<'a>>>,
+    uniforms: Option<MaterialUniformPartial<'a, M>>,
+    num_materials: usize,
 }
 
 pub struct MaterialPack<M: VulkanMaterial, A: Allocator> {
@@ -69,11 +80,10 @@ impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
 }
 
 impl VulkanDevice {
-    fn load_material_pack_textures<M: VulkanMaterial, A: Allocator>(
+    fn prepare_material_pack_textures<'a, M: VulkanMaterial>(
         &self,
-        allocator: &mut A,
-        materials: &[M],
-    ) -> Result<Option<Vec<Texture2D<A>>>, Box<dyn Error>> {
+        materials: &'a [M],
+    ) -> Result<Option<Vec<Texture2DPartial<'a>>>, Box<dyn Error>> {
         if M::NUM_IMAGES > 0 {
             let textures = materials
                 .iter()
@@ -83,7 +93,7 @@ impl VulkanDevice {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| self.load_texture(allocator, image))
+                        .map(|image| self.prepare_texture(image))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -93,47 +103,89 @@ impl VulkanDevice {
         }
     }
 
-    fn load_material_pack_uniforms<M: VulkanMaterial, A: Allocator>(
+    fn allocate_material_pack_textures_memory<'a, A: Allocator>(
         &self,
         allocator: &mut A,
-        materials: &[M],
-    ) -> Result<
-        Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
-        Box<dyn Error>,
-    >
-    where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        let uniform_data = materials
+        textures: Vec<Texture2DPartial<'a>>,
+    ) -> Result<Vec<Texture2D<A>>, Box<dyn Error>> {
+        textures
+            .into_iter()
+            .map(|texture| self.allocate_texture_memory(allocator, texture))
+            .collect()
+    }
+
+    fn prepare_material_pack_uniforms<'a, M: VulkanMaterial>(
+        &self,
+        materials: &'a [M],
+    ) -> Result<Option<MaterialUniformPartial<'a, M>>, Box<dyn Error>> {
+        let data = materials
             .iter()
             .filter_map(|material| material.uniform())
             .collect::<Vec<_>>();
-        if !uniform_data.is_empty() {
-            let mut uniform_buffer = self
-                .create_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics, _>(
-                    allocator,
+        if !data.is_empty() {
+            let uniform = self
+                .prepare_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics>(
                     materials.len(),
                 )?;
-            for (index, uniform) in uniform_data.into_iter().enumerate() {
-                *uniform_buffer[index].as_inner_mut() = *uniform;
-            }
-            Ok(Some(uniform_buffer))
+            Ok(Some(MaterialUniformPartial { uniform, data }))
         } else {
             Ok(None)
         }
     }
 
-    pub fn load_material_pack<M: VulkanMaterial, A: Allocator>(
+    fn allocate_material_pack_uniforms_memory<'a, M: VulkanMaterial, A: Allocator>(
         &self,
         allocator: &mut A,
-        materials: &[M],
+        partial: MaterialUniformPartial<'a, M>,
+    ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
+        let MaterialUniformPartial { uniform, data } = partial;
+        let mut uniform_buffer = self.allocate_uniform_buffer_memory(allocator, uniform)?;
+        for (index, uniform) in data.into_iter().enumerate() {
+            *uniform_buffer[index].as_inner_mut() = *uniform;
+        }
+        Ok(uniform_buffer)
+    }
+
+    pub fn prepare_material_pack<'a, M: VulkanMaterial>(
+        &self,
+        materials: &'a [M],
+    ) -> Result<MaterialPackPartial<'a, M>, Box<dyn Error>> {
+        let textures = self.prepare_material_pack_textures(materials)?;
+        let uniforms = self.prepare_material_pack_uniforms(materials)?;
+        Ok(MaterialPackPartial {
+            textures,
+            uniforms,
+            num_materials: materials.len(),
+        })
+    }
+
+    pub fn allocate_material_pack_memory<'a, M: VulkanMaterial, A: Allocator>(
+        &self,
+        allocator: &mut A,
+        partial: MaterialPackPartial<'a, M>,
     ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
     where
         A::Allocation<HostCoherent>: HostVisibleMemory,
     {
-        let textures = self.load_material_pack_textures(allocator, materials)?;
-        let uniforms = self.load_material_pack_uniforms(allocator, materials)?;
-        let writer = DescriptorSetWriter::<M::DescriptorLayout>::new(materials.len());
+        let MaterialPackPartial {
+            textures,
+            uniforms,
+            num_materials,
+        } = partial;
+        let textures = if let Some(textures) = textures {
+            Some(self.allocate_material_pack_textures_memory(allocator, textures)?)
+        } else {
+            None
+        };
+        let uniforms = if let Some(uniforms) = uniforms {
+            Some(self.allocate_material_pack_uniforms_memory(allocator, uniforms)?)
+        } else {
+            None
+        };
+        let writer = DescriptorSetWriter::<M::DescriptorLayout>::new(num_materials);
         let writer = if let Some(textures) = &textures {
             writer.write_images::<TextureSamplers<M>, _>(textures)
         } else {
@@ -151,6 +203,19 @@ impl VulkanDevice {
             descriptors,
         };
         Ok(MaterialPack { data })
+    }
+
+    pub fn load_material_pack<M: VulkanMaterial, A: Allocator>(
+        &self,
+        allocator: &mut A,
+        materials: &[M],
+    ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
+    where
+        A::Allocation<HostCoherent>: HostVisibleMemory,
+    {
+        let pack = self.prepare_material_pack(materials)?;
+        let pack = self.allocate_material_pack_memory(allocator, pack)?;
+        Ok(pack)
     }
 }
 

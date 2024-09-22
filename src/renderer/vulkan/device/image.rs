@@ -208,7 +208,7 @@ pub struct VulkanImage2D<M: MemoryProperties, A: Allocator> {
 }
 
 impl VulkanDevice {
-    fn prepare_image<M: MemoryProperties>(
+    pub fn prepare_image<M: MemoryProperties>(
         &self,
         builder: VulkanImageBuilder<M>,
     ) -> Result<VulkanImagePartial<M>, Box<dyn Error>> {
@@ -257,7 +257,7 @@ impl VulkanDevice {
         })
     }
 
-    fn allocate_image_memory<M: MemoryProperties, A: Allocator>(
+    pub fn allocate_image_memory<M: MemoryProperties, A: Allocator>(
         &self,
         allocator: &mut A,
         partial: VulkanImagePartial<M>,
@@ -358,6 +358,39 @@ impl VulkanDevice {
     }
 }
 
+enum ImageReader<'a> {
+    File(PngImageReader<'a, File>),
+    Buffer(PngImageReader<'a, &'a [u8]>),
+}
+
+impl<'a> ImageReader<'a> {
+    fn required_buffer_size(&self) -> usize {
+        match self {
+            ImageReader::File(reader) => reader.required_buffer_size(),
+            ImageReader::Buffer(reader) => reader.required_buffer_size(),
+        }
+    }
+
+    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+        match self {
+            ImageReader::File(reader) => reader.info(),
+            ImageReader::Buffer(reader) => reader.info(),
+        }
+    }
+
+    fn read(self, dst: &mut [u8]) -> Result<(), Box<dyn Error>> {
+        match self {
+            ImageReader::File(reader) => reader.read(dst),
+            ImageReader::Buffer(reader) => reader.read(dst),
+        }
+    }
+}
+
+pub struct Texture2DPartial<'a> {
+    image: VulkanImagePartial<DeviceLocal>,
+    reader: ImageReader<'a>,
+}
+
 pub struct Texture2D<A: Allocator> {
     pub image: VulkanImage2D<DeviceLocal, A>,
     pub sampler: vk::Sampler,
@@ -374,35 +407,41 @@ impl<A: Allocator> From<&Texture2D<A>> for vk::DescriptorImageInfo {
 }
 
 impl VulkanDevice {
-    pub fn load_texture<A: Allocator>(
+    pub fn prepare_texture<'a>(
         &self,
-        allocator: &mut A,
-        image: &Image,
-    ) -> Result<Texture2D<A>, Box<dyn Error>> {
+        image: &'a Image,
+    ) -> Result<Texture2DPartial<'a>, Box<dyn Error>> {
         match image {
             Image::File(path) => {
-                self.load_texture_impl(allocator, PngImageReader::from_file(path)?)
+                self.prepare_texture_impl(ImageReader::File(PngImageReader::from_file(path)?))
             }
             Image::Buffer(data) => {
-                self.load_texture_impl(allocator, PngImageReader::from_buffer(data)?)
+                self.prepare_texture_impl(ImageReader::Buffer(PngImageReader::from_buffer(data)?))
             }
         }
     }
 
-    fn load_texture_impl<R: Read, A: Allocator>(
+    fn prepare_texture_impl<'a>(
+        &self,
+        reader: ImageReader<'a>,
+    ) -> Result<Texture2DPartial<'a>, Box<dyn Error>> {
+        let image = self.prepare_image::<DeviceLocal>(VulkanImageBuilder::new(reader.info()?))?;
+        Ok(Texture2DPartial { image, reader })
+    }
+
+    pub fn allocate_texture_memory<'a, A: Allocator>(
         &self,
         allocator: &mut A,
-        image_reader: PngImageReader<R>,
+        partial: Texture2DPartial<'a>,
     ) -> Result<Texture2D<A>, Box<dyn Error>> {
-        let image =
-            self.prepare_image::<DeviceLocal>(VulkanImageBuilder::new(image_reader.info()?))?;
+        let Texture2DPartial { image, reader } = partial;
         let mut image = self.allocate_image_memory(allocator, image)?;
         let mut builder = StagingBufferBuilder::new();
-        let image_range = builder.append::<u8>(image_reader.required_buffer_size());
+        let image_range = builder.append::<u8>(reader.required_buffer_size());
         {
             let mut staging_buffer = self.create_stagging_buffer(builder)?;
             let mut image_range = staging_buffer.write_range::<u8>(image_range);
-            image_reader.read(image_range.remaining_as_slice_mut())?;
+            reader.read(image_range.remaining_as_slice_mut())?;
             staging_buffer.transfer_image_data(
                 &mut image,
                 0,
@@ -421,6 +460,16 @@ impl VulkanDevice {
             .max_lod(image.mip_levels as f32);
         let sampler = unsafe { self.device.create_sampler(&create_info, None)? };
         Ok(Texture2D { image, sampler })
+    }
+
+    pub fn load_texture<A: Allocator>(
+        &self,
+        allocator: &mut A,
+        image: &Image,
+    ) -> Result<Texture2D<A>, Box<dyn Error>> {
+        let texture = self.prepare_texture(image)?;
+        let texture = self.allocate_texture_memory(allocator, texture)?;
+        Ok(texture)
     }
 
     pub fn load_cubemap<A: Allocator>(
