@@ -1,11 +1,12 @@
 use crate::renderer::model::Image;
 
-use super::memory::{Allocator, DeviceLocal, MemoryProperties};
+use super::memory::{AllocReq, Allocator, DeviceLocal, MemoryProperties};
 use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
 use png::{self, BitDepth, ColorType, Transformations};
 use std::fs::File;
 use std::io::Read;
+use std::marker::PhantomData;
 use std::usize;
 use std::{borrow::Borrow, error::Error, path::Path};
 use strum::IntoEnumIterator;
@@ -22,9 +23,34 @@ struct VulkanImageInfo {
     mip_levels: u32,
 }
 
+pub struct VulkanImageBuilder<M: MemoryProperties> {
+    info: VulkanImageInfo,
+    _phantom: PhantomData<M>,
+}
+
+impl<M: MemoryProperties> VulkanImageBuilder<M> {
+    fn new(info: VulkanImageInfo) -> Self {
+        Self {
+            info,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub struct VulkanImagePartial<M: MemoryProperties> {
+    array_layers: u32,
+    mip_levels: u32,
+    extent: vk::Extent2D,
+    aspect_mask: vk::ImageAspectFlags,
+    image: vk::Image,
+    format: vk::Format,
+    view_type: vk::ImageViewType,
+    alloc_req: AllocReq<M>,
+}
+
 struct PngImageReader<'a, R: Read> {
     reader: png::Reader<R>,
-    phantom: std::marker::PhantomData<&'a R>,
+    phantom: PhantomData<&'a R>,
 }
 
 impl PngImageReader<'_, File> {
@@ -35,7 +61,7 @@ impl PngImageReader<'_, File> {
         );
         Ok(Self {
             reader: decoder.read_info()?,
-            phantom: std::marker::PhantomData,
+            phantom: PhantomData,
         })
     }
 }
@@ -48,7 +74,7 @@ impl<'a> PngImageReader<'a, &'a [u8]> {
         );
         Ok(Self {
             reader: decoder.read_info()?,
-            phantom: std::marker::PhantomData,
+            phantom: PhantomData,
         })
     }
 }
@@ -182,22 +208,25 @@ pub struct VulkanImage2D<M: MemoryProperties, A: Allocator> {
 }
 
 impl VulkanDevice {
-    fn create_image<M: MemoryProperties, A: Allocator>(
+    fn prepare_image<M: MemoryProperties>(
         &self,
-        allocator: &mut A,
-        info: VulkanImageInfo,
-    ) -> Result<VulkanImage2D<M, A>, Box<dyn Error>> {
-        let VulkanImageInfo {
-            extent,
-            format,
-            flags,
-            samples,
-            usage,
-            aspect_mask,
-            view_type,
-            array_layers,
-            mip_levels,
-        } = info;
+        builder: VulkanImageBuilder<M>,
+    ) -> Result<VulkanImagePartial<M>, Box<dyn Error>> {
+        let VulkanImageBuilder {
+            info:
+                VulkanImageInfo {
+                    extent,
+                    format,
+                    flags,
+                    samples,
+                    usage,
+                    aspect_mask,
+                    view_type,
+                    array_layers,
+                    mip_levels,
+                },
+            ..
+        } = builder;
         let image_info = vk::ImageCreateInfo::builder()
             .flags(flags)
             .extent(vk::Extent3D {
@@ -214,29 +243,50 @@ impl VulkanDevice {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(usage);
-        let (image_view, image, memory) = unsafe {
-            let image = self.device.create_image(&image_info, None)?;
-            let memory = allocator.allocate(
-                self,
-                &self.physical_device.properties,
-                self.get_alloc_req::<_, M>(image),
-            )?;
-            self.bind_memory(image, &memory)?;
-            let view_info = vk::ImageViewCreateInfo::builder()
-                .components(vk::ComponentMapping::default())
-                .format(format)
-                .image(image)
-                .view_type(view_type)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask,
-                    base_mip_level: 0,
-                    level_count: mip_levels,
-                    base_array_layer: 0,
-                    layer_count: array_layers,
-                });
-            let image_view = self.device.create_image_view(&view_info, None)?;
-            (image_view, image, memory)
-        };
+        let image = unsafe { self.device.create_image(&image_info, None)? };
+        let alloc_req = self.get_alloc_req(image);
+        Ok(VulkanImagePartial {
+            array_layers,
+            mip_levels,
+            extent,
+            image,
+            aspect_mask,
+            format,
+            view_type,
+            alloc_req,
+        })
+    }
+
+    fn allocate_image_memory<M: MemoryProperties, A: Allocator>(
+        &self,
+        allocator: &mut A,
+        partial: VulkanImagePartial<M>,
+    ) -> Result<VulkanImage2D<M, A>, Box<dyn Error>> {
+        let VulkanImagePartial {
+            array_layers,
+            mip_levels,
+            extent,
+            image,
+            format,
+            aspect_mask,
+            view_type,
+            alloc_req,
+        } = partial;
+        let memory = allocator.allocate(self, &self.physical_device.properties, alloc_req)?;
+        self.bind_memory(image, &memory)?;
+        let view_info = vk::ImageViewCreateInfo::builder()
+            .components(vk::ComponentMapping::default())
+            .format(format)
+            .image(image)
+            .view_type(view_type)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask,
+                base_mip_level: 0,
+                level_count: mip_levels,
+                base_array_layer: 0,
+                layer_count: array_layers,
+            });
+        let image_view = unsafe { self.device.create_image_view(&view_info, None)? };
         Ok(VulkanImage2D {
             array_layers,
             mip_levels,
@@ -253,22 +303,21 @@ impl VulkanDevice {
         allocator: &mut A,
     ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        self.create_image(
-            allocator,
-            VulkanImageInfo {
-                extent,
-                format: self.physical_device.attachment_properties.formats.color,
-                flags: vk::ImageCreateFlags::empty(),
-                samples: self.physical_device.attachment_properties.msaa_samples,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
-                    | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT
-                    | vk::ImageUsageFlags::INPUT_ATTACHMENT,
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                view_type: vk::ImageViewType::TYPE_2D,
-                array_layers: 1,
-                mip_levels: 1,
-            },
-        )
+        let image = self.prepare_image(VulkanImageBuilder::new(VulkanImageInfo {
+            extent,
+            format: self.physical_device.attachment_properties.formats.color,
+            flags: vk::ImageCreateFlags::empty(),
+            samples: self.physical_device.attachment_properties.msaa_samples,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT
+                | vk::ImageUsageFlags::INPUT_ATTACHMENT,
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            view_type: vk::ImageViewType::TYPE_2D,
+            array_layers: 1,
+            mip_levels: 1,
+        }))?;
+        let image = self.allocate_image_memory(allocator, image)?;
+        Ok(image)
     }
 
     pub fn create_depth_stencil_attachment_image<A: Allocator>(
@@ -276,25 +325,24 @@ impl VulkanDevice {
         allocator: &mut A,
     ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        self.create_image(
-            allocator,
-            VulkanImageInfo {
-                extent,
-                format: self
-                    .physical_device
-                    .attachment_properties
-                    .formats
-                    .depth_stencil,
-                flags: vk::ImageCreateFlags::empty(),
-                samples: self.physical_device.attachment_properties.msaa_samples,
-                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                    | vk::ImageUsageFlags::INPUT_ATTACHMENT,
-                aspect_mask: vk::ImageAspectFlags::DEPTH,
-                view_type: vk::ImageViewType::TYPE_2D,
-                array_layers: 1,
-                mip_levels: 1,
-            },
-        )
+        let image = self.prepare_image(VulkanImageBuilder::new(VulkanImageInfo {
+            extent,
+            format: self
+                .physical_device
+                .attachment_properties
+                .formats
+                .depth_stencil,
+            flags: vk::ImageCreateFlags::empty(),
+            samples: self.physical_device.attachment_properties.msaa_samples,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                | vk::ImageUsageFlags::INPUT_ATTACHMENT,
+            aspect_mask: vk::ImageAspectFlags::DEPTH,
+            view_type: vk::ImageViewType::TYPE_2D,
+            array_layers: 1,
+            mip_levels: 1,
+        }))?;
+        let image = self.allocate_image_memory(allocator, image)?;
+        Ok(image)
     }
 
     pub fn destroy_image<M: MemoryProperties, A: Allocator>(
@@ -346,8 +394,9 @@ impl VulkanDevice {
         allocator: &mut A,
         image_reader: PngImageReader<R>,
     ) -> Result<Texture2D<A>, Box<dyn Error>> {
-        let mut image = self.create_image::<DeviceLocal, _>(allocator, image_reader.info()?)?;
-
+        let image =
+            self.prepare_image::<DeviceLocal>(VulkanImageBuilder::new(image_reader.info()?))?;
+        let mut image = self.allocate_image_memory(allocator, image)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(image_reader.required_buffer_size());
         {
@@ -380,8 +429,9 @@ impl VulkanDevice {
         path: &Path,
     ) -> Result<Texture2D<A>, Box<dyn Error>> {
         let cube_reader = ImageCubeReader::prepare(path)?;
-        let mut image = self.create_image::<DeviceLocal, _>(allocator, cube_reader.info()?)?;
-
+        let image =
+            self.prepare_image::<DeviceLocal>(VulkanImageBuilder::new(cube_reader.info()?))?;
+        let mut image = self.allocate_image_memory(allocator, image)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(cube_reader.required_buffer_size());
         {

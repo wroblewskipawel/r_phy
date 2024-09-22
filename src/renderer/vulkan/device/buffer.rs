@@ -19,7 +19,8 @@ use super::{
     },
     image::VulkanImage2D,
     memory::{
-        Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory, MemoryProperties,
+        AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory,
+        MemoryProperties,
     },
     VulkanDevice,
 };
@@ -145,6 +146,26 @@ pub struct BufferInfo<'a> {
     pub queue_families: &'a [u32],
 }
 
+pub struct BufferBuilder<'a, M: MemoryProperties> {
+    pub info: BufferInfo<'a>,
+    _phantom: PhantomData<M>,
+}
+
+impl<'a, M: MemoryProperties> BufferBuilder<'a, M> {
+    pub fn new(info: BufferInfo<'a>) -> Self {
+        Self {
+            info,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub struct BufferPartial<M: MemoryProperties> {
+    size: usize,
+    buffer: vk::Buffer,
+    alloc_req: AllocReq<M>,
+}
+
 #[derive(Debug)]
 pub struct Buffer<M: MemoryProperties, A: Allocator> {
     pub size: usize,
@@ -153,17 +174,20 @@ pub struct Buffer<M: MemoryProperties, A: Allocator> {
 }
 
 impl VulkanDevice {
-    pub fn create_buffer<M: MemoryProperties, A: Allocator>(
+    fn prepare_buffer<'a, M: MemoryProperties>(
         &self,
-        allocator: &mut A,
-        info: BufferInfo,
-    ) -> Result<Buffer<M, A>, Box<dyn Error>> {
-        let BufferInfo {
-            size,
-            usage,
-            sharing_mode,
-            queue_families,
-        } = info;
+        builder: BufferBuilder<'a, M>,
+    ) -> Result<BufferPartial<M>, Box<dyn Error>> {
+        let BufferBuilder {
+            info:
+                BufferInfo {
+                    size,
+                    usage,
+                    sharing_mode,
+                    queue_families,
+                },
+            ..
+        } = builder;
         let create_info = vk::BufferCreateInfo {
             usage,
             sharing_mode,
@@ -172,16 +196,28 @@ impl VulkanDevice {
             p_queue_family_indices: queue_families.as_ptr(),
             ..Default::default()
         };
-        let (buffer, memory) = unsafe {
-            let buffer = self.device.create_buffer(&create_info, None)?;
-            let memory = allocator.allocate(
-                &self.device,
-                &self.physical_device.properties,
-                self.get_alloc_req::<_, M>(buffer),
-            )?;
-            self.bind_memory(buffer, &memory)?;
-            (buffer, memory)
-        };
+        let buffer = unsafe { self.device.create_buffer(&create_info, None)? };
+        let alloc_req = self.get_alloc_req(buffer);
+        Ok(BufferPartial {
+            size,
+            buffer,
+            alloc_req,
+        })
+    }
+
+    pub fn allocate_buffer_memory<M: MemoryProperties, A: Allocator>(
+        &self,
+        allocator: &mut A,
+        partial: BufferPartial<M>,
+    ) -> Result<Buffer<M, A>, Box<dyn Error>> {
+        let BufferPartial {
+            size,
+            buffer,
+            alloc_req,
+        } = partial;
+        let memory =
+            allocator.allocate(&self.device, &self.physical_device.properties, alloc_req)?;
+        self.bind_memory(buffer, &memory)?;
         Ok(Buffer {
             size,
             buffer,
@@ -223,7 +259,8 @@ impl VulkanDevice {
         allocator: &mut A,
         info: BufferInfo,
     ) -> Result<HostVisibleBuffer<A>, Box<dyn Error>> {
-        let buffer = self.create_buffer(allocator, info)?;
+        let buffer = self.prepare_buffer(BufferBuilder::new(info))?;
+        let buffer = self.allocate_buffer_memory(allocator, buffer)?;
         Ok(HostVisibleBuffer { buffer })
     }
 }
@@ -251,7 +288,8 @@ impl VulkanDevice {
         allocator: &mut A,
         info: BufferInfo,
     ) -> Result<DeviceLocalBuffer<A>, Box<dyn Error>> {
-        let buffer = self.create_buffer(allocator, info)?;
+        let buffer = self.prepare_buffer(BufferBuilder::new(info))?;
+        let buffer = self.allocate_buffer_memory(allocator, buffer)?;
         Ok(DeviceLocalBuffer { buffer })
     }
 }
