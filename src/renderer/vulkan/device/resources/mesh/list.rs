@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::{MeshPack, MeshPackRef};
+use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
 pub trait MeshPackList<A: Allocator>: MeshTypeList {
     fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A);
@@ -51,18 +51,58 @@ impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
 pub trait MeshPackListBuilder: MeshTypeList {
     type Pack<A: Allocator>: MeshPackList<A>;
 
-    fn build<A: Allocator>(
+    fn prepare<A: Allocator>(
         &self,
         device: &VulkanDevice,
-        allocator: &mut A,
-    ) -> Result<Self::Pack<A>, Box<dyn Error>>;
+    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>>;
 }
 
 impl MeshPackListBuilder for Nil {
     type Pack<A: Allocator> = TypedNil<A>;
 
-    fn build<A: Allocator>(
+    fn prepare<A: Allocator>(
         &self,
+        _device: &VulkanDevice,
+    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
+        Ok(Nil {})
+    }
+}
+
+impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
+    type Pack<A: Allocator> = Cons<Option<MeshPack<V, A>>, N::Pack<A>>;
+
+    fn prepare<A: Allocator>(
+        &self,
+        device: &VulkanDevice,
+    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
+        let meshes = self.get();
+        let partial = if !meshes.is_empty() {
+            Some(device.prepare_mesh_pack(self.get())?)
+        } else {
+            None
+        };
+        Ok(Cons {
+            head: partial,
+            tail: self.tail.prepare(device)?,
+        })
+    }
+}
+
+pub trait MeshPackListPartial: Sized {
+    type Pack<A: Allocator>: MeshPackList<A>;
+
+    fn allocate<A: Allocator>(
+        self,
+        device: &VulkanDevice,
+        allocator: &mut A,
+    ) -> Result<Self::Pack<A>, Box<dyn Error>>;
+}
+
+impl MeshPackListPartial for Nil {
+    type Pack<A: Allocator> = TypedNil<A>;
+
+    fn allocate<A: Allocator>(
+        self,
         _device: &VulkanDevice,
         _allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
@@ -70,36 +110,30 @@ impl MeshPackListBuilder for Nil {
     }
 }
 
-impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
+impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
+    for Cons<Option<MeshPackPartial<'a, V>>, N>
+{
     type Pack<A: Allocator> = Cons<Option<MeshPack<V, A>>, N::Pack<A>>;
 
-    fn build<A: Allocator>(
-        &self,
+    fn allocate<A: Allocator>(
+        self,
         device: &VulkanDevice,
         allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
-        let meshes = self.get();
-        let pack = if !meshes.is_empty() {
-            Some(device.load_mesh_pack(allocator, self.get())?)
+        let Self { head, tail } = self;
+        let pack = if let Some(partial) = head {
+            Some(device.allocate_mesh_pack_memory(allocator, partial)?)
         } else {
             None
         };
         Ok(Cons {
             head: pack,
-            tail: self.next().build(device, allocator)?,
+            tail: tail.allocate(device, allocator)?,
         })
     }
 }
 
 impl VulkanDevice {
-    pub fn load_meshes<A: Allocator, B: MeshPackListBuilder>(
-        &self,
-        allocator: &mut A,
-        meshes: &B,
-    ) -> Result<B::Pack<A>, Box<dyn Error>> {
-        meshes.build(self, allocator)
-    }
-
     pub fn destroy_meshes<A: Allocator, M: MeshPackList<A>>(
         &self,
         packs: &mut M,

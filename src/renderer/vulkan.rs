@@ -5,7 +5,10 @@ mod surface;
 
 use self::device::{
     renderer::deferred::DeferredRenderer,
-    resources::{MaterialPackList, MaterialPackListBuilder, MeshPackList, MeshPackListBuilder},
+    resources::{
+        MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
+        MeshPackListBuilder, MeshPackListPartial,
+    },
 };
 use crate::{
     core::{Cons, Contains, Marker, Nil},
@@ -175,8 +178,12 @@ where
         renderer: &impl GraphicsPipelineListBuilder<Pack = S>,
     ) -> Result<Self, Box<dyn Error>> {
         let mut allocator = A::new(&context, &config);
-        let materials = context.load_materials(&mut allocator, materials)?;
-        let meshes = context.load_meshes(&mut allocator, meshes)?;
+        let materials = materials
+            .prepare(&context)?
+            .allocate(&context, &mut allocator)?;
+        let meshes = meshes
+            .prepare(&context)?
+            .allocate(&context, &mut allocator)?;
         let renderer = context.create_deferred_renderer(&mut allocator, renderer)?;
         Ok(Self {
             materials,
