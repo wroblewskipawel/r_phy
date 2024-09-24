@@ -25,12 +25,28 @@ use super::{
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
     memory::{Allocator, DefaultAllocator},
+    pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
     resources::{MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
 };
 
-pub trait Frame: Sized {
+pub trait Frame: 'static {
+    type Context<P: GraphicsPipelinePackList>: FrameContext;
+
+    fn load_context<P: GraphicsPipelinePackList>(
+        &self,
+        context: &Context,
+        pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
+    ) -> Result<Self::Context<P>, Box<dyn Error>>;
+
+    fn destroy_context<P: GraphicsPipelinePackList>(
+        renderer_context: &mut Self::Context<P>,
+        context: &Context,
+    );
+}
+
+pub trait FrameContext: Sized {
     const REQUIRED_COMMANDS: usize;
     type Attachments: AttachmentList;
     type State;
@@ -42,11 +58,12 @@ pub trait Frame: Sized {
     ) -> Result<(), Box<dyn Error>>;
 
     fn draw<
-        A: Allocator,
+        A1: Allocator,
+        A2: Allocator,
         S: ShaderType,
         D: Drawable<Material = S::Material, Vertex = S::Vertex>,
-        M: MaterialPackList<A>,
-        V: MeshPackList<A>,
+        M: MaterialPackList<A2>,
+        V: MeshPackList<A1>,
     >(
         &mut self,
         shader: ShaderHandle<S>,
@@ -64,14 +81,14 @@ pub struct CameraUniform {
     pub uniform_buffer: UniformBuffer<CameraMatrices, Graphics, DefaultAllocator>,
 }
 
-pub struct FrameData<C: Frame> {
-    pub swapchain_frame: SwapchainFrame<C>,
+pub struct FrameData<C: FrameContext> {
+    pub swapchain_frame: SwapchainFrame<C::Attachments>,
     pub primary_command: BeginCommand<Persistent, Primary, Graphics>,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     pub renderer_state: C::State,
 }
 
-pub struct FramePool<F: Frame> {
+pub struct FramePool<F: FrameContext> {
     pub image_sync: Vec<SwapchainImageSync>,
     pub camera_uniform: CameraUniform,
     pub primary_commands: PersistentCommandPool<Primary, Graphics>,
@@ -80,10 +97,7 @@ pub struct FramePool<F: Frame> {
 }
 
 impl Context {
-    fn create_camera_uniform(
-        &mut self,
-        num_images: usize,
-    ) -> Result<CameraUniform, Box<dyn Error>> {
+    fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
         let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics, _>(
             &mut DefaultAllocator {},
             num_images,
@@ -103,9 +117,9 @@ impl Context {
         self.destroy_uniform_buffer(&mut camera.uniform_buffer, &mut DefaultAllocator {});
     }
 
-    pub fn create_frame_pool<F: Frame>(
-        &mut self,
-        swapchain: &VulkanSwapchain<F>,
+    pub fn create_frame_pool<F: FrameContext>(
+        &self,
+        swapchain: &VulkanSwapchain<F::Attachments>,
     ) -> Result<FramePool<F>, Box<dyn Error>> {
         let image_sync = self.create_swapchain_image_sync(swapchain)?;
         let primary_commands = self.create_persistent_command_pool(swapchain.num_images)?;
@@ -122,7 +136,7 @@ impl Context {
         })
     }
 
-    pub fn destroy_frame_pool<F: Frame>(&self, pool: &mut FramePool<F>) {
+    pub fn destroy_frame_pool<F: FrameContext>(&self, pool: &mut FramePool<F>) {
         self.destroy_swapchain_image_sync(&mut pool.image_sync);
         self.destroy_persistent_command_pool(&mut pool.primary_commands);
         self.destroy_persistent_command_pool(&mut pool.secondary_commands);

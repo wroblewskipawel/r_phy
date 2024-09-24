@@ -1,4 +1,8 @@
-use std::marker::PhantomData;
+use std::{
+    any::type_name,
+    fmt::{self, Debug, Formatter},
+    marker::PhantomData,
+};
 
 pub trait Marker {}
 
@@ -20,9 +24,15 @@ pub trait Contains<T, M: Marker> {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Nil {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct TypedNil<T> {
     _phantom: PhantomData<T>,
+}
+
+impl<T> Debug for TypedNil<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("TypedNil<{}>", type_name::<T>()))
+    }
 }
 
 impl<T> Default for TypedNil<T> {

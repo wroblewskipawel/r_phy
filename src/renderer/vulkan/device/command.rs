@@ -14,8 +14,7 @@ use self::{
 use super::{
     buffer::Buffer,
     descriptor::DescriptorBindingData,
-    frame::Frame,
-    framebuffer::{Clear, FramebufferHandle},
+    framebuffer::{AttachmentList, Clear, FramebufferHandle},
     image::VulkanImage2D,
     memory::{Allocator, MemoryProperties},
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
@@ -685,9 +684,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn begin_render_pass<F: Frame, C: RenderPassConfig<Attachments = F::Attachments>>(
+    pub fn begin_render_pass<A: AttachmentList, C: RenderPassConfig<Attachments = A>>(
         self,
-        frame: &SwapchainFrame<F>,
+        frame: &SwapchainFrame<A>,
         render_pass: &RenderPass<C>,
         clear_values: &Clear<C::Attachments>,
     ) -> Self {

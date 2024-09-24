@@ -272,7 +272,7 @@ impl VulkanDevice {
             view_type,
             alloc_req,
         } = partial;
-        let memory = allocator.allocate(self, &self.physical_device.properties, alloc_req)?;
+        let memory = allocator.allocate(self, alloc_req)?;
         self.bind_memory(image, &memory)?;
         let view_info = vk::ImageViewCreateInfo::builder()
             .components(vk::ComponentMapping::default())
@@ -299,7 +299,7 @@ impl VulkanDevice {
     }
 
     pub fn create_color_attachment_image<A: Allocator>(
-        &mut self,
+        &self,
         allocator: &mut A,
     ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
@@ -321,7 +321,7 @@ impl VulkanDevice {
     }
 
     pub fn create_depth_stencil_attachment_image<A: Allocator>(
-        &mut self,
+        &self,
         allocator: &mut A,
     ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
@@ -389,6 +389,12 @@ impl<'a> ImageReader<'a> {
 pub struct Texture2DPartial<'a> {
     image: VulkanImagePartial<DeviceLocal>,
     reader: ImageReader<'a>,
+}
+
+impl<'a> Texture2DPartial<'a> {
+    pub fn get_alloc_req(&self) -> AllocReq<DeviceLocal> {
+        self.image.alloc_req
+    }
 }
 
 pub struct Texture2D<A: Allocator> {
@@ -473,7 +479,7 @@ impl VulkanDevice {
     }
 
     pub fn load_cubemap<A: Allocator>(
-        &mut self,
+        &self,
         allocator: &mut A,
         path: &Path,
     ) -> Result<Texture2D<A>, Box<dyn Error>> {

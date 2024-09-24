@@ -28,7 +28,7 @@ pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<
 
 impl VulkanDevice {
     pub fn create_skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>>(
-        &mut self,
+        &self,
         allocator: &mut A,
         path: &Path,
         modules: impl ModuleLoader,

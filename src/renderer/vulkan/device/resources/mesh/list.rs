@@ -4,7 +4,10 @@ use crate::{
     core::{Cons, Nil, TypedNil},
     renderer::{
         model::{Mesh, MeshCollection, MeshTypeList, Vertex},
-        vulkan::device::{memory::Allocator, VulkanDevice},
+        vulkan::device::{
+            memory::{AllocReqRaw, Allocator},
+            VulkanDevice,
+        },
     },
 };
 
@@ -91,6 +94,8 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
 pub trait MeshPackListPartial: Sized {
     type Pack<A: Allocator>: MeshPackList<A>;
 
+    fn get_memory_requirements(&self) -> Vec<AllocReqRaw>;
+
     fn allocate<A: Allocator>(
         self,
         device: &VulkanDevice,
@@ -100,6 +105,10 @@ pub trait MeshPackListPartial: Sized {
 
 impl MeshPackListPartial for Nil {
     type Pack<A: Allocator> = TypedNil<A>;
+
+    fn get_memory_requirements(&self) -> Vec<AllocReqRaw> {
+        vec![]
+    }
 
     fn allocate<A: Allocator>(
         self,
@@ -114,6 +123,14 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     for Cons<Option<MeshPackPartial<'a, V>>, N>
 {
     type Pack<A: Allocator> = Cons<Option<MeshPack<V, A>>, N::Pack<A>>;
+
+    fn get_memory_requirements(&self) -> Vec<AllocReqRaw> {
+        let mut alloc_reqs = self.tail.get_memory_requirements();
+        if let Some(partial) = &self.head {
+            alloc_reqs.extend(partial.get_alloc_req_raw());
+        }
+        alloc_reqs
+    }
 
     fn allocate<A: Allocator>(
         self,

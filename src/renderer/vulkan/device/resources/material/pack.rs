@@ -8,7 +8,7 @@ use crate::renderer::vulkan::device::{
         PodUniform,
     },
     image::{Texture2D, Texture2DPartial},
-    memory::{Allocator, HostCoherent, HostVisibleMemory},
+    memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
     VulkanDevice,
 };
 
@@ -29,6 +29,24 @@ pub struct MaterialPackPartial<'a, M: VulkanMaterial> {
     textures: Option<Vec<Texture2DPartial<'a>>>,
     uniforms: Option<MaterialUniformPartial<'a, M>>,
     num_materials: usize,
+}
+
+impl<'a, M: VulkanMaterial> MaterialPackPartial<'a, M> {
+    pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
+        let mut alloc_reqs: Vec<AllocReqRaw> = if let Some(buffer) = &self.uniforms {
+            vec![buffer.uniform.get_alloc_req().into()]
+        } else {
+            vec![]
+        };
+        if let Some(textures) = &self.textures {
+            alloc_reqs.extend(
+                textures.iter().map(|texture| {
+                    <AllocReq<_> as Into<AllocReqRaw>>::into(texture.get_alloc_req())
+                }),
+            );
+        }
+        alloc_reqs.into_iter()
+    }
 }
 
 pub struct MaterialPack<M: VulkanMaterial, A: Allocator> {
@@ -139,7 +157,7 @@ impl VulkanDevice {
         partial: MaterialUniformPartial<'a, M>,
     ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
     where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
+        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let MaterialUniformPartial { uniform, data } = partial;
         let mut uniform_buffer = self.allocate_uniform_buffer_memory(allocator, uniform)?;
@@ -168,7 +186,7 @@ impl VulkanDevice {
         partial: MaterialPackPartial<'a, M>,
     ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
     where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
+        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let MaterialPackPartial {
             textures,
@@ -211,7 +229,7 @@ impl VulkanDevice {
         materials: &[M],
     ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
     where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
+        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let pack = self.prepare_material_pack(materials)?;
         let pack = self.allocate_material_pack_memory(allocator, pack)?;
@@ -225,7 +243,7 @@ impl VulkanDevice {
         pack: impl Into<&'a mut MaterialPackData<M, A>>,
         allocator: &mut A,
     ) where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
+        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let data = pack.into();
         if let Some(textures) = data.textures.as_mut() {

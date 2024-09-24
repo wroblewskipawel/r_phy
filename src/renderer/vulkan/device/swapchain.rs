@@ -10,8 +10,7 @@ use super::{
     command::{
         level::Primary, operation::Graphics, FinishedCommand, Persistent, SubmitSemaphoreState,
     },
-    frame::Frame,
-    framebuffer::{Framebuffer, FramebufferHandle},
+    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
     VulkanDevice,
 };
 #[derive(Debug, Clone, Copy)]
@@ -20,8 +19,8 @@ pub struct SwapchainImageSync {
     draw_finished: vk::Semaphore,
 }
 
-pub struct SwapchainFrame<F: Frame> {
-    pub framebuffer: FramebufferHandle<F::Attachments>,
+pub struct SwapchainFrame<A: AttachmentList> {
+    pub framebuffer: FramebufferHandle<A>,
     pub render_area: vk::Rect2D,
     image_index: u32,
     image_sync: SwapchainImageSync,
@@ -32,10 +31,10 @@ struct SwapchainImage {
     view: vk::ImageView,
 }
 
-pub struct VulkanSwapchain<F: Frame> {
+pub struct VulkanSwapchain<A: AttachmentList> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
-    pub framebuffers: Vec<Framebuffer<F::Attachments>>, // This shouldn't be pub
+    pub framebuffers: Vec<Framebuffer<A>>,
     images: Vec<SwapchainImage>,
     handle: vk::SwapchainKHR,
     loader: Swapchain,
@@ -46,11 +45,11 @@ pub const fn required_extensions() -> &'static [&'static CStr; 1] {
     REQUIRED_DEVICE_EXTENSIONS
 }
 
-impl<F: Frame> VulkanSwapchain<F> {
+impl<A: AttachmentList> VulkanSwapchain<A> {
     pub fn get_frame(
         &self,
         image_sync: SwapchainImageSync,
-    ) -> Result<SwapchainFrame<F>, Box<dyn Error>> {
+    ) -> Result<SwapchainFrame<A>, Box<dyn Error>> {
         let (image_index, _) = unsafe {
             self.loader.acquire_next_image(
                 self.handle,
@@ -74,11 +73,11 @@ impl<F: Frame> VulkanSwapchain<F> {
 }
 
 impl VulkanDevice {
-    pub fn present_frame<F: Frame>(
+    pub fn present_frame<A: AttachmentList>(
         &self,
-        swapchain: &VulkanSwapchain<F>,
+        swapchain: &VulkanSwapchain<A>,
         command: FinishedCommand<Persistent, Primary, Graphics>,
-        frame: SwapchainFrame<F>,
+        frame: SwapchainFrame<A>,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {
             image_index,
@@ -111,9 +110,9 @@ impl VulkanDevice {
 }
 
 impl Context {
-    pub fn create_swapchain_image_sync<F: Frame>(
+    pub fn create_swapchain_image_sync<A: AttachmentList>(
         &self,
-        swapchain: &VulkanSwapchain<F>,
+        swapchain: &VulkanSwapchain<A>,
     ) -> Result<Vec<SwapchainImageSync>, Box<dyn Error>> {
         unsafe {
             swapchain
@@ -141,13 +140,10 @@ impl Context {
         }
     }
 
-    pub fn create_swapchain<F: Frame>(
+    pub fn create_swapchain<A: AttachmentList>(
         &self,
-        framebuffer_builder: impl Fn(
-            vk::ImageView,
-            Extent2D,
-        ) -> Result<Framebuffer<F::Attachments>, Box<dyn Error>>,
-    ) -> Result<VulkanSwapchain<F>, Box<dyn Error>> {
+        framebuffer_builder: impl Fn(vk::ImageView, Extent2D) -> Result<Framebuffer<A>, Box<dyn Error>>,
+    ) -> Result<VulkanSwapchain<A>, Box<dyn Error>> {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
                 vk::SurfaceCapabilitiesKHR {
@@ -227,7 +223,7 @@ impl Context {
         }
     }
 
-    pub fn destroy_swapchain<F: Frame>(&self, swapchain: &mut VulkanSwapchain<F>) {
+    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut VulkanSwapchain<A>) {
         swapchain.framebuffers.iter_mut().for_each(|framebuffer| {
             self.destroy_framebuffer(framebuffer);
         });

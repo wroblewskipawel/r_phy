@@ -57,10 +57,17 @@ impl ByteRange {
         ByteRange { beg, end }
     }
 
+    pub fn extend_raw(&mut self, len: usize, alignment: usize) -> ByteRange {
+        let beg = ByteRange::align_raw(self.end, alignment);
+        let end = beg + len;
+        self.end = end;
+        ByteRange { beg, end }
+    }
+
     pub fn take<T: AnyBitPattern>(&mut self, count: usize) -> Option<ByteRange> {
         let beg = ByteRange::align::<T>(self.beg);
         let end = beg + count * size_of::<T>();
-        if end < self.end {
+        if end <= self.end {
             self.beg = end;
             Some(ByteRange { beg, end })
         } else {
@@ -71,7 +78,7 @@ impl ByteRange {
     pub fn alloc_raw(&mut self, size: usize, alignment: usize) -> Option<ByteRange> {
         let beg = ByteRange::align_raw(self.beg, alignment);
         let end = beg + size;
-        if end < self.end {
+        if end <= self.end {
             self.beg = end;
             Some(ByteRange { beg, end })
         } else {
@@ -163,7 +170,7 @@ impl<'a, M: MemoryProperties> BufferBuilder<'a, M> {
 pub struct BufferPartial<M: MemoryProperties> {
     size: usize,
     buffer: vk::Buffer,
-    alloc_req: AllocReq<M>,
+    pub alloc_req: AllocReq<M>,
 }
 
 #[derive(Debug)]
@@ -215,8 +222,7 @@ impl VulkanDevice {
             buffer,
             alloc_req,
         } = partial;
-        let memory =
-            allocator.allocate(&self.device, &self.physical_device.properties, alloc_req)?;
+        let memory = allocator.allocate(self, alloc_req)?;
         self.bind_memory(buffer, &memory)?;
         Ok(Buffer {
             size,
@@ -232,7 +238,7 @@ impl VulkanDevice {
     ) {
         unsafe {
             self.device.destroy_buffer(buffer.buffer, None);
-            allocator.free(&self.device, &mut buffer.memory);
+            allocator.free(self, &mut buffer.memory);
         }
     }
 }
@@ -599,6 +605,12 @@ pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
     buffer: PersistentBufferPartial,
     pub size: usize,
     _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> UniformBufferPartial<U, O> {
+    pub fn get_alloc_req(&self) -> AllocReq<HostCoherent> {
+        self.buffer.buffer.buffer.alloc_req
+    }
 }
 
 pub struct UniformBuffer<U: AnyBitPattern, O: Operation, A: Allocator> {

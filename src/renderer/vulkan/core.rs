@@ -51,7 +51,7 @@ fn check_required_layer_support(
     Ok(supported)
 }
 
-pub(super) struct Context {
+pub struct Context {
     device: Device,
     pub surface: Surface,
     debug_utils: Option<DebugUtils>,

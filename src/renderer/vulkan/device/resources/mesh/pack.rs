@@ -7,7 +7,7 @@ use crate::renderer::{
     vulkan::device::{
         buffer::{BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
         command::operation::{self, Operation},
-        memory::Allocator,
+        memory::{AllocReqRaw, Allocator},
         VulkanDevice,
     },
 };
@@ -18,6 +18,13 @@ use super::{
 
 pub struct MeshPackPartial<'a, V: Vertex> {
     partial: MeshPackDataPartial<'a, V>,
+}
+
+// TODO: Define trait for querrying for memory requirements
+impl<'a, V: Vertex> MeshPackPartial<'a, V> {
+    pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
+        [self.partial.buffer.alloc_req.into()].into_iter()
+    }
 }
 
 #[derive(Debug)]

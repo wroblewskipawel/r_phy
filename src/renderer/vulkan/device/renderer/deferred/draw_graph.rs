@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-use super::{Commands, DeferredRenderer, DeferredRendererFrameState, DeferredShader};
+use super::{Commands, DeferredRendererContext, DeferredRendererFrameState, DeferredShader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModelIndex {
@@ -111,13 +111,14 @@ pub struct DrawGraph {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
-impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
+impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
     pub(super) fn append_draw_call<
-        T: Allocator,
+        T1: Allocator,
+        T2: Allocator,
         S: ShaderType,
         D: Drawable,
-        M: MaterialPackList<T>,
-        V: MeshPackList<T>,
+        M: MaterialPackList<T2>,
+        V: MeshPackList<T1>,
     >(
         &mut self,
         material_packs: &M,
@@ -182,7 +183,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
         &mut self,
         device: &VulkanDevice,
         state: DeferredRendererFrameState<P>,
-        swapchain_frame: &SwapchainFrame<Self>,
+        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
     ) -> Result<Commands<P>, Box<dyn Error>> {
         let DeferredRendererFrameState {
             commands:
@@ -196,6 +197,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
             draw_graph,
             ..
         } = state;
+        let renderer = self.renderer.borrow();
         let depth_prepass = device.record_command(depth_prepass, |command| {
             draw_graph
                 .pipeline_states
@@ -236,11 +238,11 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRenderer<A, P> {
         });
 
         for (_, pipeline_state) in draw_graph.pipeline_states {
-            let (_, command) = self.frames.frames.secondary_commands.next();
+            let (_, command) = self.frames.secondary_commands.next();
             let command = device.record_command(
                 device.begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
                     command,
-                    self.render_pass,
+                    renderer.render_pass,
                     swapchain_frame.framebuffer,
                 )?,
                 |command| {

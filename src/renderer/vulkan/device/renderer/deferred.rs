@@ -1,7 +1,7 @@
 mod commands;
 mod draw_graph;
 
-use std::{error::Error, path::Path};
+use std::{cell::RefCell, error::Error, path::Path, rc::Rc};
 
 use ash::vk;
 
@@ -18,7 +18,7 @@ use crate::{
             core::Context,
             device::{
                 descriptor::{DescriptorPool, DescriptorSetWriter, GBufferDescriptorSet},
-                frame::{Frame, FrameData, FramePool},
+                frame::{Frame, FrameContext, FrameData, FramePool},
                 framebuffer::{
                     presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
                     InputAttachment,
@@ -89,11 +89,10 @@ struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
     shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
 }
 
-struct DeferredRendererFrameData<A: Allocator, P: GraphicsPipelinePackList> {
+struct DeferredRendererFrameData<A: Allocator> {
     g_buffer: GBuffer<A>,
-    frames: FramePool<DeferredRenderer<A, P>>,
+    swapchain: VulkanSwapchain<AttachmentsGBuffer>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
-    swapchain: VulkanSwapchain<DeferredRenderer<A, P>>,
 }
 
 struct DeferredRendererResources<A: Allocator> {
@@ -101,11 +100,10 @@ struct DeferredRendererResources<A: Allocator> {
     skybox: Skybox<A, GBufferSkyboxPipeline<AttachmentsGBuffer, A>>,
 }
 
-pub struct DeferredRenderer<A: Allocator, P: GraphicsPipelinePackList> {
-    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
+pub struct DeferredRendererContext<A: Allocator, P: GraphicsPipelinePackList> {
+    renderer: Rc<RefCell<DeferredRenderer<A>>>,
     pipelines: DeferredRendererPipelines<P>,
-    resources: DeferredRendererResources<A>,
-    frames: DeferredRendererFrameData<A, P>,
+    frames: FramePool<Self>,
     current_frame: Option<FrameData<Self>>,
 }
 
@@ -114,7 +112,41 @@ pub struct DeferredRendererFrameState<P: GraphicsPipelinePackList> {
     draw_graph: DrawGraph,
 }
 
-impl<A: Allocator, P: GraphicsPipelinePackList> Frame for DeferredRenderer<A, P> {
+pub struct DeferredRenderer<A: Allocator> {
+    render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
+    frame_data: DeferredRendererFrameData<A>,
+    resources: DeferredRendererResources<A>,
+}
+
+impl<A: Allocator> Frame for Rc<RefCell<DeferredRenderer<A>>> {
+    type Context<P: GraphicsPipelinePackList> = DeferredRendererContext<A, P>;
+
+    fn load_context<P: GraphicsPipelinePackList>(
+        &self,
+        context: &Context,
+        pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
+    ) -> Result<Self::Context<P>, Box<dyn Error>> {
+        let borrow = self.borrow();
+        let pipelines = context.create_pipelines(pipelines)?;
+        let frames = context.create_frame_pool(&borrow.frame_data.swapchain)?;
+        Ok(DeferredRendererContext {
+            renderer: self.clone(),
+            pipelines,
+            frames,
+            current_frame: None,
+        })
+    }
+
+    fn destroy_context<P: GraphicsPipelinePackList>(
+        renderer_context: &mut Self::Context<P>,
+        context: &Context,
+    ) {
+        context.destroy_pipelines(&mut renderer_context.pipelines);
+        context.destroy_frame_pool(&mut renderer_context.frames);
+    }
+}
+
+impl<A: Allocator, P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<A, P> {
     const REQUIRED_COMMANDS: usize = P::LEN + 3;
     type Attachments = AttachmentsGBuffer;
     type State = DeferredRendererFrameState<P>;
@@ -124,14 +156,16 @@ impl<A: Allocator, P: GraphicsPipelinePackList> Frame for DeferredRenderer<A, P>
         device: &VulkanDevice,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
-        let (index, primary_command) = self.frames.frames.primary_commands.next();
+        let (index, primary_command) = self.frames.primary_commands.next();
         let primary_command = device.begin_primary_command(primary_command)?;
         let swapchain_frame = self
-            .frames
+            .renderer
+            .borrow()
+            .frame_data
             .swapchain
-            .get_frame(self.frames.frames.image_sync[index])?;
-        let camera_descriptor = self.frames.frames.camera_uniform.descriptors.get(index);
-        self.frames.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
+            .get_frame(self.frames.image_sync[index])?;
+        let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
+        self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
         let commands =
             self.prepare_commands(device, &swapchain_frame, camera_descriptor, camera_matrices)?;
         let draw_graph = DrawGraph::new();
@@ -148,11 +182,12 @@ impl<A: Allocator, P: GraphicsPipelinePackList> Frame for DeferredRenderer<A, P>
     }
 
     fn draw<
-        T: Allocator,
+        T1: Allocator,
+        T2: Allocator,
         S: ShaderType,
         D: Drawable<Material = S::Material, Vertex = S::Vertex>,
-        M: MaterialPackList<T>,
-        V: MeshPackList<T>,
+        M: MaterialPackList<T2>,
+        V: MeshPackList<T1>,
     >(
         &mut self,
         shader: ShaderHandle<S>,
@@ -174,7 +209,12 @@ impl<A: Allocator, P: GraphicsPipelinePackList> Frame for DeferredRenderer<A, P>
         let commands = self.record_draw_calls(device, renderer_state, &swapchain_frame)?;
         let primary_command =
             self.record_primary_command(device, primary_command, commands, &swapchain_frame)?;
-        device.present_frame(&self.frames.swapchain, primary_command, swapchain_frame)?;
+        let renderer = self.renderer.borrow();
+        device.present_frame(
+            &renderer.frame_data.swapchain,
+            primary_command,
+            swapchain_frame,
+        )?;
         Ok(())
     }
 }
@@ -196,7 +236,7 @@ impl<A: Allocator> GBuffer<A> {
 
 impl Context {
     fn create_pipelines<P: GraphicsPipelineListBuilder>(
-        &mut self,
+        &self,
         pipelines: &P,
     ) -> Result<DeferredRendererPipelines<P::Pack>, Box<dyn Error>> {
         let write_pass = pipelines.build(&self)?;
@@ -215,10 +255,10 @@ impl Context {
         })
     }
 
-    fn create_frame_data<A: Allocator, P: GraphicsPipelinePackList>(
-        &mut self,
+    fn create_frame_data<A: Allocator>(
+        &self,
         allocator: &mut A,
-    ) -> Result<DeferredRendererFrameData<A, P>, Box<dyn Error>> {
+    ) -> Result<DeferredRendererFrameData<A>, Box<dyn Error>> {
         let g_buffer = self.create_g_buffer(allocator)?;
         let swapchain = self.create_swapchain(|swapchain_image, extent| {
             self.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
@@ -232,17 +272,15 @@ impl Context {
                     .get_input_attachments(&swapchain.framebuffers[0]),
             ),
         )?;
-        let frames = self.create_frame_pool(&swapchain)?;
         Ok(DeferredRendererFrameData {
             g_buffer,
-            frames,
             descriptors,
             swapchain,
         })
     }
 
     fn create_renderer_resources<A: Allocator>(
-        &mut self,
+        &self,
         allocator: &mut A,
     ) -> Result<DeferredRendererResources<A>, Box<dyn Error>> {
         let skybox = self.create_skybox(
@@ -266,22 +304,17 @@ impl Context {
         Ok(DeferredRendererResources { mesh, skybox })
     }
 
-    pub fn create_deferred_renderer<A: Allocator, B: GraphicsPipelineListBuilder>(
-        &mut self,
+    pub fn create_deferred_renderer<A: Allocator>(
+        &self,
         allocator: &mut A,
-        pipelines: &B,
-    ) -> Result<DeferredRenderer<A, B::Pack>, Box<dyn Error>> {
-        let frames = self.create_frame_data(allocator)?;
+    ) -> Result<DeferredRenderer<A>, Box<dyn Error>> {
+        let frame_data = self.create_frame_data(allocator)?;
         let render_pass = self.get_render_pass()?;
-        let pipelines = self.create_pipelines(pipelines)?;
         let resources = self.create_renderer_resources(allocator)?;
-
         Ok(DeferredRenderer {
-            frames,
-            pipelines,
+            frame_data,
             render_pass,
             resources,
-            current_frame: None,
         })
     }
 
@@ -294,12 +327,11 @@ impl Context {
         self.destroy_pipeline(&mut pipelines.shading_pass);
     }
 
-    fn destroy_frame_state<A: Allocator, P: GraphicsPipelinePackList>(
+    fn destroy_frame_state<A: Allocator>(
         &self,
-        frames: &mut DeferredRendererFrameData<A, P>,
+        frames: &mut DeferredRendererFrameData<A>,
         allocator: &mut A,
     ) {
-        self.destroy_frame_pool(&mut frames.frames);
         self.destroy_descriptor_pool(&mut frames.descriptors);
         self.destroy_swapchain(&mut frames.swapchain);
         self.destroy_g_buffer(&mut frames.g_buffer, allocator);
@@ -314,18 +346,17 @@ impl Context {
         self.destroy_skybox(&mut resources.skybox, allocator);
     }
 
-    pub fn destroy_deferred_renderer<A: Allocator, P: GraphicsPipelinePackList>(
+    pub fn destroy_deferred_renderer<A: Allocator>(
         &self,
-        renderer: &mut DeferredRenderer<A, P>,
+        renderer: &mut DeferredRenderer<A>,
         allocator: &mut A,
     ) {
+        self.destroy_frame_state(&mut renderer.frame_data, allocator);
         self.destroy_renderer_resources(&mut renderer.resources, allocator);
-        self.destroy_frame_state(&mut renderer.frames, allocator);
-        self.destroy_pipelines(&mut renderer.pipelines);
     }
 
     fn create_g_buffer<A: Allocator>(
-        &mut self,
+        &self,
         allocator: &mut A,
     ) -> Result<GBuffer<A>, Box<dyn Error>> {
         let combined = self.create_color_attachment_image(allocator)?;
