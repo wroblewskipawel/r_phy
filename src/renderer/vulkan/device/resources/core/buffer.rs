@@ -12,10 +12,19 @@ use std::{
     usize,
 };
 
-use crate::renderer::vulkan::device::{command::{operation::{self, Operation}, SubmitSemaphoreState}, memory::{AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory, MemoryProperties}, VulkanDevice};
+use crate::renderer::vulkan::device::{
+    command::{
+        operation::{self, Operation},
+        SubmitSemaphoreState,
+    },
+    memory::{
+        AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory,
+        MemoryProperties,
+    },
+    VulkanDevice,
+};
 
-use super::image::VulkanImage2D;
-
+use super::{image::VulkanImage2D, FromPartial, Partial, PartialBuilder};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -159,24 +168,42 @@ impl<'a, M: MemoryProperties> BufferBuilder<'a, M> {
     }
 }
 
-pub struct BufferPartial<M: MemoryProperties> {
-    size: usize,
-    buffer: vk::Buffer,
-    pub alloc_req: AllocReq<M>,
-}
-
 #[derive(Debug)]
 pub struct Buffer<M: MemoryProperties, A: Allocator> {
-    pub size: usize,
-    pub buffer: vk::Buffer,
+    size: usize,
+    buffer: vk::Buffer,
     memory: A::Allocation<M>,
 }
 
-impl VulkanDevice {
-    pub fn prepare_buffer<'a, M: MemoryProperties>(
-        &self,
-        builder: BufferBuilder<'a, M>,
-    ) -> Result<BufferPartial<M>, Box<dyn Error>> {
+impl<M: MemoryProperties, A: Allocator> Buffer<M, A> {
+    pub fn handle(&self) -> vk::Buffer {
+        self.buffer
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
+#[derive(Debug)]
+pub struct BufferPartial<M: MemoryProperties> {
+    size: usize,
+    req: AllocReq<M>,
+    buffer: vk::Buffer,
+}
+
+impl<M: MemoryProperties> Partial for BufferPartial<M> {
+    type Memory = M;
+
+    fn requirements(&self) -> AllocReq<Self::Memory> {
+        self.req
+    }
+}
+
+impl<'a, M: MemoryProperties> PartialBuilder for BufferBuilder<'a, M> {
+    type Partial = BufferPartial<M>;
+
+    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
         let BufferBuilder {
             info:
                 BufferInfo {
@@ -186,7 +213,7 @@ impl VulkanDevice {
                     queue_families,
                 },
             ..
-        } = builder;
+        } = self;
         let create_info = vk::BufferCreateInfo {
             usage,
             sharing_mode,
@@ -195,121 +222,43 @@ impl VulkanDevice {
             p_queue_family_indices: queue_families.as_ptr(),
             ..Default::default()
         };
-        let buffer = unsafe { self.device.create_buffer(&create_info, None)? };
-        let alloc_req = self.get_alloc_req(buffer);
-        Ok(BufferPartial {
-            size,
-            buffer,
-            alloc_req,
-        })
+        let buffer = unsafe { device.create_buffer(&create_info, None)? };
+        let req = device.get_alloc_req(buffer);
+        Ok(BufferPartial { size, req, buffer })
     }
+}
 
-    pub fn allocate_buffer_memory<M: MemoryProperties, A: Allocator>(
-        &self,
-        allocator: &mut A,
-        partial: BufferPartial<M>,
-    ) -> Result<Buffer<M, A>, Box<dyn Error>> {
-        let BufferPartial {
-            size,
-            buffer,
-            alloc_req,
-        } = partial;
-        let memory = allocator.allocate(self, alloc_req)?;
-        self.bind_memory(buffer, &memory)?;
+impl<M: MemoryProperties, A: Allocator> FromPartial for Buffer<M, A> {
+    type Partial<'a> = BufferPartial<M>;
+    type Allocator = A;
+
+    fn finalize<'a>(
+        partial: Self::Partial<'a>,
+        device: &VulkanDevice,
+        allocator: &mut Self::Allocator,
+    ) -> Result<Self, Box<dyn Error>> {
+        let BufferPartial { size, buffer, req } = partial;
+        let memory = allocator.allocate(device, req)?;
+        device.bind_memory(buffer, &memory)?;
         Ok(Buffer {
             size,
             buffer,
             memory,
         })
     }
+}
 
-    pub fn destroy_buffer<M: MemoryProperties, A: Allocator>(
+impl VulkanDevice {
+    pub fn destroy_buffer<'a, M: MemoryProperties, A: Allocator>(
         &self,
-        buffer: &mut Buffer<M, A>,
+        buffer: impl Into<&'a mut Buffer<M, A>>,
         allocator: &mut A,
     ) {
+        let buffer = buffer.into();
         unsafe {
             self.device.destroy_buffer(buffer.buffer, None);
             allocator.free(self, &mut buffer.memory);
         }
-    }
-}
-
-pub struct HostVisibleBufferPartial {
-    buffer: BufferPartial<HostCoherent>,
-}
-
-pub struct HostVisibleBuffer<A: Allocator> {
-    buffer: Buffer<HostCoherent, A>,
-}
-
-impl<'a, A: Allocator> From<&'a HostVisibleBuffer<A>> for &'a Buffer<HostCoherent, A> {
-    fn from(value: &'a HostVisibleBuffer<A>) -> Self {
-        &value.buffer
-    }
-}
-
-impl<'a, A: Allocator> From<&'a mut HostVisibleBuffer<A>> for &'a mut Buffer<HostCoherent, A> {
-    fn from(value: &'a mut HostVisibleBuffer<A>) -> Self {
-        &mut value.buffer
-    }
-}
-
-impl VulkanDevice {
-    pub fn prepare_host_visible_buffer(
-        &self,
-        info: BufferInfo,
-    ) -> Result<HostVisibleBufferPartial, Box<dyn Error>> {
-        let buffer = self.prepare_buffer(BufferBuilder::new(info))?;
-        Ok(HostVisibleBufferPartial { buffer })
-    }
-
-    pub fn allocate_host_visible_buffer_memory<A: Allocator>(
-        &self,
-        allocator: &mut A,
-        partial: HostVisibleBufferPartial,
-    ) -> Result<HostVisibleBuffer<A>, Box<dyn Error>> {
-        let buffer = self.allocate_buffer_memory(allocator, partial.buffer)?;
-        Ok(HostVisibleBuffer { buffer })
-    }
-
-    pub fn create_host_visible_buffer<A: Allocator>(
-        &self,
-        allocator: &mut A,
-        info: BufferInfo,
-    ) -> Result<HostVisibleBuffer<A>, Box<dyn Error>> {
-        let buffer = self.prepare_host_visible_buffer(info)?;
-        let buffer = self.allocate_host_visible_buffer_memory(allocator, buffer)?;
-        Ok(buffer)
-    }
-}
-
-#[derive(Debug)]
-pub struct DeviceLocalBuffer<A: Allocator> {
-    pub buffer: Buffer<DeviceLocal, A>,
-}
-
-impl<'a, A: Allocator> From<&'a DeviceLocalBuffer<A>> for &'a Buffer<DeviceLocal, A> {
-    fn from(value: &'a DeviceLocalBuffer<A>) -> Self {
-        &value.buffer
-    }
-}
-
-impl<'a, A: Allocator> From<&'a mut DeviceLocalBuffer<A>> for &'a mut Buffer<DeviceLocal, A> {
-    fn from(value: &'a mut DeviceLocalBuffer<A>) -> Self {
-        &mut value.buffer
-    }
-}
-
-impl VulkanDevice {
-    pub fn create_device_local_buffer<A: Allocator>(
-        &self,
-        allocator: &mut A,
-        info: BufferInfo,
-    ) -> Result<DeviceLocalBuffer<A>, Box<dyn Error>> {
-        let buffer = self.prepare_buffer(BufferBuilder::new(info))?;
-        let buffer = self.allocate_buffer_memory(allocator, buffer)?;
-        Ok(DeviceLocalBuffer { buffer })
     }
 }
 
@@ -346,22 +295,21 @@ pub struct WritableRange<T: AnyBitPattern> {
     range: Range<T>,
 }
 
-impl<'a> From<&'a StagingBuffer<'a>> for &'a Buffer<HostCoherent, DefaultAllocator> {
-    fn from(value: &'a StagingBuffer) -> Self {
+impl<'a, 'b> From<&'b StagingBuffer<'a>> for &'b Buffer<HostCoherent, DefaultAllocator> {
+    fn from(value: &'b StagingBuffer) -> Self {
         (&value.buffer).into()
     }
 }
 
-impl<'a> From<&'a mut StagingBuffer<'a>> for &'a mut Buffer<HostCoherent, DefaultAllocator> {
-    fn from(value: &'a mut StagingBuffer) -> Self {
+impl<'a, 'b> From<&'b mut StagingBuffer<'a>> for &'b mut Buffer<HostCoherent, DefaultAllocator> {
+    fn from(value: &'b mut StagingBuffer) -> Self {
         (&mut value.buffer).into()
     }
 }
 
 impl<'a> Drop for StagingBuffer<'a> {
     fn drop(&mut self) {
-        self.device
-            .destroy_persistent_buffer(&mut self.buffer, &mut DefaultAllocator {});
+        self.device.destroy_buffer(self, &mut DefaultAllocator {});
     }
 }
 
@@ -497,15 +445,14 @@ impl VulkanDevice {
         builder: StagingBufferBuilder,
     ) -> Result<StagingBuffer, Box<dyn Error>> {
         let StagingBufferBuilder { range } = builder;
-        let buffer = self.create_persistent_buffer(
-            &mut DefaultAllocator {},
-            BufferInfo {
-                size: range.end,
-                usage: vk::BufferUsageFlags::TRANSFER_SRC,
-                sharing_mode: vk::SharingMode::EXCLUSIVE,
-                queue_families: &[operation::Transfer::get_queue_family_index(self)],
-            },
-        )?;
+        let info = BufferInfo {
+            size: range.end,
+            usage: vk::BufferUsageFlags::TRANSFER_SRC,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            queue_families: &[operation::Transfer::get_queue_family_index(self)],
+        };
+        let partial = BufferBuilder::new(info).prepare(self)?;
+        let buffer = PersistentBuffer::finalize(partial, self, &mut DefaultAllocator {})?;
         Ok(StagingBuffer {
             range,
             buffer,
@@ -514,116 +461,138 @@ impl VulkanDevice {
     }
 }
 
-pub struct PersistentBufferPartial {
-    buffer: HostVisibleBufferPartial,
-    size: usize,
-}
-
 pub struct PersistentBuffer<A: Allocator> {
-    buffer: HostVisibleBuffer<A>,
+    buffer: Buffer<HostCoherent, A>,
     ptr: Option<*mut c_void>,
 }
 
 impl<'a, A: Allocator> From<&'a PersistentBuffer<A>> for &'a Buffer<HostCoherent, A> {
     fn from(value: &'a PersistentBuffer<A>) -> Self {
-        (&value.buffer).into()
+        &value.buffer
     }
 }
 
 impl<'a, A: Allocator> From<&'a mut PersistentBuffer<A>> for &'a mut Buffer<HostCoherent, A> {
     fn from(value: &'a mut PersistentBuffer<A>) -> Self {
-        (&mut value.buffer).into()
+        &mut value.buffer
     }
 }
 
-impl VulkanDevice {
-    pub fn prepare_persistent_buffer(
-        &self,
-        info: BufferInfo,
-    ) -> Result<PersistentBufferPartial, Box<dyn Error>> {
-        let buffer = self.prepare_host_visible_buffer(info)?;
-        Ok(PersistentBufferPartial {
-            buffer,
-            size: info.size,
-        })
-    }
+impl<A: Allocator> FromPartial for PersistentBuffer<A>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
+{
+    type Partial<'a> = BufferPartial<HostCoherent>;
+    type Allocator = A;
 
-    pub fn allocate_persistent_buffer_memory<A: Allocator>(
-        &self,
-        allcator: &mut A,
-        partial: PersistentBufferPartial,
-    ) -> Result<PersistentBuffer<A>, Box<dyn Error>>
-    where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        let PersistentBufferPartial { buffer, size } = partial;
-        let mut buffer = self.allocate_host_visible_buffer_memory(allcator, buffer)?;
-        let ptr = buffer
-            .buffer
-            .memory
-            .map_memory(self, ByteRange { beg: 0, end: size })?;
+    fn finalize<'a>(
+        partial: Self::Partial<'a>,
+        device: &VulkanDevice,
+        allocator: &mut Self::Allocator,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut buffer = Buffer::finalize(partial, device, allocator)?;
+        let ptr = buffer.memory.map_memory(
+            &device,
+            ByteRange {
+                beg: 0,
+                end: buffer.size,
+            },
+        )?;
         Ok(PersistentBuffer {
             buffer,
             ptr: Some(ptr),
         })
     }
-
-    pub fn create_persistent_buffer<A: Allocator>(
-        &self,
-        allcator: &mut A,
-        info: BufferInfo,
-    ) -> Result<PersistentBuffer<A>, Box<dyn Error>>
-    where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        let buffer = self.prepare_persistent_buffer(info)?;
-        let buffer = self.allocate_persistent_buffer_memory(allcator, buffer)?;
-        Ok(buffer)
-    }
-
-    pub fn destroy_persistent_buffer<A: Allocator>(
-        &self,
-        buffer: &mut PersistentBuffer<A>,
-        allocator: &mut A,
-    ) where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        buffer.buffer.buffer.memory.unmap_memory(self);
-        self.destroy_buffer(buffer.into(), allocator);
-    }
-}
-
-pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
-    buffer: PersistentBufferPartial,
-    pub size: usize,
-    _phantom: PhantomData<(U, O)>,
-}
-
-impl<U: AnyBitPattern, O: Operation> UniformBufferPartial<U, O> {
-    pub fn get_alloc_req(&self) -> AllocReq<HostCoherent> {
-        self.buffer.buffer.buffer.alloc_req
-    }
 }
 
 pub struct UniformBuffer<U: AnyBitPattern, O: Operation, A: Allocator> {
+    len: usize,
     buffer: PersistentBuffer<A>,
-    pub size: usize,
     _phantom: PhantomData<(U, O)>,
 }
 
+pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
+    len: usize,
+    buffer: BufferPartial<HostCoherent>,
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> Partial for UniformBufferPartial<U, O> {
+    type Memory = HostCoherent;
+
+    fn requirements(&self) -> AllocReq<Self::Memory> {
+        self.buffer.req
+    }
+}
+
+pub struct UniformBufferBuilder<U: AnyBitPattern, O: Operation> {
+    len: usize,
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> UniformBufferBuilder<U, O> {
+    pub fn new(len: usize) -> Self {
+        Self {
+            len,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> PartialBuilder for UniformBufferBuilder<U, O> {
+    type Partial = UniformBufferPartial<U, O>;
+
+    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
+        let info = BufferInfo {
+            size: size_of::<U>() * self.len,
+            usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            queue_families: &[O::get_queue_family_index(device)],
+        };
+        let buffer = BufferBuilder::new(info).prepare(device)?;
+        Ok(UniformBufferPartial {
+            len: self.len,
+            buffer,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation, A: Allocator> FromPartial for UniformBuffer<U, O, A>
+where
+    A::Allocation<HostCoherent>: HostVisibleMemory,
+{
+    type Partial<'a> = UniformBufferPartial<U, O>;
+    type Allocator = A;
+
+    fn finalize<'a>(
+        partial: Self::Partial<'a>,
+        device: &VulkanDevice,
+        allocator: &mut Self::Allocator,
+    ) -> Result<Self, Box<dyn Error>> {
+        let len = partial.len;
+        let buffer = PersistentBuffer::finalize(partial.buffer, device, allocator)?;
+        Ok(UniformBuffer {
+            len,
+            buffer,
+            _phantom: PhantomData,
+        })
+    }
+}
+
 impl<'a, U: AnyBitPattern, O: Operation, A: Allocator> From<&'a UniformBuffer<U, O, A>>
-    for &'a PersistentBuffer<A>
+    for &'a Buffer<HostCoherent, A>
 {
     fn from(value: &'a UniformBuffer<U, O, A>) -> Self {
-        &value.buffer
+        &value.buffer.buffer
     }
 }
 
 impl<'a, U: AnyBitPattern, O: Operation, A: Allocator> From<&'a mut UniformBuffer<U, O, A>>
-    for &'a mut PersistentBuffer<A>
+    for &'a mut Buffer<HostCoherent, A>
 {
     fn from(value: &'a mut UniformBuffer<U, O, A>) -> Self {
-        &mut value.buffer
+        &mut value.buffer.buffer
     }
 }
 
@@ -631,7 +600,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffe
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
-        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_ref().unwrap() }
     }
@@ -639,83 +608,27 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffe
 
 impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize> for UniformBuffer<U, O, A> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_mut().unwrap() }
     }
 }
 
 impl<U: AnyBitPattern, O: Operation, A: Allocator> UniformBuffer<U, O, A> {
-    pub fn as_raw(&self) -> vk::Buffer {
-        // Do it more elegant way later, maybe push as_raw up the encapsulation chain?
-        self.buffer.buffer.buffer.buffer
-    }
-}
-
-impl VulkanDevice {
-    pub fn prepare_uniform_buffer<U: AnyBitPattern, O: Operation>(
-        &self,
-        size: usize,
-    ) -> Result<UniformBufferPartial<U, O>, Box<dyn Error>> {
-        let buffer = self.prepare_persistent_buffer(BufferInfo {
-            size: size_of::<U>() * size,
-            usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[O::get_queue_family_index(self)],
-        })?;
-        Ok(UniformBufferPartial {
-            buffer,
-            size,
-            _phantom: PhantomData,
-        })
+    pub fn handle(&self) -> vk::Buffer {
+        self.buffer.buffer.handle()
     }
 
-    pub fn allocate_uniform_buffer_memory<U: AnyBitPattern, O: Operation, A: Allocator>(
-        &self,
-        allocator: &mut A,
-        partial: UniformBufferPartial<U, O>,
-    ) -> Result<UniformBuffer<U, O, A>, Box<dyn Error>>
-    where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        let UniformBufferPartial { buffer, size, .. } = partial;
-        let buffer = self.allocate_persistent_buffer_memory(allocator, buffer)?;
-        Ok(UniformBuffer {
-            buffer,
-            size,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub fn create_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
-        &self,
-        allocator: &mut A,
-        size: usize,
-    ) -> Result<UniformBuffer<U, O, A>, Box<dyn Error>>
-    where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        let buffer = self.prepare_uniform_buffer(size)?;
-        let buffer = self.allocate_uniform_buffer_memory(allocator, buffer)?;
-        Ok(buffer)
-    }
-
-    pub fn destroy_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
-        &self,
-        buffer: &mut UniformBuffer<U, O, A>,
-        allocator: &mut A,
-    ) where
-        A::Allocation<HostCoherent>: HostVisibleMemory,
-    {
-        self.destroy_persistent_buffer(buffer.into(), allocator);
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
 
 // TODO: Move to separate module
 pub struct UniformBufferTypeErased<O: Operation, A: Allocator> {
-    type_id: TypeId,
+    len: usize,
     buffer: PersistentBuffer<A>,
-    pub size: usize,
+    type_id: TypeId,
     _phantom: PhantomData<O>,
 }
 
@@ -723,19 +636,19 @@ impl<P: AnyBitPattern, O: Operation, A: Allocator> From<UniformBuffer<P, O, A>>
     for UniformBufferTypeErased<O, A>
 {
     fn from(value: UniformBuffer<P, O, A>) -> Self {
-        let UniformBuffer { buffer, size, .. } = value;
+        let UniformBuffer { len, buffer, .. } = value;
         UniformBufferTypeErased {
-            type_id: TypeId::of::<P>(),
+            len,
             buffer,
-            size,
+            type_id: TypeId::of::<P>(),
             _phantom: PhantomData,
         }
     }
 }
 
 pub struct UniformBufferRef<'a, P: AnyBitPattern, O: Operation, A: Allocator> {
+    len: usize,
     buffer: &'a mut PersistentBuffer<A>,
-    pub size: usize,
     _phantom: PhantomData<(P, O)>,
 }
 
@@ -747,8 +660,8 @@ impl<'a, P: AnyBitPattern, O: Operation, A: Allocator>
     fn try_from(value: &'a mut UniformBufferTypeErased<O, A>) -> Result<Self, Self::Error> {
         if value.type_id == TypeId::of::<P>() {
             Ok(UniformBufferRef {
+                len: value.len,
                 buffer: &mut value.buffer,
-                size: value.size,
                 _phantom: PhantomData,
             })
         } else {
@@ -761,10 +674,10 @@ impl<'a, P: AnyBitPattern, O: Operation, A: Allocator>
 }
 
 impl<'a, O: Operation, A: Allocator> From<&'a mut UniformBufferTypeErased<O, A>>
-    for &'a mut PersistentBuffer<A>
+    for &'a mut Buffer<HostCoherent, A>
 {
     fn from(value: &'a mut UniformBufferTypeErased<O, A>) -> Self {
-        &mut value.buffer
+        (&mut value.buffer).into()
     }
 }
 
@@ -772,7 +685,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffe
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
-        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_ref().unwrap() }
     }
@@ -782,7 +695,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize>
     for UniformBufferRef<'_, U, O, A>
 {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        debug_assert!(index < self.size, "Out of range UniformBuffer access!");
+        debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_mut().unwrap() }
     }

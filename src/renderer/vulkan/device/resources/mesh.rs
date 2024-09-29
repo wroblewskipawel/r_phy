@@ -80,9 +80,9 @@ pub struct MeshPackDataPartial<'a, V: Vertex> {
 
 #[derive(Debug)]
 pub struct MeshPackData<A: Allocator> {
-    pub buffer: Buffer<DeviceLocal, A>,
-    pub buffer_ranges: BufferRanges,
-    pub meshes: Vec<MeshByteRange>,
+    buffer: Buffer<DeviceLocal, A>,
+    buffer_ranges: BufferRanges,
+    meshes: Vec<MeshByteRange>,
 }
 
 impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLocal, A> {
@@ -97,7 +97,8 @@ impl VulkanDevice {
         pack: impl Into<&'a mut MeshPackData<A>>,
         allocator: &mut A,
     ) {
-        self.destroy_buffer((&mut pack.into().buffer).into(), allocator);
+        let pack = pack.into();
+        self.destroy_buffer(&mut pack.buffer, allocator);
     }
 }
 
@@ -110,8 +111,7 @@ pub struct MeshPackBinding {
 impl<'a, A: Allocator> From<&'a MeshPackData<A>> for MeshPackBinding {
     fn from(value: &'a MeshPackData<A>) -> Self {
         Self {
-            // TODO: Improve buffer aggregation scheme and naming
-            buffer: value.buffer.buffer,
+            buffer: value.buffer.handle(),
             buffer_ranges: value.buffer_ranges,
         }
     }

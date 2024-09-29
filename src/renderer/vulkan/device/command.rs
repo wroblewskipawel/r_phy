@@ -17,7 +17,10 @@ use super::{
     memory::{Allocator, MemoryProperties},
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{buffer::Buffer, image::VulkanImage2D, BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox},
+    resources::{
+        buffer::Buffer, image::VulkanImage2D, BufferType, LayoutSkybox, MeshPackBinding,
+        MeshRangeBindData, Skybox,
+    },
     swapchain::SwapchainFrame,
     QueueFamilies, VulkanDevice,
 };
@@ -447,7 +450,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let src = src.into();
         let dst = dst.into();
         unsafe {
-            device.cmd_copy_buffer(L::buffer(&command.data), src.buffer, dst.buffer, ranges);
+            device.cmd_copy_buffer(L::buffer(&command.data), src.handle(), dst.handle(), ranges);
         }
         RecordingCommand(command, device)
     }
@@ -656,7 +659,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         unsafe {
             device.cmd_copy_buffer_to_image(
                 L::buffer(&command.data),
-                src.buffer,
+                src.handle(),
                 dst.image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[vk::BufferImageCopy {

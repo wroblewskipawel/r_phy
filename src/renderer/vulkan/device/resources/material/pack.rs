@@ -1,15 +1,21 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
 use crate::renderer::vulkan::device::{
-    command::operation::Graphics, descriptor::{
+    command::operation::Graphics,
+    descriptor::{
         Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
         PodUniform,
-    }, memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory}, resources::{buffer::{UniformBuffer, UniformBufferPartial}, image::{Texture2D, Texture2DPartial}}, VulkanDevice
+    },
+    memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
+    resources::{
+        buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
+        image::{Texture2D, Texture2DPartial},
+        FromPartial, Partial, PartialBuilder,
+    },
+    VulkanDevice,
 };
 
-use super::{
-    TextureSamplers, VulkanMaterial,
-};
+use super::{TextureSamplers, VulkanMaterial};
 
 struct MaterialUniformPartial<'a, M: VulkanMaterial> {
     uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,
@@ -31,7 +37,7 @@ pub struct MaterialPackPartial<'a, M: VulkanMaterial> {
 impl<'a, M: VulkanMaterial> MaterialPackPartial<'a, M> {
     pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
         let mut alloc_reqs: Vec<AllocReqRaw> = if let Some(buffer) = &self.uniforms {
-            vec![buffer.uniform.get_alloc_req().into()]
+            vec![buffer.uniform.requirements().into()]
         } else {
             vec![]
         };
@@ -108,7 +114,7 @@ impl VulkanDevice {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| self.prepare_texture(image))
+                        .map(|image| image.prepare(self))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -125,7 +131,7 @@ impl VulkanDevice {
     ) -> Result<Vec<Texture2D<A>>, Box<dyn Error>> {
         textures
             .into_iter()
-            .map(|texture| self.allocate_texture_memory(allocator, texture))
+            .map(|texture| Texture2D::finalize(texture, self, allocator))
             .collect()
     }
 
@@ -138,10 +144,7 @@ impl VulkanDevice {
             .filter_map(|material| material.uniform())
             .collect::<Vec<_>>();
         if !data.is_empty() {
-            let uniform = self
-                .prepare_uniform_buffer::<PodUniform<M::Uniform, FragmentStage>, Graphics>(
-                    materials.len(),
-                )?;
+            let uniform = UniformBufferBuilder::new(materials.len()).prepare(self)?;
             Ok(Some(MaterialUniformPartial { uniform, data }))
         } else {
             Ok(None)
@@ -157,7 +160,7 @@ impl VulkanDevice {
         <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let MaterialUniformPartial { uniform, data } = partial;
-        let mut uniform_buffer = self.allocate_uniform_buffer_memory(allocator, uniform)?;
+        let mut uniform_buffer = UniformBuffer::finalize(uniform, self, allocator)?;
         for (index, uniform) in data.into_iter().enumerate() {
             *uniform_buffer[index].as_inner_mut() = *uniform;
         }
@@ -249,7 +252,7 @@ impl VulkanDevice {
                 .for_each(|texture| self.destroy_texture(texture, allocator));
         }
         if let Some(uniforms) = data.uniforms.as_mut() {
-            self.destroy_uniform_buffer(uniforms, allocator);
+            self.destroy_buffer(uniforms, allocator);
         }
         self.destroy_descriptor_pool(&mut data.descriptors);
     }

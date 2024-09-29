@@ -11,7 +11,8 @@ use crate::{
 
 use super::{
     memory::{Allocator, DeviceLocal},
-    render_pass::RenderPassConfig, resources::image::VulkanImage2D,
+    render_pass::RenderPassConfig,
+    resources::image::VulkanImage2D,
 };
 
 pub trait ClearValue {

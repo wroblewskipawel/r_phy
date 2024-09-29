@@ -25,7 +25,10 @@ use super::{
     framebuffer::AttachmentList,
     memory::{Allocator, DefaultAllocator},
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
-    resources::{buffer::UniformBuffer, MaterialPackList, MeshPackList},
+    resources::{
+        buffer::{UniformBuffer, UniformBufferBuilder},
+        FromPartial, MaterialPackList, MeshPackList, PartialBuilder,
+    },
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
 };
@@ -97,9 +100,10 @@ pub struct FramePool<F: FrameContext> {
 
 impl Context {
     fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
-        let uniform_buffer = self.create_uniform_buffer::<CameraMatrices, Graphics, _>(
+        let uniform_buffer = UniformBuffer::finalize(
+            UniformBufferBuilder::new(num_images).prepare(self)?,
+            self,
             &mut DefaultAllocator {},
-            num_images,
         )?;
         let descriptors = self.create_descriptor_pool(
             DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
@@ -113,7 +117,7 @@ impl Context {
 
     fn destroy_camera_uniform(&self, camera: &mut CameraUniform) {
         self.destroy_descriptor_pool(&mut camera.descriptors);
-        self.destroy_uniform_buffer(&mut camera.uniform_buffer, &mut DefaultAllocator {});
+        self.destroy_buffer(&mut camera.uniform_buffer, &mut DefaultAllocator {});
     }
 
     pub fn create_frame_pool<F: FrameContext>(

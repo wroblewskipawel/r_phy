@@ -11,8 +11,8 @@ use ash::{vk, Device};
 
 use crate::renderer::vulkan::{
     device::{
-        resources::buffer::ByteRange,
         memory::{HostCoherent, HostVisibleMemory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
+        resources::buffer::ByteRange,
         VulkanDevice,
     },
     VulkanRendererConfig,

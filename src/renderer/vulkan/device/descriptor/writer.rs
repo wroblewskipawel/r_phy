@@ -4,7 +4,8 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::renderer::vulkan::device::{
-    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer, VulkanDevice
+    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer,
+    VulkanDevice,
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};
@@ -62,13 +63,14 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
             .sum::<usize>();
         let num_uniforms = self.num_sets * descriptor_count;
         debug_assert_eq!(
-            num_uniforms, buffer.size,
+            num_uniforms,
+            buffer.len(),
             "UniformBuffer object not large enough for DescriptorPool write!"
         );
         let buffer_write_base_index = self.bufer_writes.len();
         self.bufer_writes
             .extend((0..num_uniforms).map(|index| vk::DescriptorBufferInfo {
-                buffer: buffer.as_raw(),
+                buffer: buffer.handle(),
                 offset: (size_of::<U>() * index) as vk::DeviceSize,
                 range: size_of::<U>() as vk::DeviceSize,
             }));

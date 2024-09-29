@@ -1,6 +1,6 @@
 mod default;
-mod r#static;
 mod page;
+mod r#static;
 
 use std::{
     error::Error,
@@ -10,9 +10,9 @@ use std::{
 
 use ash::vk::{self, PhysicalDeviceMemoryProperties};
 pub use default::*;
-pub use r#static::*;
 #[allow(unused_imports)]
 pub use page::*;
+pub use r#static::*;
 
 use crate::renderer::vulkan::device::VulkanDevice;
 

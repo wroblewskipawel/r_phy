@@ -22,7 +22,7 @@ use super::{
 use ash::vk;
 use device::{
     frame::{Frame, FrameContext},
-    memory::{AllocatorCreate, DefaultAllocator, StaticAllocatorConfig, StaticAllocator},
+    memory::{AllocatorCreate, DefaultAllocator, StaticAllocator, StaticAllocatorConfig},
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
     renderer::deferred::DeferredRenderer,
 };

@@ -7,7 +7,10 @@ use crate::renderer::{
     vulkan::device::{
         command::operation::{self, Operation},
         memory::{AllocReqRaw, Allocator},
-        resources::buffer::{BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
+        resources::{
+            buffer::{Buffer, BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
+            FromPartial, Partial, PartialBuilder,
+        },
         VulkanDevice,
     },
 };
@@ -23,7 +26,7 @@ pub struct MeshPackPartial<'a, V: Vertex> {
 // TODO: Define trait for querrying for memory requirements
 impl<'a, V: Vertex> MeshPackPartial<'a, V> {
     pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
-        [self.partial.buffer.alloc_req.into()].into_iter()
+        [self.partial.buffer.requirements().into()].into_iter()
     }
 }
 
@@ -65,7 +68,7 @@ impl<'a, V: Vertex, T: Vertex, A: Allocator> TryFrom<&'a MeshPack<V, A>> for Mes
 impl<'a, V: Vertex, A: Allocator> From<MeshPackRef<'a, V, A>> for MeshPackBinding {
     fn from(value: MeshPackRef<'a, V, A>) -> Self {
         MeshPackBinding {
-            buffer: value.data.buffer.buffer,
+            buffer: value.data.buffer.handle(),
             buffer_ranges: value.data.buffer_ranges,
         }
     }
@@ -145,14 +148,15 @@ impl VulkanDevice {
         let mut buffer_ranges = BufferRanges::new();
         buffer_ranges.set(BufferType::Vertex, vertex_range);
         buffer_ranges.set(BufferType::Index, index_range);
-        let buffer = self.prepare_buffer(BufferBuilder::new(BufferInfo {
+        let buffer = BufferBuilder::new(BufferInfo {
             size: buffer_ranges.get_rquired_buffer_size(),
             usage: vk::BufferUsageFlags::VERTEX_BUFFER
                 | vk::BufferUsageFlags::INDEX_BUFFER
                 | vk::BufferUsageFlags::TRANSFER_DST,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             queue_families: &[operation::Graphics::get_queue_family_index(self)],
-        }))?;
+        })
+        .prepare(self)?;
         let partial = MeshPackDataPartial {
             buffer,
             buffer_ranges,
@@ -174,7 +178,7 @@ impl VulkanDevice {
                     meshes,
                 },
         } = partial;
-        let mut buffer = self.allocate_buffer_memory(allocator, buffer)?;
+        let mut buffer = Buffer::finalize(buffer, self, allocator)?;
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let mut builder = StagingBufferBuilder::new();
