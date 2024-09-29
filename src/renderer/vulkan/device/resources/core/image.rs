@@ -1,7 +1,7 @@
 use crate::renderer::model::Image;
+use crate::renderer::vulkan::device::memory::{AllocReq, Allocator, DeviceLocal, MemoryProperties};
+use crate::renderer::vulkan::device::VulkanDevice;
 
-use super::memory::{AllocReq, Allocator, DeviceLocal, MemoryProperties};
-use super::{buffer::StagingBufferBuilder, VulkanDevice};
 use ash::vk;
 use png::{self, BitDepth, ColorType, Transformations};
 use std::fs::File;
@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 use std::usize;
 use std::{borrow::Borrow, error::Error, path::Path};
 use strum::IntoEnumIterator;
+
+use super::buffer::StagingBufferBuilder;
 
 struct VulkanImageInfo {
     extent: vk::Extent2D,

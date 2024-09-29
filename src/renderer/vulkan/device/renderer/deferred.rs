@@ -23,7 +23,6 @@ use crate::{
                     presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
                     InputAttachment,
                 },
-                image::VulkanImage2D,
                 memory::{Allocator, DeviceLocal},
                 pipeline::{
                     GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
@@ -34,8 +33,9 @@ use crate::{
                 render_pass::{
                     DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
                 },
-                resources::{MaterialPackList, MeshPack, MeshPackList},
-                skybox::Skybox,
+                resources::{
+                    image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox,
+                },
                 swapchain::VulkanSwapchain,
                 VulkanDevice,
             },

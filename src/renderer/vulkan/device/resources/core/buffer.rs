@@ -12,18 +12,10 @@ use std::{
     usize,
 };
 
-use super::{
-    command::{
-        operation::{self, Operation},
-        SubmitSemaphoreState,
-    },
-    image::VulkanImage2D,
-    memory::{
-        AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory,
-        MemoryProperties,
-    },
-    VulkanDevice,
-};
+use crate::renderer::vulkan::device::{command::{operation::{self, Operation}, SubmitSemaphoreState}, memory::{AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory, MemoryProperties}, VulkanDevice};
+
+use super::image::VulkanImage2D;
+
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -661,7 +653,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> UniformBuffer<U, O, A> {
 }
 
 impl VulkanDevice {
-    pub(super) fn prepare_uniform_buffer<U: AnyBitPattern, O: Operation>(
+    pub fn prepare_uniform_buffer<U: AnyBitPattern, O: Operation>(
         &self,
         size: usize,
     ) -> Result<UniformBufferPartial<U, O>, Box<dyn Error>> {
@@ -695,7 +687,7 @@ impl VulkanDevice {
         })
     }
 
-    pub(super) fn create_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
+    pub fn create_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
         &self,
         allocator: &mut A,
         size: usize,
@@ -708,7 +700,7 @@ impl VulkanDevice {
         Ok(buffer)
     }
 
-    pub(super) fn destroy_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
+    pub fn destroy_uniform_buffer<U: AnyBitPattern, O: Operation, A: Allocator>(
         &self,
         buffer: &mut UniformBuffer<U, O, A>,
         allocator: &mut A,

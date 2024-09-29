@@ -10,7 +10,7 @@ use std::{
 
 use ash::{vk, Device};
 
-use super::{buffer::ByteRange, VulkanDevice};
+use super::{resources::buffer::ByteRange, VulkanDevice};
 
 pub use allocator::*;
 

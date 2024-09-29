@@ -4,17 +4,21 @@ use std::path::Path;
 use crate::{
     core::{Cons, Nil},
     physics::shape,
-    renderer::{camera::CameraMatrices, model::CommonVertex},
+    renderer::{
+        camera::CameraMatrices,
+        model::CommonVertex,
+        vulkan::device::{
+            descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
+            memory::Allocator,
+            pipeline::{
+                GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder,
+            },
+            VulkanDevice,
+        },
+    },
 };
 
-use super::{
-    descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-    image::Texture2D,
-    memory::Allocator,
-    pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
-    resources::MeshPack,
-    VulkanDevice,
-};
+use super::{image::Texture2D, MeshPack};
 
 pub type LayoutSkybox<A> =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet<A>, Nil>, Cons<CameraMatrices, Nil>>;

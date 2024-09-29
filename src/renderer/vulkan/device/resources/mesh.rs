@@ -10,9 +10,11 @@ use std::ops::Index;
 use strum::EnumCount;
 
 use crate::renderer::model::{Mesh, Vertex};
-use crate::renderer::vulkan::device::buffer::{Buffer, BufferPartial};
+
 use crate::renderer::vulkan::device::memory::{Allocator, DeviceLocal};
-use crate::renderer::vulkan::device::{buffer::ByteRange, VulkanDevice};
+use crate::renderer::vulkan::device::VulkanDevice;
+
+use super::buffer::{Buffer, BufferPartial, ByteRange};
 
 #[derive(strum::EnumCount)]
 pub enum BufferType {

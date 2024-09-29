@@ -5,7 +5,7 @@ use ash::vk;
 use crate::{
     core::Nil,
     renderer::vulkan::device::{
-        buffer::ByteRange,
+        resources::buffer::ByteRange,
         memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
         VulkanDevice,
     },

@@ -10,9 +10,8 @@ use crate::{
 };
 
 use super::{
-    image::VulkanImage2D,
     memory::{Allocator, DeviceLocal},
-    render_pass::RenderPassConfig,
+    render_pass::RenderPassConfig, resources::image::VulkanImage2D,
 };
 
 pub trait ClearValue {

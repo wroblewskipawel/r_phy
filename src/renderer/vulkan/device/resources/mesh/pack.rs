@@ -5,9 +5,9 @@ use ash::vk;
 use crate::renderer::{
     model::{Mesh, Vertex},
     vulkan::device::{
-        buffer::{BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
         command::operation::{self, Operation},
         memory::{AllocReqRaw, Allocator},
+        resources::buffer::{BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
         VulkanDevice,
     },
 };

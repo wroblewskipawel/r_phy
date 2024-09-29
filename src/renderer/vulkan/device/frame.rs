@@ -16,7 +16,6 @@ use crate::{
 };
 
 use super::{
-    buffer::UniformBuffer,
     command::{
         level::{Primary, Secondary},
         operation::Graphics,
@@ -26,7 +25,7 @@ use super::{
     framebuffer::AttachmentList,
     memory::{Allocator, DefaultAllocator},
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
-    resources::{MaterialPackList, MeshPackList},
+    resources::{buffer::UniformBuffer, MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
 };

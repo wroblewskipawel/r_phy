@@ -1,18 +1,15 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
 use crate::renderer::vulkan::device::{
-    buffer::{UniformBuffer, UniformBufferPartial},
-    command::operation::Graphics,
-    descriptor::{
+    command::operation::Graphics, descriptor::{
         Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
         PodUniform,
-    },
-    image::{Texture2D, Texture2DPartial},
-    memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
-    VulkanDevice,
+    }, memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory}, resources::{buffer::{UniformBuffer, UniformBufferPartial}, image::{Texture2D, Texture2DPartial}}, VulkanDevice
 };
 
-use super::{TextureSamplers, VulkanMaterial};
+use super::{
+    TextureSamplers, VulkanMaterial,
+};
 
 struct MaterialUniformPartial<'a, M: VulkanMaterial> {
     uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,

@@ -1,15 +1,12 @@
-pub(super) mod buffer;
 pub(super) mod command;
 pub(super) mod descriptor;
 pub(super) mod frame;
 pub(super) mod framebuffer;
-pub(super) mod image;
 pub(super) mod memory;
 pub(super) mod pipeline;
 pub(super) mod render_pass;
 pub(super) mod renderer;
 pub(super) mod resources;
-pub(super) mod skybox;
 pub(super) mod swapchain;
 
 use self::command::TransientCommandPools;

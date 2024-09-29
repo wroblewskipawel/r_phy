@@ -3,7 +3,7 @@ use std::{error::Error, marker::PhantomData};
 use ash::vk::{self, MemoryRequirements, PhysicalDeviceMemoryProperties};
 
 use crate::renderer::vulkan::device::{
-    buffer::ByteRange,
+    resources::buffer::ByteRange,
     memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
     VulkanDevice,
 };

@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::renderer::vulkan::device::{
-    buffer::UniformBuffer, command::operation::Operation, memory::Allocator, VulkanDevice,
+    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer, VulkanDevice
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};

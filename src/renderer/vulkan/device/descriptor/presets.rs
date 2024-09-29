@@ -7,7 +7,9 @@ use crate::{
     core::{Cons, Nil},
     renderer::{
         camera::CameraMatrices,
-        vulkan::device::{framebuffer::InputAttachment, image::Texture2D, memory::Allocator},
+        vulkan::device::{
+            framebuffer::InputAttachment, memory::Allocator, resources::image::Texture2D,
+        },
     },
 };
 
