@@ -192,13 +192,13 @@ impl<
         let meshes = meshes.prepare(&context)?;
         meshes
             .get_memory_requirements()
-            .iter()
-            .for_each(|&req| config.add_allocation(req));
+            .into_iter()
+            .for_each(|req| config.add_allocation(req));
         let materials = materials.prepare(&context)?;
         materials
             .get_memory_requirements()
-            .iter()
-            .for_each(|&req| config.add_allocation(req));
+            .into_iter()
+            .for_each(|req| config.add_allocation(req));
         let mut allocator = StaticAllocator::create(&context, &config)?;
         let materials = materials.allocate(&context, &mut allocator)?;
         let meshes = meshes.allocate(&context, &mut allocator)?;

@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::{AllocReq, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
 
 pub struct DefaultAllocator {}
 
@@ -31,7 +31,7 @@ impl Allocator for DefaultAllocator {
     fn allocate<M: MemoryProperties>(
         &mut self,
         device: &VulkanDevice,
-        request: AllocReq<M>,
+        request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let memory_type_index = request
             .get_memory_type_index(&device.physical_device.properties.memory)

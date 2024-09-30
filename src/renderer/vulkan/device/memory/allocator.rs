@@ -3,6 +3,7 @@ mod page;
 mod r#static;
 
 use std::{
+    any::{type_name, TypeId},
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     marker::PhantomData,
@@ -16,7 +17,7 @@ pub use r#static::*;
 
 use crate::renderer::vulkan::device::VulkanDevice;
 
-use super::{Memory, MemoryProperties, Resource};
+use super::{DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, Resource};
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeviceAllocError {
@@ -51,12 +52,12 @@ pub trait AllocatorCreate: Sized + 'static {
 }
 
 pub trait Allocator: AllocatorCreate {
-    type Allocation<M: MemoryProperties>: Memory<M>;
+    type Allocation<M: MemoryProperties>: Memory;
 
     fn allocate<M: MemoryProperties>(
         &mut self,
         device: &VulkanDevice,
-        request: AllocReq<M>,
+        request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError>;
 
     fn free<M: MemoryProperties>(
@@ -67,41 +68,114 @@ pub trait Allocator: AllocatorCreate {
 }
 
 #[derive(Debug)]
-pub struct AllocReq<T: MemoryProperties> {
-    requirements: vk::MemoryRequirements,
-    _phantom: PhantomData<T>,
+pub enum AllocReq {
+    HostVisible(AllocReqTyped<HostVisible>),
+    DeviceLocal(AllocReqTyped<DeviceLocal>),
+    HostCoherent(AllocReqTyped<HostCoherent>),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct AllocReqRaw {
-    requirements: vk::MemoryRequirements,
-    properties: vk::MemoryPropertyFlags,
-}
-
-impl<T: MemoryProperties> From<AllocReq<T>> for AllocReqRaw {
-    fn from(value: AllocReq<T>) -> Self {
-        Self {
-            requirements: value.requirements,
-            properties: T::properties(),
+impl<M: MemoryProperties> From<AllocReqTyped<M>> for AllocReq {
+    fn from(value: AllocReqTyped<M>) -> AllocReq {
+        let type_id = TypeId::of::<M>();
+        if type_id == TypeId::of::<HostVisible>() {
+            AllocReq::HostVisible(AllocReqTyped {
+                requirements: value.requirements,
+                _phantom: PhantomData,
+            })
+        } else if type_id == TypeId::of::<DeviceLocal>() {
+            AllocReq::DeviceLocal(AllocReqTyped {
+                requirements: value.requirements,
+                _phantom: PhantomData,
+            })
+        } else if type_id == TypeId::of::<HostCoherent>() {
+            AllocReq::HostCoherent(AllocReqTyped {
+                requirements: value.requirements,
+                _phantom: PhantomData,
+            })
+        } else {
+            unreachable!();
         }
     }
 }
 
-impl<T: MemoryProperties> Clone for AllocReq<T> {
+impl AllocReq {
+    fn requirements(&self) -> vk::MemoryRequirements {
+        match self {
+            AllocReq::HostVisible(req) => req.requirements,
+            AllocReq::DeviceLocal(req) => req.requirements,
+            AllocReq::HostCoherent(req) => req.requirements,
+        }
+    }
+
+    fn contained_type_id(&self) -> TypeId {
+        match self {
+            AllocReq::HostVisible(_) => TypeId::of::<HostVisible>(),
+            AllocReq::DeviceLocal(_) => TypeId::of::<DeviceLocal>(),
+            AllocReq::HostCoherent(_) => TypeId::of::<HostCoherent>(),
+        }
+    }
+
+    pub fn get_memory_type_index(
+        &self,
+        properties: &PhysicalDeviceMemoryProperties,
+    ) -> Option<u32> {
+        match self {
+            AllocReq::HostVisible(req) => req.get_memory_type_index(properties),
+            AllocReq::DeviceLocal(req) => req.get_memory_type_index(properties),
+            AllocReq::HostCoherent(req) => req.get_memory_type_index(properties),
+        }
+    }
+
+    pub fn properties(&self) -> vk::MemoryPropertyFlags {
+        match self {
+            AllocReq::HostVisible(_) => HostVisible::properties(),
+            AllocReq::DeviceLocal(_) => DeviceLocal::properties(),
+            AllocReq::HostCoherent(_) => HostCoherent::properties(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AllocReqTyped<T: MemoryProperties> {
+    requirements: vk::MemoryRequirements,
+    _phantom: PhantomData<T>,
+}
+
+impl<M: MemoryProperties> TryFrom<AllocReq> for AllocReqTyped<M> {
+    type Error = Box<dyn Error>;
+
+    fn try_from(value: AllocReq) -> Result<Self, Self::Error> {
+        if value.contained_type_id() == TypeId::of::<M>() {
+            Ok(Self {
+                requirements: value.requirements(),
+                _phantom: PhantomData,
+            })
+        } else {
+            Err(format!(
+                "Invalid memory type cast {:?} as {}",
+                value,
+                type_name::<M>()
+            )
+            .into())
+        }
+    }
+}
+
+impl<T: MemoryProperties> Clone for AllocReqTyped<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: MemoryProperties> Copy for AllocReq<T> {}
+impl<T: MemoryProperties> Copy for AllocReqTyped<T> {}
 
-impl AllocReqRaw {
+impl<M: MemoryProperties> AllocReqTyped<M> {
     pub fn get_memory_type_index(
         &self,
         properties: &PhysicalDeviceMemoryProperties,
     ) -> Option<u32> {
         let memory_type_bits = self.requirements.memory_type_bits;
-        let memory_properties = self.properties;
+        let memory_properties = M::properties();
 
         properties
             .memory_types
@@ -119,26 +193,16 @@ impl AllocReqRaw {
     }
 }
 
-impl<M: MemoryProperties> AllocReq<M> {
-    pub fn get_memory_type_index(
-        &self,
-        properties: &PhysicalDeviceMemoryProperties,
-    ) -> Option<u32> {
-        let raw: AllocReqRaw = (*self).into();
-        raw.get_memory_type_index(properties)
-    }
-}
-
 impl VulkanDevice {
     pub fn get_alloc_req<T: Into<Resource>, M: MemoryProperties>(
         &self,
         resource: T,
-    ) -> AllocReq<M> {
+    ) -> AllocReqTyped<M> {
         let requirements = match resource.into() {
             Resource::Buffer(buffer) => unsafe { self.get_buffer_memory_requirements(buffer) },
             Resource::Image(image) => unsafe { self.get_image_memory_requirements(image) },
         };
-        AllocReq {
+        AllocReqTyped {
             requirements,
             _phantom: PhantomData,
         }

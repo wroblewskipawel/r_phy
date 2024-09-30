@@ -6,7 +6,7 @@ use crate::renderer::vulkan::device::{
         Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
         PodUniform,
     },
-    memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
+    memory::{AllocReq, Allocator, HostCoherent, HostVisibleMemory},
     resources::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
         image::{ImageReader, Texture2D, Texture2DPartial},
@@ -35,17 +35,18 @@ pub struct MaterialPackPartial<'a, M: VulkanMaterial> {
 }
 
 impl<'a, M: VulkanMaterial> MaterialPackPartial<'a, M> {
-    pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
-        let mut alloc_reqs: Vec<AllocReqRaw> = if let Some(buffer) = &self.uniforms {
-            vec![buffer.uniform.requirements().into()]
+    pub fn get_alloc_req(&self) -> impl Iterator<Item = AllocReq> {
+        let mut alloc_reqs: Vec<AllocReq> = if let Some(buffer) = &self.uniforms {
+            buffer.uniform.requirements().collect()
         } else {
             vec![]
         };
         if let Some(textures) = &self.textures {
             alloc_reqs.extend(
-                textures.iter().map(|texture| {
-                    <AllocReq<_> as Into<AllocReqRaw>>::into(texture.get_alloc_req())
-                }),
+                textures
+                    .iter()
+                    .map(|texture| texture.requirements())
+                    .flatten(),
             );
         }
         alloc_reqs.into_iter()

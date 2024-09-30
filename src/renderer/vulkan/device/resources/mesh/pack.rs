@@ -6,7 +6,7 @@ use crate::renderer::{
     model::{Mesh, Vertex},
     vulkan::device::{
         command::operation::{self, Operation},
-        memory::{AllocReqRaw, Allocator, DeviceLocal},
+        memory::{AllocReq, Allocator},
         resources::{
             buffer::{Buffer, BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
             FromPartial, Partial, PartialBuilder,
@@ -50,9 +50,7 @@ impl<'a, V: Vertex> PartialBuilder for &'a [Mesh<V>] {
 }
 
 impl<'a, V: Vertex> Partial for MeshPackPartial<'a, V> {
-    type Memory = DeviceLocal;
-
-    fn requirements(&self) -> crate::renderer::vulkan::device::memory::AllocReq<Self::Memory> {
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         self.partial.buffer.requirements()
     }
 }
@@ -117,13 +115,6 @@ impl<V: Vertex, A: Allocator> FromPartial for MeshPack<V, A> {
 
 pub struct MeshPackPartial<'a, V: Vertex> {
     partial: MeshPackDataPartial<'a, V>,
-}
-
-// TODO: Define trait for querrying for memory requirements
-impl<'a, V: Vertex> MeshPackPartial<'a, V> {
-    pub fn get_alloc_req_raw(&self) -> impl Iterator<Item = AllocReqRaw> {
-        [self.partial.buffer.requirements().into()].into_iter()
-    }
 }
 
 #[derive(Debug)]

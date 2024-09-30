@@ -5,7 +5,7 @@ use crate::{
     renderer::{
         model::{MaterialCollection, MaterialTypeList},
         vulkan::device::{
-            memory::{AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
+            memory::{AllocReq, Allocator, HostCoherent, HostVisibleMemory},
             VulkanDevice,
         },
     },
@@ -72,7 +72,7 @@ pub trait MaterialPackListPartial: Sized {
     where
         <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReqRaw>;
+    fn get_memory_requirements(&self) -> Vec<AllocReq>;
 
     fn allocate<A: Allocator>(
         self,
@@ -86,7 +86,7 @@ pub trait MaterialPackListPartial: Sized {
 impl MaterialPackListPartial for Nil {
     type Pack<A: Allocator> = TypedNil<A> where <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReqRaw> {
+    fn get_memory_requirements(&self) -> Vec<AllocReq> {
         vec![]
     }
 
@@ -109,10 +109,10 @@ impl<'a, M: VulkanMaterial, N: MaterialPackListPartial> MaterialPackListPartial
     where
     <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReqRaw> {
+    fn get_memory_requirements(&self) -> Vec<AllocReq> {
         let mut alloc_reqs = self.tail.get_memory_requirements();
         if let Some(partial) = &self.head {
-            alloc_reqs.extend(partial.get_alloc_req_raw());
+            alloc_reqs.extend(partial.get_alloc_req());
         }
         alloc_reqs
     }

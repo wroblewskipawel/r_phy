@@ -64,7 +64,7 @@ impl From<vk::Buffer> for Resource {
 }
 
 impl VulkanDevice {
-    pub fn bind_memory<T: Into<Resource>, M: MemoryProperties, C: Memory<M>>(
+    pub fn bind_memory<T: Into<Resource>, C: Memory>(
         &self,
         resource: T,
         memory: &C,
@@ -130,22 +130,15 @@ impl<M: MemoryProperties> Deref for MemoryChunk<M> {
     }
 }
 
-pub trait Memory<M: MemoryProperties>: 'static + Debug {
-    fn chunk(&self) -> MemoryChunk<M>;
+pub trait Memory: 'static + Debug {
+    type Properties: MemoryProperties;
+    fn chunk(&self) -> MemoryChunk<Self::Properties>;
 }
 
-impl<M: MemoryProperties> Memory<M> for MemoryChunk<M> {
-    fn chunk(&self) -> MemoryChunk<M> {
+impl<M: MemoryProperties> Memory for MemoryChunk<M> {
+    type Properties = M;
+    fn chunk(&self) -> MemoryChunk<Self::Properties> {
         *self
-    }
-}
-
-impl<T: 'static + Debug, M: MemoryProperties> Memory<M> for T
-where
-    for<'a> &'a T: Into<MemoryChunk<M>>,
-{
-    fn chunk(&self) -> MemoryChunk<M> {
-        self.into()
     }
 }
 

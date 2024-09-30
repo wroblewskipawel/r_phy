@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::renderer::vulkan::device::{
-    memory::{AllocReq, Allocator, MemoryProperties},
+    memory::{AllocReq, Allocator},
     VulkanDevice,
 };
 
@@ -9,8 +9,7 @@ pub mod buffer;
 pub mod image;
 
 pub trait Partial {
-    type Memory: MemoryProperties;
-    fn requirements(&self) -> AllocReq<Self::Memory>;
+    fn requirements(&self) -> impl Iterator<Item = AllocReq>;
 }
 
 pub trait PartialBuilder {

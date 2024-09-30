@@ -11,14 +11,14 @@ use ash::{vk, Device};
 
 use crate::renderer::vulkan::{
     device::{
-        memory::{HostCoherent, HostVisibleMemory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
+        memory::{HostCoherent, HostVisibleMemory, Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
         resources::buffer::ByteRange,
         VulkanDevice,
     },
     VulkanRendererConfig,
 };
 
-use super::{AllocReq, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
 
 pub struct PageChunk<M: MemoryProperties> {
     chunk: MemoryChunk<M>,
@@ -36,9 +36,10 @@ impl<M: MemoryProperties> Debug for PageChunk<M> {
     }
 }
 
-impl<M: MemoryProperties> From<&PageChunk<M>> for MemoryChunk<M> {
-    fn from(block: &PageChunk<M>) -> Self {
-        block.chunk
+impl<M: MemoryProperties> Memory for PageChunk<M> {
+    type Properties = M;
+    fn chunk(&self) -> MemoryChunk<Self::Properties> {
+        self.chunk
     }
 }
 
@@ -200,7 +201,7 @@ impl Allocator for PageAllocator {
     fn allocate<M: MemoryProperties>(
         &mut self,
         device: &VulkanDevice,
-        request: AllocReq<M>,
+        request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let memory_type_index = request
             .get_memory_type_index(&device.physical_device.properties.memory)

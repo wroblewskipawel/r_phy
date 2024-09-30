@@ -18,8 +18,7 @@ use crate::renderer::vulkan::device::{
         SubmitSemaphoreState,
     },
     memory::{
-        AllocReq, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory,
-        MemoryProperties,
+        AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory, MemoryProperties
     },
     VulkanDevice,
 };
@@ -188,15 +187,13 @@ impl<M: MemoryProperties, A: Allocator> Buffer<M, A> {
 #[derive(Debug)]
 pub struct BufferPartial<M: MemoryProperties> {
     size: usize,
-    req: AllocReq<M>,
+    req: AllocReqTyped<M>,
     buffer: vk::Buffer,
 }
 
 impl<M: MemoryProperties> Partial for BufferPartial<M> {
-    type Memory = M;
-
-    fn requirements(&self) -> AllocReq<Self::Memory> {
-        self.req
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        [self.req.into()].into_iter()
     }
 }
 
@@ -518,10 +515,8 @@ pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
 }
 
 impl<U: AnyBitPattern, O: Operation> Partial for UniformBufferPartial<U, O> {
-    type Memory = HostCoherent;
-
-    fn requirements(&self) -> AllocReq<Self::Memory> {
-        self.buffer.req
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        [self.buffer.req.into()].into_iter()
     }
 }
 

@@ -8,7 +8,7 @@ use crate::renderer::vulkan::device::{
     VulkanDevice,
 };
 
-use super::{AllocReq, AllocReqRaw, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReq, AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
 
 #[derive(Debug, Default)]
 pub struct StaticAllocatorConfig {
@@ -25,10 +25,10 @@ impl StaticAllocatorConfig {
         }
     }
 
-    pub fn add_allocation(&mut self, req: AllocReqRaw) {
+    pub fn add_allocation(&mut self, req: AllocReq) {
         let MemoryRequirements {
             size, alignment, ..
-        } = req.requirements;
+        } = req.requirements();
         let memory_type_index = req.get_memory_type_index(&self.properties).unwrap() as usize;
         self.allocations[memory_type_index].extend_raw(size as usize, alignment as usize);
     }
@@ -93,7 +93,7 @@ impl Allocator for StaticAllocator {
     fn allocate<M: MemoryProperties>(
         &mut self,
         device: &VulkanDevice,
-        req: AllocReq<M>,
+        req: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let MemoryRequirements {
             size, alignment, ..

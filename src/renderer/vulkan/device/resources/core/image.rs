@@ -1,5 +1,7 @@
 use crate::renderer::model::Image;
-use crate::renderer::vulkan::device::memory::{AllocReq, Allocator, DeviceLocal, MemoryProperties};
+use crate::renderer::vulkan::device::memory::{
+    AllocReq, AllocReqTyped, Allocator, DeviceLocal, MemoryProperties,
+};
 use crate::renderer::vulkan::device::VulkanDevice;
 
 use ash::vk;
@@ -71,14 +73,12 @@ impl<M: MemoryProperties> VulkanImageBuilder<M> {
 pub struct VulkanImagePartial<M: MemoryProperties> {
     image: vk::Image,
     info: VulkanImageInfo,
-    req: AllocReq<M>,
+    req: AllocReqTyped<M>,
 }
 
 impl<M: MemoryProperties> Partial for VulkanImagePartial<M> {
-    type Memory = M;
-
-    fn requirements(&self) -> AllocReq<M> {
-        self.req
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        [self.req.into()].into_iter()
     }
 }
 
@@ -421,12 +421,6 @@ pub struct Texture2DPartial<'a> {
     reader: ImageReaderInner<'a>,
 }
 
-impl<'a> Texture2DPartial<'a> {
-    pub fn get_alloc_req(&self) -> AllocReq<DeviceLocal> {
-        self.image.req
-    }
-}
-
 pub struct Texture2D<A: Allocator> {
     pub image: VulkanImage2D<DeviceLocal, A>,
     pub sampler: vk::Sampler,
@@ -453,10 +447,8 @@ impl<'a> PartialBuilder for ImageReader<'a> {
 }
 
 impl<'a> Partial for Texture2DPartial<'a> {
-    type Memory = DeviceLocal;
-
-    fn requirements(&self) -> AllocReq<DeviceLocal> {
-        self.image.req
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        [self.image.req.into()].into_iter()
     }
 }
 
