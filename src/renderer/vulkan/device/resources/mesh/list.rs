@@ -6,6 +6,7 @@ use crate::{
         model::{Mesh, MeshCollection, MeshTypeList, Vertex},
         vulkan::device::{
             memory::{AllocReqRaw, Allocator},
+            resources::{FromPartial, PartialBuilder},
             VulkanDevice,
         },
     },
@@ -80,7 +81,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
     ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
-            Some(device.prepare_mesh_pack(self.get())?)
+            Some(self.get().prepare(device)?)
         } else {
             None
         };
@@ -139,7 +140,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {
-            Some(device.allocate_mesh_pack_memory(allocator, partial)?)
+            Some(MeshPack::finalize(partial, device, allocator)?)
         } else {
             None
         };

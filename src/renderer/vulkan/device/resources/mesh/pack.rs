@@ -6,7 +6,7 @@ use crate::renderer::{
     model::{Mesh, Vertex},
     vulkan::device::{
         command::operation::{self, Operation},
-        memory::{AllocReqRaw, Allocator},
+        memory::{AllocReqRaw, Allocator, DeviceLocal},
         resources::{
             buffer::{Buffer, BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
             FromPartial, Partial, PartialBuilder,
@@ -18,6 +18,102 @@ use crate::renderer::{
 use super::{
     BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, MeshPackDataPartial,
 };
+
+impl<'a, V: Vertex> PartialBuilder for &'a [Mesh<V>] {
+    type Partial = MeshPackPartial<'a, V>;
+
+    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
+        let num_vertices = self.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
+        let num_indices = self.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
+        let mut builder = StagingBufferBuilder::new();
+        let vertex_range = builder.append::<V>(num_vertices);
+        let index_range = builder.append::<u32>(num_indices);
+        let mut buffer_ranges = BufferRanges::new();
+        buffer_ranges.set(BufferType::Vertex, vertex_range);
+        buffer_ranges.set(BufferType::Index, index_range);
+        let buffer = BufferBuilder::new(BufferInfo {
+            size: buffer_ranges.get_rquired_buffer_size(),
+            usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                | vk::BufferUsageFlags::INDEX_BUFFER
+                | vk::BufferUsageFlags::TRANSFER_DST,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            queue_families: &[operation::Graphics::get_queue_family_index(device)],
+        })
+        .prepare(device)?;
+        let partial = MeshPackDataPartial {
+            buffer,
+            buffer_ranges,
+            meshes: self,
+        };
+        Ok(MeshPackPartial { partial })
+    }
+}
+
+impl<'a, V: Vertex> Partial for MeshPackPartial<'a, V> {
+    type Memory = DeviceLocal;
+
+    fn requirements(&self) -> crate::renderer::vulkan::device::memory::AllocReq<Self::Memory> {
+        self.partial.buffer.requirements()
+    }
+}
+
+impl<V: Vertex, A: Allocator> FromPartial for MeshPack<V, A> {
+    type Partial<'a> = MeshPackPartial<'a, V>;
+    type Allocator = A;
+
+    fn finalize<'a>(
+        partial: Self::Partial<'a>,
+        device: &VulkanDevice,
+        allocator: &mut Self::Allocator,
+    ) -> Result<Self, Box<dyn Error>> {
+        let MeshPackPartial {
+            partial:
+                MeshPackDataPartial {
+                    buffer,
+                    buffer_ranges,
+                    meshes,
+                },
+        } = partial;
+        let mut buffer = Buffer::finalize(buffer, device, allocator)?;
+        let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
+        let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
+        let mut builder = StagingBufferBuilder::new();
+        let vertex_range = builder.append::<V>(num_vertices);
+        let index_range = builder.append::<u32>(num_indices);
+        let (vertex_ranges, index_ranges) = {
+            let mut staging_buffer = device.create_stagging_buffer(builder)?;
+            let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
+            let vertex_ranges = meshes
+                .iter()
+                .map(|mesh| vertex_writer.write(&mesh.vertices))
+                .collect::<Vec<_>>();
+            let mut index_writer = staging_buffer.write_range::<u32>(index_range);
+            let index_ranges = meshes
+                .iter()
+                .map(|mesh| index_writer.write(&mesh.indices))
+                .collect::<Vec<_>>();
+            staging_buffer.transfer_buffer_data(&mut buffer, 0)?;
+            (vertex_ranges, index_ranges)
+        };
+        let meshes = vertex_ranges
+            .into_iter()
+            .zip(index_ranges)
+            .map(|(vertices, indices)| MeshByteRange {
+                vertices: vertices.into(),
+                indices: indices.into(),
+            })
+            .collect();
+        let data = MeshPackData {
+            buffer,
+            buffer_ranges,
+            meshes,
+        };
+        Ok(MeshPack {
+            data,
+            _phantom: PhantomData,
+        })
+    }
+}
 
 pub struct MeshPackPartial<'a, V: Vertex> {
     partial: MeshPackDataPartial<'a, V>,
@@ -135,96 +231,12 @@ pub struct MeshRange<V: Vertex> {
 }
 
 impl VulkanDevice {
-    // TODO: Should &self be &mut? Consider renaming the function to create_mesh_pack
-    pub fn prepare_mesh_pack<'a, V: Vertex>(
-        &self,
-        meshes: &'a [Mesh<V>],
-    ) -> Result<MeshPackPartial<'a, V>, Box<dyn Error>> {
-        let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
-        let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
-        let mut builder = StagingBufferBuilder::new();
-        let vertex_range = builder.append::<V>(num_vertices);
-        let index_range = builder.append::<u32>(num_indices);
-        let mut buffer_ranges = BufferRanges::new();
-        buffer_ranges.set(BufferType::Vertex, vertex_range);
-        buffer_ranges.set(BufferType::Index, index_range);
-        let buffer = BufferBuilder::new(BufferInfo {
-            size: buffer_ranges.get_rquired_buffer_size(),
-            usage: vk::BufferUsageFlags::VERTEX_BUFFER
-                | vk::BufferUsageFlags::INDEX_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_DST,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[operation::Graphics::get_queue_family_index(self)],
-        })
-        .prepare(self)?;
-        let partial = MeshPackDataPartial {
-            buffer,
-            buffer_ranges,
-            meshes,
-        };
-        Ok(MeshPackPartial { partial })
-    }
-
-    pub fn allocate_mesh_pack_memory<V: Vertex, A: Allocator>(
-        &self,
-        allocator: &mut A,
-        partial: MeshPackPartial<V>,
-    ) -> Result<MeshPack<V, A>, Box<dyn Error>> {
-        let MeshPackPartial {
-            partial:
-                MeshPackDataPartial {
-                    buffer,
-                    buffer_ranges,
-                    meshes,
-                },
-        } = partial;
-        let mut buffer = Buffer::finalize(buffer, self, allocator)?;
-        let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
-        let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
-        let mut builder = StagingBufferBuilder::new();
-        let vertex_range = builder.append::<V>(num_vertices);
-        let index_range = builder.append::<u32>(num_indices);
-        let (vertex_ranges, index_ranges) = {
-            let mut staging_buffer = self.create_stagging_buffer(builder)?;
-            let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
-            let vertex_ranges = meshes
-                .iter()
-                .map(|mesh| vertex_writer.write(&mesh.vertices))
-                .collect::<Vec<_>>();
-            let mut index_writer = staging_buffer.write_range::<u32>(index_range);
-            let index_ranges = meshes
-                .iter()
-                .map(|mesh| index_writer.write(&mesh.indices))
-                .collect::<Vec<_>>();
-            staging_buffer.transfer_buffer_data(&mut buffer, 0)?;
-            (vertex_ranges, index_ranges)
-        };
-        let meshes = vertex_ranges
-            .into_iter()
-            .zip(index_ranges)
-            .map(|(vertices, indices)| MeshByteRange {
-                vertices: vertices.into(),
-                indices: indices.into(),
-            })
-            .collect();
-        let data = MeshPackData {
-            buffer,
-            buffer_ranges,
-            meshes,
-        };
-        Ok(MeshPack {
-            data,
-            _phantom: PhantomData,
-        })
-    }
-
     pub fn load_mesh_pack<V: Vertex, A: Allocator>(
         &self,
         allocator: &mut A,
         meshes: &[Mesh<V>],
     ) -> Result<MeshPack<V, A>, Box<dyn Error>> {
-        let mesh_pack = self.prepare_mesh_pack(meshes)?;
-        let mesh_pack = self.allocate_mesh_pack_memory(allocator, mesh_pack)?;
+        let mesh_pack = MeshPack::finalize(meshes.prepare(self)?, self, allocator)?;
         Ok(mesh_pack)
     }
 }
