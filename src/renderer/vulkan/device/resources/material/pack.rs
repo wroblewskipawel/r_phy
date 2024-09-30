@@ -9,7 +9,7 @@ use crate::renderer::vulkan::device::{
     memory::{AllocReq, AllocReqRaw, Allocator, HostCoherent, HostVisibleMemory},
     resources::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
-        image::{Texture2D, Texture2DPartial},
+        image::{ImageReader, Texture2D, Texture2DPartial},
         FromPartial, Partial, PartialBuilder,
     },
     VulkanDevice,
@@ -114,7 +114,7 @@ impl VulkanDevice {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| image.prepare(self))
+                        .map(|image| ImageReader::image(image)?.prepare(self))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;

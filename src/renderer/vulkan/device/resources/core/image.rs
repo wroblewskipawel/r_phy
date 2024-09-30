@@ -225,90 +225,6 @@ struct ImageCubeReader {
     faces: Vec<(ImageCubeFace, PngImageReader<'static, File>)>,
 }
 
-impl PartialBuilder for ImageCubeReader {
-    type Partial = CubeMapPartial;
-
-    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
-        let image = VulkanImageBuilder::new(self.info()?).prepare(device)?;
-        Ok(CubeMapPartial {
-            image,
-            reader: self,
-        })
-    }
-}
-
-pub struct CubeMapPartial {
-    image: VulkanImagePartial<DeviceLocal>,
-    reader: ImageCubeReader,
-}
-
-impl Partial for CubeMapPartial {
-    type Memory = DeviceLocal;
-
-    fn requirements(&self) -> AllocReq<DeviceLocal> {
-        self.image.req
-    }
-}
-
-pub struct CubeMap<A: Allocator> {
-    texture: Texture2D<A>,
-}
-
-impl<'a, A: Allocator> From<&'a CubeMap<A>> for &'a Texture2D<A> {
-    fn from(cubemap: &'a CubeMap<A>) -> Self {
-        &cubemap.texture
-    }
-}
-
-impl<'a, A: Allocator> From<&'a mut CubeMap<A>> for &'a mut Texture2D<A> {
-    fn from(cubemap: &'a mut CubeMap<A>) -> Self {
-        &mut cubemap.texture
-    }
-}
-
-impl<A: Allocator> FromPartial for CubeMap<A> {
-    type Partial<'a> = CubeMapPartial;
-    type Allocator = A;
-
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
-        device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>> {
-        let CubeMapPartial { image, reader } = partial;
-        let mut image = VulkanImage2D::finalize(image, device, allocator)?;
-        let mut builder = StagingBufferBuilder::new();
-        let image_range = builder.append::<u8>(reader.required_buffer_size());
-        {
-            let mut staging_buffer = device.create_stagging_buffer(builder)?;
-            reader.iter().try_for_each(|(face, reader)| {
-                let mut image_range = staging_buffer.write_range::<u8>(image_range);
-                reader.read(image_range.remaining_as_slice_mut())?;
-                staging_buffer.transfer_image_data(
-                    &mut image,
-                    face as u32,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                )
-            })?;
-            image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-        }
-        let create_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .border_color(vk::BorderColor::FLOAT_OPAQUE_BLACK)
-            .min_lod(0.0)
-            .max_lod(image.mip_levels as f32);
-        let sampler = unsafe { device.create_sampler(&create_info, None)? };
-        Ok(CubeMap {
-            texture: Texture2D { image, sampler },
-        })
-    }
-}
-
 impl ImageCubeReader {
     fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
         let faces = path
@@ -344,11 +260,6 @@ impl ImageCubeReader {
     fn required_buffer_size(&self) -> usize {
         let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
         reader.required_buffer_size()
-    }
-
-    fn iter(self) -> impl Iterator<Item = (ImageCubeFace, PngImageReader<'static, File>)> {
-        let Self { faces } = self;
-        faces.into_iter()
     }
 }
 
@@ -426,37 +337,88 @@ impl VulkanDevice {
     }
 }
 
-enum ImageReader<'a> {
-    File(PngImageReader<'a, File>),
-    Buffer(PngImageReader<'a, &'a [u8]>),
+pub struct ImageReader<'a> {
+    reader: ImageReaderInner<'a>,
+}
+
+enum ImageReaderInner<'a> {
+    File(Option<PngImageReader<'a, File>>),
+    Buffer(Option<PngImageReader<'a, &'a [u8]>>),
+    Cube(ImageCubeReader),
 }
 
 impl<'a> ImageReader<'a> {
+    pub fn cube(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let reader = ImageReaderInner::Cube(ImageCubeReader::prepare(path)?);
+        Ok(Self { reader })
+    }
+
+    pub fn image(image: &'a Image) -> Result<Self, Box<dyn Error>> {
+        let reader = match image {
+            Image::File(path) => ImageReaderInner::File(Some(PngImageReader::from_file(path)?)),
+            Image::Buffer(data) => {
+                ImageReaderInner::Buffer(Some(PngImageReader::from_buffer(data)?))
+            }
+        };
+        Ok(Self { reader })
+    }
+}
+
+impl<'a> ImageReaderInner<'a> {
     fn required_buffer_size(&self) -> usize {
-        match self {
-            ImageReader::File(reader) => reader.required_buffer_size(),
-            ImageReader::Buffer(reader) => reader.required_buffer_size(),
+        match &self {
+            ImageReaderInner::File(reader) => reader
+                .as_ref()
+                .map_or(0, |reader| reader.required_buffer_size()),
+            ImageReaderInner::Buffer(reader) => reader
+                .as_ref()
+                .map_or(0, |reader| reader.required_buffer_size()),
+            ImageReaderInner::Cube(reader) => reader.required_buffer_size(),
         }
     }
 
     fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
-        match self {
-            ImageReader::File(reader) => reader.info(),
-            ImageReader::Buffer(reader) => reader.info(),
+        match &self {
+            ImageReaderInner::File(reader) => reader
+                .as_ref()
+                .map_or(Err(format!("Exhausted ImageReader!").into()), |reader| {
+                    reader.info()
+                }),
+            ImageReaderInner::Buffer(reader) => reader
+                .as_ref()
+                .map_or(Err(format!("Exhausted ImageReader!").into()), |reader| {
+                    reader.info()
+                }),
+            ImageReaderInner::Cube(reader) => reader.info(),
         }
     }
 
-    fn read(self, dst: &mut [u8]) -> Result<(), Box<dyn Error>> {
-        match self {
-            ImageReader::File(reader) => reader.read(dst),
-            ImageReader::Buffer(reader) => reader.read(dst),
-        }
+    fn read(&mut self, dst: &mut [u8]) -> Result<Option<u32>, Box<dyn Error>> {
+        let dst_layer = match self {
+            ImageReaderInner::File(reader) => reader
+                .take()
+                .and_then(|reader| Some(reader.read(dst).map(|()| 0))),
+            ImageReaderInner::Buffer(reader) => reader
+                .take()
+                .and_then(|reader| Some(reader.read(dst).map(|()| 0))),
+            ImageReaderInner::Cube(reader) => {
+                reader.faces.pop().and_then(|(face_index, reader)| {
+                    Some(reader.read(dst).map(|()| face_index as u32))
+                })
+            }
+        };
+        let dst_layer = if let Some(dst_layer) = dst_layer {
+            Some(dst_layer?)
+        } else {
+            None
+        };
+        Ok(dst_layer)
     }
 }
 
 pub struct Texture2DPartial<'a> {
     image: VulkanImagePartial<DeviceLocal>,
-    reader: ImageReader<'a>,
+    reader: ImageReaderInner<'a>,
 }
 
 impl<'a> Texture2DPartial<'a> {
@@ -480,14 +442,11 @@ impl<A: Allocator> From<&Texture2D<A>> for vk::DescriptorImageInfo {
     }
 }
 
-impl<'a> PartialBuilder for &'a Image {
+impl<'a> PartialBuilder for ImageReader<'a> {
     type Partial = Texture2DPartial<'a>;
 
     fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
-        let reader = match self {
-            Image::File(path) => ImageReader::File(PngImageReader::from_file(path)?),
-            Image::Buffer(data) => ImageReader::Buffer(PngImageReader::from_buffer(data)?),
-        };
+        let ImageReader { reader } = self;
         let image = VulkanImageBuilder::new(reader.info()?).prepare(device)?;
         Ok(Texture2DPartial { image, reader })
     }
@@ -510,19 +469,21 @@ impl<A: Allocator> FromPartial for Texture2D<A> {
         device: &VulkanDevice,
         allocator: &mut Self::Allocator,
     ) -> Result<Self, Box<dyn Error>> {
-        let Texture2DPartial { image, reader } = partial;
+        let Texture2DPartial { image, mut reader } = partial;
         let mut image = VulkanImage2D::finalize(image, device, allocator)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(reader.required_buffer_size());
         {
             let mut staging_buffer = device.create_stagging_buffer(builder)?;
             let mut image_range = staging_buffer.write_range::<u8>(image_range);
-            reader.read(image_range.remaining_as_slice_mut())?;
-            staging_buffer.transfer_image_data(
-                &mut image,
-                0,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            )?;
+            let staging_area = image_range.remaining_as_slice_mut();
+            while let Some(dst_layer) = reader.read(staging_area)? {
+                staging_buffer.transfer_image_data(
+                    &mut image,
+                    dst_layer,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                )?;
+            }
             image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
         }
         let create_info = vk::SamplerCreateInfo::builder()
@@ -540,24 +501,12 @@ impl<A: Allocator> FromPartial for Texture2D<A> {
 }
 
 impl VulkanDevice {
-    pub fn load_texture<A: Allocator>(
+    pub fn load_texture<'a, A: Allocator>(
         &self,
         allocator: &mut A,
-        image: &Image,
+        image: ImageReader<'a>,
     ) -> Result<Texture2D<A>, Box<dyn Error>> {
         Texture2D::finalize(image.prepare(self)?, self, allocator)
-    }
-
-    pub fn load_cubemap<A: Allocator>(
-        &self,
-        allocator: &mut A,
-        path: &Path,
-    ) -> Result<CubeMap<A>, Box<dyn Error>> {
-        CubeMap::finalize(
-            ImageCubeReader::prepare(path)?.prepare(self)?,
-            self,
-            allocator,
-        )
     }
 
     pub fn destroy_texture<'a, A: Allocator>(

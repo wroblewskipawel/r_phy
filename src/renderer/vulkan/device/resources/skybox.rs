@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::{
-    image::{CubeMap, Texture2D},
+    image::{ImageReader, Texture2D},
     MeshPack,
 };
 
@@ -27,7 +27,7 @@ pub type LayoutSkybox<A> =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet<A>, Nil>, Cons<CameraMatrices, Nil>>;
 
 pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> {
-    cubemap: CubeMap<A>,
+    cubemap: Texture2D<A>,
     pub mesh_pack: MeshPack<CommonVertex, A>,
     pub descriptor: DescriptorPool<TextureDescriptorSet<A>>,
     pub pipeline: GraphicsPipeline<L>,
@@ -40,14 +40,11 @@ impl VulkanDevice {
         path: &Path,
         modules: impl ModuleLoader,
     ) -> Result<Skybox<A, L>, Box<dyn Error>> {
-        let cubemap = self.load_cubemap(allocator, path)?;
-        let descriptor = {
-            let texture: &Texture2D<_> = (&cubemap).into();
-            self.create_descriptor_pool(
-                DescriptorSetWriter::<TextureDescriptorSet<A>>::new(1)
-                    .write_images::<Texture2D<A>, _>(std::slice::from_ref(texture)),
-            )?
-        };
+        let cubemap = self.load_texture(allocator, ImageReader::cube(path)?)?;
+        let descriptor = self.create_descriptor_pool(
+            DescriptorSetWriter::<TextureDescriptorSet<A>>::new(1)
+                .write_images::<Texture2D<A>, _>(std::slice::from_ref(&cubemap)),
+        )?;
         let layout = self.get_pipeline_layout::<L::Layout>()?;
         let pipeline = self.create_graphics_pipeline(layout, &modules)?;
         let mesh_pack = self.load_mesh_pack(allocator, &[shape::Cube::new(1.0).into()])?;
