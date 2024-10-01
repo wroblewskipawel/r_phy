@@ -10,7 +10,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc, time::Instant};
+use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
 use crate::{
     input::InputHandler,
@@ -19,7 +19,7 @@ use crate::{
         camera::{Camera, CameraBuilder, CameraNone},
         model::{Drawable, DrawableType, EmptyMaterial, MaterialHandle, MeshHandle, VertexNone},
         shader::{ShaderHandle, ShaderType},
-        Renderer, RendererBuilder, RendererContext,
+        ContextBuilder, Renderer, RendererBuilder, RendererContext,
     },
 };
 
@@ -310,13 +310,12 @@ impl<R: Renderer, C: Camera> LoopTypes for Loop<R, C> {
     type Camera = C;
 }
 
-pub struct Scene<D: DrawableCollection, L: LoopTypes> {
-    builder: <L::Renderer as Renderer>::Builder,
+pub struct Scene<D: DrawableCollection, B: ContextBuilder> {
+    builder: B,
     objects: D,
-    _loop: PhantomData<L>,
 }
 
-impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
+impl<D: DrawableCollection, B: ContextBuilder> Scene<D, B> {
     pub fn with_objects<
         S: ShaderType,
         T: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
@@ -324,43 +323,40 @@ impl<D: DrawableCollection, L: LoopTypes> Scene<D, L> {
         self,
         shader: ShaderHandle<S>,
         objects: Vec<Object<T>>,
-    ) -> Scene<Cons<DrawableContainer<S, T>, D>, L> {
+    ) -> Scene<Cons<DrawableContainer<S, T>, D>, B> {
         Scene {
             builder: self.builder,
             objects: Cons {
                 head: DrawableContainer { shader, objects },
                 tail: self.objects,
             },
-            _loop: PhantomData,
         }
     }
 }
 
 impl<R: Renderer, C: Camera> Loop<R, C> {
-    pub fn context_builder(&self) -> R::Builder {
-        R::Builder::default()
-    }
-
-    pub fn scene(&self, builder: R::Builder) -> Result<Scene<Nil, Self>, Box<dyn Error>> {
+    pub fn scene<B: ContextBuilder<Renderer = R>>(
+        &self,
+        builder: B,
+    ) -> Result<Scene<Nil, B>, Box<dyn Error>> {
         Ok(Scene {
             builder,
             objects: Nil {},
-            _loop: PhantomData,
         })
     }
 
-    pub fn run<D: DrawableCollection>(
+    pub fn run<D: DrawableCollection, B: ContextBuilder<Renderer = R>>(
         self,
-        mut scene: Scene<D, Self>,
+        mut scene: Scene<D, B>,
     ) -> Result<(), Box<dyn Error>> {
         let Self {
             window,
             event_loop,
-            mut renderer,
+            renderer,
             mut input_handler,
             camera,
         } = self;
-        let mut context = renderer.load_context(scene.builder)?;
+        let mut context = scene.builder.build(&renderer)?;
         let cursor_state = Rc::new(RefCell::new(CursorState::new()));
         let shared_cursor_state = cursor_state.clone();
         let shared_window = window.clone();

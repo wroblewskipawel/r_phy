@@ -18,7 +18,8 @@ use crate::renderer::vulkan::device::{
         SubmitSemaphoreState,
     },
     memory::{
-        AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, HostVisibleMemory, MemoryProperties
+        AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent,
+        HostVisibleMemory, MemoryProperties,
     },
     VulkanDevice,
 };

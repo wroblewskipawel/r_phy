@@ -24,7 +24,9 @@ use super::{
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
     memory::{Allocator, DefaultAllocator},
-    pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
+    pipeline::{
+        GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList, ModuleLoader,
+    },
     resources::{
         buffer::{UniformBuffer, UniformBufferBuilder},
         FromPartial, MaterialPackList, MeshPackList, PartialBuilder,
@@ -34,6 +36,7 @@ use super::{
 };
 
 pub trait Frame: 'static {
+    type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;
     type Context<P: GraphicsPipelinePackList>: FrameContext;
 
     fn load_context<P: GraphicsPipelinePackList>(

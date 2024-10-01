@@ -119,6 +119,7 @@ pub struct DeferredRenderer<A: Allocator> {
 }
 
 impl<A: Allocator> Frame for Rc<RefCell<DeferredRenderer<A>>> {
+    type Shader<S: ShaderType> = DeferredShader<S>;
     type Context<P: GraphicsPipelinePackList> = DeferredRendererContext<A, P>;
 
     fn load_context<P: GraphicsPipelinePackList>(
