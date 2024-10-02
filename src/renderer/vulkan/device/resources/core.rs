@@ -8,23 +8,15 @@ use crate::renderer::vulkan::device::{
 pub mod buffer;
 pub mod image;
 
-pub trait Partial {
+pub trait PartialBuilder<'a>: Sized {
+    type Config;
+    type Target<A: Allocator>;
+
+    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>>;
     fn requirements(&self) -> impl Iterator<Item = AllocReq>;
-}
-
-pub trait PartialBuilder {
-    type Partial: Partial;
-
-    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>>;
-}
-
-pub trait FromPartial: Sized {
-    type Partial<'a>: Partial;
-    type Allocator: Allocator;
-
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
+    fn finalize<A: Allocator>(
+        self,
         device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>>;
+        allocator: &mut A,
+    ) -> Result<Self::Target<A>, Box<dyn Error>>;
 }

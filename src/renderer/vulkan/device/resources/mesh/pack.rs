@@ -8,8 +8,8 @@ use crate::renderer::{
         command::operation::{self, Operation},
         memory::{AllocReq, Allocator},
         resources::{
-            buffer::{Buffer, BufferBuilder, BufferInfo, Range, StagingBufferBuilder},
-            FromPartial, Partial, PartialBuilder,
+            buffer::{BufferBuilder, BufferInfo, BufferPartial, Range, StagingBufferBuilder},
+            PartialBuilder,
         },
         VulkanDevice,
     },
@@ -19,51 +19,46 @@ use super::{
     BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, MeshPackDataPartial,
 };
 
-impl<'a, V: Vertex> PartialBuilder for &'a [Mesh<V>] {
-    type Partial = MeshPackPartial<'a, V>;
+impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
+    type Config = &'a [Mesh<V>];
+    type Target<A: Allocator> = MeshPack<V, A>;
 
-    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
-        let num_vertices = self.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
-        let num_indices = self.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
+    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+        let num_vertices = config.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
+        let num_indices = config.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
         let vertex_range = builder.append::<V>(num_vertices);
         let index_range = builder.append::<u32>(num_indices);
         let mut buffer_ranges = BufferRanges::new();
         buffer_ranges.set(BufferType::Vertex, vertex_range);
         buffer_ranges.set(BufferType::Index, index_range);
-        let buffer = BufferBuilder::new(BufferInfo {
-            size: buffer_ranges.get_rquired_buffer_size(),
-            usage: vk::BufferUsageFlags::VERTEX_BUFFER
-                | vk::BufferUsageFlags::INDEX_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_DST,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[operation::Graphics::get_queue_family_index(device)],
-        })
-        .prepare(device)?;
+        let buffer = BufferPartial::prepare(
+            BufferBuilder::new(BufferInfo {
+                size: buffer_ranges.get_rquired_buffer_size(),
+                usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+                sharing_mode: vk::SharingMode::EXCLUSIVE,
+                queue_families: &[operation::Graphics::get_queue_family_index(device)],
+            }),
+            device,
+        )?;
         let partial = MeshPackDataPartial {
             buffer,
             buffer_ranges,
-            meshes: self,
+            meshes: config,
         };
         Ok(MeshPackPartial { partial })
     }
-}
-
-impl<'a, V: Vertex> Partial for MeshPackPartial<'a, V> {
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         self.partial.buffer.requirements()
     }
-}
 
-impl<V: Vertex, A: Allocator> FromPartial for MeshPack<V, A> {
-    type Partial<'a> = MeshPackPartial<'a, V>;
-    type Allocator = A;
-
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
+    fn finalize<A: Allocator>(
+        self,
         device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>> {
+        allocator: &mut A,
+    ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let MeshPackPartial {
             partial:
                 MeshPackDataPartial {
@@ -71,8 +66,8 @@ impl<V: Vertex, A: Allocator> FromPartial for MeshPack<V, A> {
                     buffer_ranges,
                     meshes,
                 },
-        } = partial;
-        let mut buffer = Buffer::finalize(buffer, device, allocator)?;
+        } = self;
+        let mut buffer = buffer.finalize(device, allocator)?;
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -227,7 +222,7 @@ impl VulkanDevice {
         allocator: &mut A,
         meshes: &[Mesh<V>],
     ) -> Result<MeshPack<V, A>, Box<dyn Error>> {
-        let mesh_pack = MeshPack::finalize(meshes.prepare(self)?, self, allocator)?;
+        let mesh_pack = MeshPackPartial::prepare(meshes, self)?.finalize(self, allocator)?;
         Ok(mesh_pack)
     }
 }

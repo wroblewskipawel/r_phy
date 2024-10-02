@@ -10,7 +10,7 @@ use crate::renderer::vulkan::device::{
     resources::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
         image::{ImageReader, Texture2D, Texture2DPartial},
-        FromPartial, Partial, PartialBuilder,
+        PartialBuilder,
     },
     VulkanDevice,
 };
@@ -115,7 +115,7 @@ impl VulkanDevice {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| ImageReader::image(image)?.prepare(self))
+                        .map(|image| Texture2DPartial::prepare(ImageReader::image(image)?, self))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -132,7 +132,7 @@ impl VulkanDevice {
     ) -> Result<Vec<Texture2D<A>>, Box<dyn Error>> {
         textures
             .into_iter()
-            .map(|texture| Texture2D::finalize(texture, self, allocator))
+            .map(|texture| texture.finalize(self, allocator))
             .collect()
     }
 
@@ -145,7 +145,8 @@ impl VulkanDevice {
             .filter_map(|material| material.uniform())
             .collect::<Vec<_>>();
         if !data.is_empty() {
-            let uniform = UniformBufferBuilder::new(materials.len()).prepare(self)?;
+            let uniform =
+                UniformBufferPartial::prepare(UniformBufferBuilder::new(materials.len()), self)?;
             Ok(Some(MaterialUniformPartial { uniform, data }))
         } else {
             Ok(None)
@@ -159,7 +160,7 @@ impl VulkanDevice {
     ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
     {
         let MaterialUniformPartial { uniform, data } = partial;
-        let mut uniform_buffer = UniformBuffer::finalize(uniform, self, allocator)?;
+        let mut uniform_buffer = uniform.finalize(self, allocator)?;
         for (index, uniform) in data.into_iter().enumerate() {
             *uniform_buffer[index].as_inner_mut() = *uniform;
         }

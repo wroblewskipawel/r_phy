@@ -24,7 +24,7 @@ use crate::renderer::vulkan::device::{
     VulkanDevice,
 };
 
-use super::{image::VulkanImage2D, FromPartial, Partial, PartialBuilder};
+use super::{image::VulkanImage2D, PartialBuilder};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -192,16 +192,11 @@ pub struct BufferPartial<M: MemoryProperties> {
     buffer: vk::Buffer,
 }
 
-impl<M: MemoryProperties> Partial for BufferPartial<M> {
-    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
-        [self.req.into()].into_iter()
-    }
-}
+impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
+    type Config = BufferBuilder<'a, M>;
+    type Target<A: Allocator> = Buffer<M, A>;
 
-impl<'a, M: MemoryProperties> PartialBuilder for BufferBuilder<'a, M> {
-    type Partial = BufferPartial<M>;
-
-    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
         let BufferBuilder {
             info:
                 BufferInfo {
@@ -211,7 +206,7 @@ impl<'a, M: MemoryProperties> PartialBuilder for BufferBuilder<'a, M> {
                     queue_families,
                 },
             ..
-        } = self;
+        } = config;
         let create_info = vk::BufferCreateInfo {
             usage,
             sharing_mode,
@@ -224,18 +219,17 @@ impl<'a, M: MemoryProperties> PartialBuilder for BufferBuilder<'a, M> {
         let req = device.get_alloc_req(buffer);
         Ok(BufferPartial { size, req, buffer })
     }
-}
 
-impl<M: MemoryProperties, A: Allocator> FromPartial for Buffer<M, A> {
-    type Partial<'a> = BufferPartial<M>;
-    type Allocator = A;
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        [self.req.into()].into_iter()
+    }
 
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
+    fn finalize<A: Allocator>(
+        self,
         device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>> {
-        let BufferPartial { size, buffer, req } = partial;
+        allocator: &mut A,
+    ) -> Result<Self::Target<A>, Box<dyn Error>> {
+        let BufferPartial { size, buffer, req } = self;
         let memory = allocator.allocate(device, req)?;
         device.bind_memory(buffer, &memory)?;
         Ok(Buffer {
@@ -449,14 +443,18 @@ impl VulkanDevice {
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             queue_families: &[operation::Transfer::get_queue_family_index(self)],
         };
-        let partial = BufferBuilder::new(info).prepare(self)?;
-        let buffer = PersistentBuffer::finalize(partial, self, &mut DefaultAllocator {})?;
+        let partial = PersistentBufferPartial::prepare(BufferBuilder::new(info), self)?;
+        let buffer = partial.finalize(self, &mut DefaultAllocator {})?;
         Ok(StagingBuffer {
             range,
             buffer,
             device: self,
         })
     }
+}
+
+pub struct PersistentBufferPartial {
+    buffer: BufferPartial<HostCoherent>,
 }
 
 pub struct PersistentBuffer<A: Allocator> {
@@ -476,16 +474,25 @@ impl<'a, A: Allocator> From<&'a mut PersistentBuffer<A>> for &'a mut Buffer<Host
     }
 }
 
-impl<A: Allocator> FromPartial for PersistentBuffer<A> {
-    type Partial<'a> = BufferPartial<HostCoherent>;
-    type Allocator = A;
+impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
+    type Config = BufferBuilder<'a, HostCoherent>;
+    type Target<A: Allocator> = PersistentBuffer<A>;
 
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
+    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+        let buffer = BufferPartial::prepare(config, device)?;
+        Ok(PersistentBufferPartial { buffer })
+    }
+
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        self.buffer.requirements()
+    }
+
+    fn finalize<A: Allocator>(
+        self,
         device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>> {
-        let mut buffer = Buffer::finalize(partial, device, allocator)?;
+        allocator: &mut A,
+    ) -> Result<Self::Target<A>, Box<dyn Error>> {
+        let mut buffer = self.buffer.finalize(device, allocator)?;
         let ptr = buffer.memory.map(
             &device,
             ByteRange {
@@ -508,14 +515,8 @@ pub struct UniformBuffer<U: AnyBitPattern, O: Operation, A: Allocator> {
 
 pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
     len: usize,
-    buffer: BufferPartial<HostCoherent>,
+    buffer: PersistentBufferPartial,
     _phantom: PhantomData<(U, O)>,
-}
-
-impl<U: AnyBitPattern, O: Operation> Partial for UniformBufferPartial<U, O> {
-    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
-        [self.buffer.req.into()].into_iter()
-    }
 }
 
 pub struct UniformBufferBuilder<U: AnyBitPattern, O: Operation> {
@@ -532,36 +533,36 @@ impl<U: AnyBitPattern, O: Operation> UniformBufferBuilder<U, O> {
     }
 }
 
-impl<U: AnyBitPattern, O: Operation> PartialBuilder for UniformBufferBuilder<U, O> {
-    type Partial = UniformBufferPartial<U, O>;
+impl<'a, U: AnyBitPattern, O: Operation> PartialBuilder<'a> for UniformBufferPartial<U, O> {
+    type Config = UniformBufferBuilder<U, O>;
+    type Target<A: Allocator> = UniformBuffer<U, O, A>;
 
-    fn prepare(self, device: &VulkanDevice) -> Result<Self::Partial, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
         let info = BufferInfo {
-            size: size_of::<U>() * self.len,
+            size: size_of::<U>() * config.len,
             usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             queue_families: &[O::get_queue_family_index(device)],
         };
-        let buffer = BufferBuilder::new(info).prepare(device)?;
+        let buffer = PersistentBufferPartial::prepare(BufferBuilder::new(info), device)?;
         Ok(UniformBufferPartial {
-            len: self.len,
+            len: config.len,
             buffer,
             _phantom: PhantomData,
         })
     }
-}
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> FromPartial for UniformBuffer<U, O, A> {
-    type Partial<'a> = UniformBufferPartial<U, O>;
-    type Allocator = A;
+    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
+        self.buffer.requirements()
+    }
 
-    fn finalize<'a>(
-        partial: Self::Partial<'a>,
+    fn finalize<A: Allocator>(
+        self,
         device: &VulkanDevice,
-        allocator: &mut Self::Allocator,
-    ) -> Result<Self, Box<dyn Error>> {
-        let len = partial.len;
-        let buffer = PersistentBuffer::finalize(partial.buffer, device, allocator)?;
+        allocator: &mut A,
+    ) -> Result<Self::Target<A>, Box<dyn Error>> {
+        let len = self.len;
+        let buffer = self.buffer.finalize(device, allocator)?;
         Ok(UniformBuffer {
             len,
             buffer,

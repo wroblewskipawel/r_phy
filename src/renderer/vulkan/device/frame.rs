@@ -28,8 +28,8 @@ use super::{
         GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList, ModuleLoader,
     },
     resources::{
-        buffer::{UniformBuffer, UniformBufferBuilder},
-        FromPartial, MaterialPackList, MeshPackList, PartialBuilder,
+        buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
+        MaterialPackList, MeshPackList, PartialBuilder,
     },
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
     VulkanDevice,
@@ -103,11 +103,9 @@ pub struct FramePool<F: FrameContext> {
 
 impl Context {
     fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
-        let uniform_buffer = UniformBuffer::finalize(
-            UniformBufferBuilder::new(num_images).prepare(self)?,
-            self,
-            &mut DefaultAllocator {},
-        )?;
+        let uniform_buffer =
+            UniformBufferPartial::prepare(UniformBufferBuilder::new(num_images), self)?
+                .finalize(self, &mut DefaultAllocator {})?;
         let descriptors = self.create_descriptor_pool(
             DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
                 .write_buffer(&uniform_buffer),
