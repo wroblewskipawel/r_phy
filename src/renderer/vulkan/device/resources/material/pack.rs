@@ -6,7 +6,7 @@ use crate::renderer::vulkan::device::{
         Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
         PodUniform,
     },
-    memory::{AllocReq, Allocator, HostCoherent, HostVisibleMemory},
+    memory::{AllocReq, Allocator},
     resources::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
         image::{ImageReader, Texture2D, Texture2DPartial},
@@ -157,8 +157,6 @@ impl VulkanDevice {
         allocator: &mut A,
         partial: MaterialUniformPartial<'a, M>,
     ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
-    where
-        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
     {
         let MaterialUniformPartial { uniform, data } = partial;
         let mut uniform_buffer = UniformBuffer::finalize(uniform, self, allocator)?;
@@ -185,10 +183,7 @@ impl VulkanDevice {
         &self,
         allocator: &mut A,
         partial: MaterialPackPartial<'a, M>,
-    ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
-    where
-        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
-    {
+    ) -> Result<MaterialPack<M, A>, Box<dyn Error>> {
         let MaterialPackPartial {
             textures,
             uniforms,
@@ -228,10 +223,7 @@ impl VulkanDevice {
         &self,
         allocator: &mut A,
         materials: &[M],
-    ) -> Result<MaterialPack<M, A>, Box<dyn Error>>
-    where
-        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
-    {
+    ) -> Result<MaterialPack<M, A>, Box<dyn Error>> {
         let pack = self.prepare_material_pack(materials)?;
         let pack = self.allocate_material_pack_memory(allocator, pack)?;
         Ok(pack)
@@ -243,9 +235,7 @@ impl VulkanDevice {
         &self,
         pack: impl Into<&'a mut MaterialPackData<M, A>>,
         allocator: &mut A,
-    ) where
-        <A as Allocator>::Allocation<HostCoherent>: HostVisibleMemory,
-    {
+    ) {
         let data = pack.into();
         if let Some(textures) = data.textures.as_mut() {
             textures

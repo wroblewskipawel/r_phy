@@ -133,6 +133,8 @@ impl<M: MemoryProperties> Deref for MemoryChunk<M> {
 pub trait Memory: 'static + Debug {
     type Properties: MemoryProperties;
     fn chunk(&self) -> MemoryChunk<Self::Properties>;
+    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result>;
+    fn unmap(&mut self, device: &Device);
 }
 
 impl<M: MemoryProperties> Memory for MemoryChunk<M> {
@@ -140,15 +142,9 @@ impl<M: MemoryProperties> Memory for MemoryChunk<M> {
     fn chunk(&self) -> MemoryChunk<Self::Properties> {
         *self
     }
-}
 
-pub trait HostVisibleMemory {
-    fn map_memory(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result>;
-    fn unmap_memory(&mut self, device: &Device);
-}
-
-impl HostVisibleMemory for MemoryChunk<HostCoherent> {
-    fn map_memory(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
+    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
+        // TODO: Add checks for valid memory properties, consinder panic or returning dedicated result type
         unsafe {
             device.map_memory(
                 self.memory,
@@ -159,7 +155,7 @@ impl HostVisibleMemory for MemoryChunk<HostCoherent> {
         }
     }
 
-    fn unmap_memory(&mut self, device: &Device) {
+    fn unmap(&mut self, device: &Device) {
         unsafe {
             device.unmap_memory(self.memory);
         }

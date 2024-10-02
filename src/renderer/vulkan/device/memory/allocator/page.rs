@@ -11,9 +11,7 @@ use ash::{vk, Device};
 
 use crate::renderer::vulkan::{
     device::{
-        memory::{
-            HostCoherent, HostVisibleMemory, Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties,
-        },
+        memory::{Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
         resources::buffer::ByteRange,
         VulkanDevice,
     },
@@ -43,17 +41,15 @@ impl<M: MemoryProperties> Memory for PageChunk<M> {
     fn chunk(&self) -> MemoryChunk<Self::Properties> {
         self.chunk
     }
-}
 
-impl HostVisibleMemory for PageChunk<HostCoherent> {
-    fn map_memory(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
+    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
         if self.ptr.is_none() {
             self.ptr = Some(self.page.borrow_mut().map_page(device)?);
         }
         Ok(unsafe { self.ptr.unwrap().byte_add(self.chunk.range.beg + range.beg) })
     }
 
-    fn unmap_memory(&mut self, device: &Device) {
+    fn unmap(&mut self, device: &Device) {
         if self.ptr.is_some() {
             self.page.borrow_mut().unmap_page(device);
             self.ptr = None;

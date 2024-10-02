@@ -18,8 +18,8 @@ use crate::renderer::vulkan::device::{
         SubmitSemaphoreState,
     },
     memory::{
-        AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent,
-        HostVisibleMemory, MemoryProperties,
+        AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, Memory,
+        MemoryProperties,
     },
     VulkanDevice,
 };
@@ -476,10 +476,7 @@ impl<'a, A: Allocator> From<&'a mut PersistentBuffer<A>> for &'a mut Buffer<Host
     }
 }
 
-impl<A: Allocator> FromPartial for PersistentBuffer<A>
-where
-    A::Allocation<HostCoherent>: HostVisibleMemory,
-{
+impl<A: Allocator> FromPartial for PersistentBuffer<A> {
     type Partial<'a> = BufferPartial<HostCoherent>;
     type Allocator = A;
 
@@ -489,7 +486,7 @@ where
         allocator: &mut Self::Allocator,
     ) -> Result<Self, Box<dyn Error>> {
         let mut buffer = Buffer::finalize(partial, device, allocator)?;
-        let ptr = buffer.memory.map_memory(
+        let ptr = buffer.memory.map(
             &device,
             ByteRange {
                 beg: 0,
@@ -554,10 +551,7 @@ impl<U: AnyBitPattern, O: Operation> PartialBuilder for UniformBufferBuilder<U, 
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> FromPartial for UniformBuffer<U, O, A>
-where
-    A::Allocation<HostCoherent>: HostVisibleMemory,
-{
+impl<U: AnyBitPattern, O: Operation, A: Allocator> FromPartial for UniformBuffer<U, O, A> {
     type Partial<'a> = UniformBufferPartial<U, O>;
     type Allocator = A;
 
