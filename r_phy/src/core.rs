@@ -11,10 +11,10 @@ use winit::{
 };
 
 use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
+use math::{transform::Transform, types::Matrix4};
 
 use crate::{
     input::InputHandler,
-    math::{transform::Transform, types::Matrix4},
     renderer::{
         camera::{Camera, CameraBuilder, CameraNone},
         model::{Drawable, DrawableType, EmptyMaterial, MaterialHandle, MeshHandle, VertexNone},

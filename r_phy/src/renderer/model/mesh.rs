@@ -2,9 +2,9 @@ use std::{marker::PhantomData, mem::offset_of, ops::Deref};
 
 use bytemuck::{Pod, Zeroable};
 
+use math::types::{Vector2, Vector3, Vector4};
 use crate::{
     core::{Cons, Nil, TypedNil},
-    math::types::{Vector2, Vector3, Vector4},
     physics::shape,
 };
 

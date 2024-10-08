@@ -5,7 +5,6 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::{
     core::{Cons, Nil},
-    math::types::{Matrix3, Matrix4},
     renderer::{
         camera::CameraMatrices,
         vulkan::device::{
@@ -14,6 +13,7 @@ use crate::{
         },
     },
 };
+use math::types::{Matrix3, Matrix4};
 
 use super::{PipelineLayoutBuilder, PushConstant};
 

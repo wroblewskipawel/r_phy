@@ -7,7 +7,7 @@ use super::types::{Matrix3, Matrix4, Quat, Vector3, Vector4};
 
 #[cfg(test)]
 mod test_transform {
-    use crate::math::types::{Matrix4, Vector3, Vector4};
+    use crate::types::{Matrix4, Vector3, Vector4};
 
     use super::Transform;
 
@@ -166,8 +166,8 @@ impl Transform {
 
 #[cfg(test)]
 mod test_matrix_4_transforms {
-    use crate::math::types::EPS;
-    use crate::math::types::{Matrix4, Vector3, Vector4};
+    use crate::types::EPS;
+    use crate::types::{Matrix4, Vector3, Vector4};
 
     #[test]
     fn rotate_x() {

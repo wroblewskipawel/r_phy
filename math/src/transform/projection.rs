@@ -1,4 +1,4 @@
-use crate::math::types::{Matrix4, Vector3, Vector4};
+use crate::types::{Matrix4, Vector3, Vector4};
 
 impl Matrix4 {
     #[inline]

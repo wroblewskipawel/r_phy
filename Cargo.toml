@@ -1,4 +1,9 @@
 [workspace]
+resolver = "2"
 members = [
-    "r_phy"
+    "math",
+    "r_phy",
 ]
+
+[workspace.dependencies]
+bytemuck = { version = "1.18.0", features = ["derive"] }

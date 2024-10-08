@@ -6,7 +6,7 @@ use super::{Matrix3, Vector3};
 #[cfg(test)]
 mod test_quat {
 
-    use crate::math::types::{Matrix3, Matrix4, Quat, Vector3};
+    use crate::types::{Matrix3, Matrix4, Quat, Vector3};
 
     fn get_quat() -> Quat {
         Quat::axis_angle(Vector3::z(), std::f32::consts::FRAC_PI_2)

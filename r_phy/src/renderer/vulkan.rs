@@ -7,9 +7,9 @@ use self::device::resources::{
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
     MeshPackListBuilder, MeshPackListPartial,
 };
+use math::types::Matrix4;
 use crate::{
     core::{Cons, Contains, Marker, Nil},
-    math::types::Matrix4,
 };
 use core::Context;
 

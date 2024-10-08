@@ -5,12 +5,12 @@ use winit::{
     window::{WindowBuilder, WindowButtons},
 };
 
+use math::{
+    transform::Transform,
+    types::{Matrix4, Vector3},
+};
 use r_phy::{
     core::{LoopBuilder, Object},
-    math::{
-        transform::Transform,
-        types::{Matrix4, Vector3},
-    },
     physics::shape::Cube,
     renderer::{
         camera::first_person::FirstPersonCameraBuilder,
@@ -61,8 +61,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cube_mesh = context_builder.add_mesh::<CommonVertex, _>(Cube::new(1.0f32).into());
     // TODO: Explicit type conversion to the type used by selected renderer should not be visible at the front-end
     let checker_shader = context_builder.add_shader::<DeferredShader<_>, _>(
-        Shader::<CommonVertex, EmptyMaterial>::new("_resources/shaders/spv/deferred/gbuffer_write/checker")
-            .into(),
+        Shader::<CommonVertex, EmptyMaterial>::new(
+            "_resources/shaders/spv/deferred/gbuffer_write/checker",
+        )
+        .into(),
     );
     let scene = game_loop.scene(context_builder)?.with_objects(
         checker_shader,

@@ -237,7 +237,7 @@ impl Matrix2 {
 
 #[cfg(test)]
 mod test_matrix_3 {
-    use crate::math::types::EPS;
+    use crate::types::EPS;
 
     use super::{Matrix3, Vector3};
 

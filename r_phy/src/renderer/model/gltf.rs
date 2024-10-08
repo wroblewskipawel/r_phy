@@ -3,8 +3,8 @@ use base64::Engine;
 use gltf::{self, buffer, mesh::Mode, Gltf, Semantic};
 use std::{error::Error, path::Path};
 
+use math::types::{Vector2, Vector3, Vector4};
 use crate::{
-    math::types::{Vector2, Vector3, Vector4},
     renderer::model::Image,
 };
 

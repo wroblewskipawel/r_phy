@@ -3,8 +3,8 @@ use std::{
     marker::PhantomData,
 };
 
+use math::types::Matrix4;
 use crate::{
-    math::types::Matrix4,
     renderer::{
         model::{Drawable, Material, MaterialHandle, Vertex},
         shader::{ShaderHandle, ShaderType},

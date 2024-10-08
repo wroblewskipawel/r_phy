@@ -1,10 +1,10 @@
+use crate::renderer::camera::CameraMatrices;
 use ash::{
     vk::{self, Extent2D, Offset3D},
     Device,
 };
 use bytemuck::{bytes_of, Pod};
-
-use crate::{math::types::Vector4, renderer::camera::CameraMatrices};
+use math::types::Vector4;
 
 use self::{
     level::{Level, Primary, Secondary},

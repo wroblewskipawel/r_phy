@@ -8,40 +8,36 @@ use ash::vk;
 use commands::Commands;
 use draw_graph::DrawGraph;
 
-use crate::{
-    math::types::{Matrix4, Vector3},
-    renderer::{
-        camera::CameraMatrices,
-        model::{CommonVertex, Drawable, MeshBuilder},
-        shader::{ShaderHandle, ShaderType},
-        vulkan::{
-            core::Context,
-            device::{
-                descriptor::{DescriptorPool, DescriptorSetWriter, GBufferDescriptorSet},
-                frame::{Frame, FrameContext, FrameData, FramePool},
-                framebuffer::{
-                    presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
-                    InputAttachment,
-                },
-                memory::{Allocator, DeviceLocal},
-                pipeline::{
-                    GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
-                    GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
-                    GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
-                    ShaderDirectory, StatesDepthWriteDisabled,
-                },
-                render_pass::{
-                    DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
-                },
-                resources::{
-                    image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox,
-                },
-                swapchain::VulkanSwapchain,
-                VulkanDevice,
+use crate::renderer::{
+    camera::CameraMatrices,
+    model::{CommonVertex, Drawable, MeshBuilder},
+    shader::{ShaderHandle, ShaderType},
+    vulkan::{
+        core::Context,
+        device::{
+            descriptor::{DescriptorPool, DescriptorSetWriter, GBufferDescriptorSet},
+            frame::{Frame, FrameContext, FrameData, FramePool},
+            framebuffer::{
+                presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
+                InputAttachment,
             },
+            memory::{Allocator, DeviceLocal},
+            pipeline::{
+                GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
+                GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
+                GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
+                ShaderDirectory, StatesDepthWriteDisabled,
+            },
+            render_pass::{
+                DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
+            },
+            resources::{image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox},
+            swapchain::VulkanSwapchain,
+            VulkanDevice,
         },
     },
 };
+use math::types::{Matrix4, Vector3};
 
 pub struct DeferredShader<S: ShaderType> {
     shader: S,

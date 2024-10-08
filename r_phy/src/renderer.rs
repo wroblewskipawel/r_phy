@@ -3,11 +3,11 @@ pub mod model;
 pub mod shader;
 pub mod vulkan;
 
+use crate::core::Nil;
+use math::types::Matrix4;
 use shader::{ShaderHandle, ShaderType, ShaderTypeList};
 use std::error::Error;
 use winit::window::Window;
-
-use crate::{core::Nil, math::types::Matrix4};
 
 use self::{
     camera::Camera,

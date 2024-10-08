@@ -4,13 +4,10 @@ use std::{
     rc::Rc,
 };
 
+use math::types::{Matrix4, Vector3};
 use winit::{dpi::PhysicalPosition, keyboard::KeyCode};
 
-use crate::{
-    input::InputHandler,
-    math::types::{Matrix4, Vector3},
-    renderer::camera::UP,
-};
+use crate::{input::InputHandler, renderer::camera::UP};
 
 use super::{Camera, CameraBuilder, CameraMatrices};
 

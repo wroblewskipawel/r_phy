@@ -5,15 +5,13 @@
 
 use std::{error::Error, marker::PhantomData};
 
-use crate::{
-    math::types::Matrix4,
-    renderer::{
-        camera::CameraMatrices,
-        model::Drawable,
-        shader::{ShaderHandle, ShaderType},
-        vulkan::core::Context,
-    },
+use crate::renderer::{
+    camera::CameraMatrices,
+    model::Drawable,
+    shader::{ShaderHandle, ShaderType},
+    vulkan::core::Context,
 };
+use math::types::Matrix4;
 
 use super::{
     command::{

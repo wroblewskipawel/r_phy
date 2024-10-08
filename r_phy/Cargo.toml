@@ -9,7 +9,7 @@ default-run = "r_phy"
 [dependencies]
 ash = "0.37.3"
 base64 = "0.22.0"
-bytemuck = { version = "1.14.3", features = ["derive"] }
+bytemuck = { workspace = true }
 colored = "2.1.0"
 glob = "0.3.1"
 gltf = "1.4.0"
@@ -17,6 +17,7 @@ png = "0.17.13"
 serde = "1.0.197"
 strum = { version = "0.26.1", features = ["derive"] }
 winit = "0.29.10"
+math = { path = "../math" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["windef"] }
