@@ -4,7 +4,7 @@ members = [
     "type_list",
     "math",
     "system",
-    "r_phy", "input", "sandbox", 
+    "graphics", "input", "sandbox", "physics", 
 ]
 
 [workspace.dependencies]

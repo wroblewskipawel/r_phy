@@ -8,4 +8,4 @@ type_list = { path = "../type_list" }
 math = { path = "../math" }
 winit = { workspace = true }
 input = { path = "../input" }
-r_phy = { path = "../r_phy" }
+graphics = { path = "../graphics" }

@@ -11,7 +11,7 @@ use math::{transform::Transform, types::Matrix4};
 use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
 use input::InputHandler;
-use r_phy::renderer::{
+use graphics::renderer::{
     camera::{Camera, CameraBuilder, CameraNone},
     model::Drawable,
     shader::{ShaderHandle, ShaderType},

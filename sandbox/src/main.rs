@@ -9,8 +9,8 @@ use math::{
     types::{Matrix4, Vector3},
 };
 use system::{LoopBuilder, Object};
-use r_phy::{
-    physics::shape::Cube,
+use physics::shape::Cube;
+use graphics::{
     renderer::{
         camera::first_person::FirstPersonCameraBuilder,
         model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},

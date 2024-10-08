@@ -8,4 +8,5 @@ default-run = "sandbox"
 math = { path = "../math" }
 system = { path = "../system" }
 winit = { workspace = true }
-r_phy = { path = "../r_phy" }
+physics = { path = "../physics" }
+graphics = { path = "../graphics" }

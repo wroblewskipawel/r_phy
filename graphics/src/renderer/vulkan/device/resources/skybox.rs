@@ -1,22 +1,18 @@
 use std::error::Error;
 use std::path::Path;
 
-use type_list::{Cons, Nil};
-use crate::{
-    physics::shape,
-    renderer::{
-        camera::CameraMatrices,
-        model::CommonVertex,
-        vulkan::device::{
-            descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-            memory::Allocator,
-            pipeline::{
-                GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder,
-            },
-            VulkanDevice,
-        },
+use crate::renderer::{
+    camera::CameraMatrices,
+    model::CommonVertex,
+    vulkan::device::{
+        descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
+        memory::Allocator,
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
+        VulkanDevice,
     },
 };
+use physics::shape;
+use type_list::{Cons, Nil};
 
 use super::{
     image::{ImageReader, Texture2D},
