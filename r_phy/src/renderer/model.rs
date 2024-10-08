@@ -6,6 +6,7 @@ use std::fmt::Debug;
 
 pub use material::*;
 pub use mesh::*;
+use type_list::Nil;
 
 pub trait DrawableType: 'static {
     type Vertex: Vertex;
@@ -49,5 +50,20 @@ impl<M: Material, V: Vertex> Drawable for Model<M, V> {
 
     fn mesh(&self) -> MeshHandle<Self::Vertex> {
         self.mesh
+    }
+}
+
+impl DrawableType for Nil {
+    type Vertex = VertexNone;
+    type Material = EmptyMaterial;
+}
+
+impl Drawable for Nil {
+    fn material(&self) -> MaterialHandle<Self::Material> {
+        unreachable!()
+    }
+
+    fn mesh(&self) -> MeshHandle<Self::Vertex> {
+        unreachable!()
     }
 }

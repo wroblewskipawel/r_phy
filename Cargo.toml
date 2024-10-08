@@ -1,9 +1,12 @@
 [workspace]
 resolver = "2"
-members = [
+members = [ 
+    "type_list",
     "math",
-    "r_phy", "type_list",
+    "system",
+    "r_phy", "input", "sandbox", 
 ]
 
 [workspace.dependencies]
 bytemuck = { version = "1.18.0", features = ["derive"] }
+winit = "0.29.10"

@@ -7,17 +7,15 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 use math::{transform::Transform, types::Matrix4};
+use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
-use crate::{
-    input::InputHandler,
-    renderer::{
-        camera::{Camera, CameraBuilder, CameraNone},
-        model::{Drawable, DrawableType, EmptyMaterial, MaterialHandle, MeshHandle, VertexNone},
-        shader::{ShaderHandle, ShaderType},
-        ContextBuilder, Renderer, RendererBuilder, RendererContext,
-    },
+use input::InputHandler;
+use r_phy::renderer::{
+    camera::{Camera, CameraBuilder, CameraNone},
+    model::Drawable,
+    shader::{ShaderHandle, ShaderType},
+    ContextBuilder, Renderer, RendererBuilder, RendererContext,
 };
 
 #[derive(Clone, Copy)]
@@ -175,21 +173,6 @@ pub trait DrawableTypeList: 'static {
     const LEN: usize;
     type Drawable: Drawable + Clone + Copy;
     type Next: DrawableTypeList;
-}
-
-impl DrawableType for Nil {
-    type Vertex = VertexNone;
-    type Material = EmptyMaterial;
-}
-
-impl Drawable for Nil {
-    fn material(&self) -> MaterialHandle<Self::Material> {
-        unreachable!()
-    }
-
-    fn mesh(&self) -> MeshHandle<Self::Vertex> {
-        unreachable!()
-    }
 }
 
 impl DrawableTypeList for Nil {

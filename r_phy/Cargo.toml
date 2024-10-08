@@ -2,7 +2,6 @@
 name = "r_phy"
 version = "0.1.0"
 edition = "2021"
-default-run = "r_phy"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -16,8 +15,9 @@ gltf = "1.4.0"
 png = "0.17.13"
 serde = "1.0.197"
 strum = { version = "0.26.1", features = ["derive"] }
-winit = "0.29.10"
+winit = { workspace = true }
 math = { path = "../math" }
+input = { path = "../input" }
 type_list = { path = "../type_list" }
 
 [target.'cfg(windows)'.dependencies]

@@ -53,8 +53,8 @@ impl VulkanRendererConfigBuilder {
         Ok(config)
     }
 
-    pub fn with_page_size(mut self, size: vk::DeviceSize) -> Self {
-        self.page_size = Some(size);
+    pub fn with_page_size(mut self, size: usize) -> Self {
+        self.page_size = Some(size as vk::DeviceSize);
         self
     }
 }

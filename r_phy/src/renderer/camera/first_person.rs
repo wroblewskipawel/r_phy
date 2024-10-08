@@ -7,7 +7,8 @@ use std::{
 use math::types::{Matrix4, Vector3};
 use winit::{dpi::PhysicalPosition, keyboard::KeyCode};
 
-use crate::{input::InputHandler, renderer::camera::UP};
+use crate::renderer::camera::UP;
+use input::InputHandler;
 
 use super::{Camera, CameraBuilder, CameraMatrices};
 

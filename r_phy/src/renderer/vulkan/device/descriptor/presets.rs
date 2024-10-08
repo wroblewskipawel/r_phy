@@ -3,15 +3,13 @@ use std::marker::PhantomData;
 use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
-use type_list::{Cons, Nil};
-use crate::{
-    renderer::{
-        camera::CameraMatrices,
-        vulkan::device::{
-            framebuffer::InputAttachment, memory::Allocator, resources::image::Texture2D,
-        },
+use crate::renderer::{
+    camera::CameraMatrices,
+    vulkan::device::{
+        framebuffer::InputAttachment, memory::Allocator, resources::image::Texture2D,
     },
 };
+use type_list::{Cons, Nil};
 
 use super::{DescriptorBinding, DescriptorLayoutBuilder};
 

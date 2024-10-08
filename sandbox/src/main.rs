@@ -1,4 +1,3 @@
-use ash::vk;
 use std::{error::Error, result::Result};
 use winit::{
     dpi::PhysicalSize,
@@ -9,8 +8,8 @@ use math::{
     transform::Transform,
     types::{Matrix4, Vector3},
 };
+use system::{LoopBuilder, Object};
 use r_phy::{
-    core::{LoopBuilder, Object},
     physics::shape::Cube,
     renderer::{
         camera::first_person::FirstPersonCameraBuilder,
@@ -23,7 +22,7 @@ use r_phy::{
     },
 };
 
-const RENDERER_MEM_ALLOC_PAGE_SIZE: vk::DeviceSize = 128 * 1024 * 1024;
+const RENDERER_MEM_ALLOC_PAGE_SIZE: usize = 128 * 1024 * 1024;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let renderer_builder = VulkanRendererBuilder::<DeferredRenderer<DefaultAllocator>>::new()

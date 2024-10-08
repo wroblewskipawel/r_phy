@@ -1,0 +1,11 @@
+[package]
+name = "sandbox"
+version = "0.1.0"
+edition = "2021"
+default-run = "sandbox"
+
+[dependencies]
+math = { path = "../math" }
+system = { path = "../system" }
+winit = { workspace = true }
+r_phy = { path = "../r_phy" }

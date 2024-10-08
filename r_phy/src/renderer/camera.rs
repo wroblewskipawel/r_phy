@@ -4,10 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use bytemuck::{Pod, Zeroable};
 
+use input::InputHandler;
 use math::types::{Matrix4, Vector3};
-use crate::{
-    input::InputHandler,
-};
 
 pub const UP: Vector3 = Vector3::z();
 
