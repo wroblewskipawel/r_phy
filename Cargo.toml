@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "math",
-    "r_phy",
+    "r_phy", "type_list",
 ]
 
 [workspace.dependencies]

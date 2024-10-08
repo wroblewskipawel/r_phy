@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 use ash::vk::{self, Extent2D};
 pub use presets::*;
 
+use type_list::{Cons, Nil};
 use crate::{
-    core::{Cons, Nil},
     renderer::{
         model::Vertex,
         vulkan::device::{

@@ -1,7 +1,4 @@
-mod type_list;
-
-pub use type_list::*;
-
+use type_list::{Cons, Nil};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, StartCause, WindowEvent},

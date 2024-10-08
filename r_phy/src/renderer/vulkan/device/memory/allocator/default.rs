@@ -2,8 +2,8 @@ use std::{error::Error, marker::PhantomData};
 
 use ash::vk;
 
+use type_list::Nil;
 use crate::{
-    core::Nil,
     renderer::vulkan::device::{
         memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
         resources::buffer::ByteRange,

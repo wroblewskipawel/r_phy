@@ -5,7 +5,7 @@ use std::{
 
 use bytemuck::AnyBitPattern;
 
-use crate::core::{Cons, Nil, TypedNil};
+use type_list::{Cons, Nil, TypedNil};
 use math::types::{Vector3, Vector4};
 
 #[allow(dead_code)]

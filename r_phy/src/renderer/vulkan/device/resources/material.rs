@@ -6,10 +6,9 @@ use std::marker::PhantomData;
 pub use list::*;
 pub use pack::*;
 
-use ash::vk;
-
-use crate::core::{Cons, Nil};
 use crate::renderer::model::Material;
+use ash::vk;
+use type_list::{Cons, Nil};
 
 use crate::renderer::vulkan::device::descriptor::{FragmentStage, PodUniform};
 

@@ -3,26 +3,24 @@ use std::{
     marker::PhantomData,
 };
 
-use math::types::Matrix4;
-use crate::{
-    renderer::{
-        model::{Drawable, Material, MaterialHandle, Vertex},
-        shader::{ShaderHandle, ShaderType},
-        vulkan::device::{
-            descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
-            framebuffer::presets::AttachmentsGBuffer,
-            memory::Allocator,
-            pipeline::{
-                GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
-                PipelineBindData, PushConstantRangeMapper,
-            },
-            render_pass::GBufferWritePass,
-            resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
-            swapchain::SwapchainFrame,
-            VulkanDevice,
+use crate::renderer::{
+    model::{Drawable, Material, MaterialHandle, Vertex},
+    shader::{ShaderHandle, ShaderType},
+    vulkan::device::{
+        descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
+        framebuffer::presets::AttachmentsGBuffer,
+        memory::Allocator,
+        pipeline::{
+            GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
+            PipelineBindData, PushConstantRangeMapper,
         },
+        render_pass::GBufferWritePass,
+        resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
+        swapchain::SwapchainFrame,
+        VulkanDevice,
     },
 };
+use math::types::Matrix4;
 
 use super::{Commands, DeferredRendererContext, DeferredRendererFrameState, DeferredShader};
 

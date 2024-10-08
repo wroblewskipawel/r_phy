@@ -1,16 +1,15 @@
 use std::error::Error;
 
-use crate::{
-    core::{Cons, Nil, TypedNil},
-    renderer::{
-        model::{Mesh, MeshCollection, MeshTypeList, Vertex},
-        vulkan::device::{
-            memory::{AllocReq, Allocator},
-            resources::PartialBuilder,
-            VulkanDevice,
-        },
+use type_list::Contains;
+use crate::renderer::{
+    model::{Mesh, MeshTypeList, Vertex},
+    vulkan::device::{
+        memory::{AllocReq, Allocator},
+        resources::PartialBuilder,
+        VulkanDevice,
     },
 };
+use type_list::{Cons, Nil, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 

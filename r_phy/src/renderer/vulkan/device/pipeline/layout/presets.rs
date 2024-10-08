@@ -3,17 +3,15 @@ use std::mem::size_of;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
 
-use crate::{
-    core::{Cons, Nil},
-    renderer::{
-        camera::CameraMatrices,
-        vulkan::device::{
-            descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
-            resources::VulkanMaterial,
-        },
+use crate::renderer::{
+    camera::CameraMatrices,
+    vulkan::device::{
+        descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
+        resources::VulkanMaterial,
     },
 };
 use math::types::{Matrix3, Matrix4};
+use type_list::{Cons, Nil};
 
 use super::{PipelineLayoutBuilder, PushConstant};
 

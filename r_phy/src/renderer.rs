@@ -3,7 +3,7 @@ pub mod model;
 pub mod shader;
 pub mod vulkan;
 
-use crate::core::Nil;
+use type_list::Nil;
 use math::types::Matrix4;
 use shader::{ShaderHandle, ShaderType, ShaderTypeList};
 use std::error::Error;

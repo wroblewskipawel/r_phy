@@ -4,10 +4,11 @@ use crate::renderer::{
     model::CommonVertex,
     vulkan::device::{AttachmentProperties, PhysicalDeviceProperties},
 };
+use type_list::{Cons, Nil};
 
 use super::{
-    Blend, ColorBlendBuilder, Cons, DepthStencil, Multisample, Nil, PipelineStatesBuilder,
-    Rasterization, VertexAssembly, VertexBindingBuilder, Viewport, ViewportInfo,
+    Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,
+    VertexAssembly, VertexBindingBuilder, Viewport, ViewportInfo,
 };
 
 pub struct TriangleList {}

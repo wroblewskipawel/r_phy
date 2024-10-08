@@ -1,15 +1,13 @@
 use std::error::Error;
 
-use crate::{
-    core::{Cons, Nil, TypedNil},
-    renderer::{
-        model::{MaterialCollection, MaterialTypeList},
-        vulkan::device::{
-            memory::{AllocReq, Allocator},
-            VulkanDevice,
-        },
+use crate::renderer::{
+    model::{MaterialTypeList, MaterialCollection},
+    vulkan::device::{
+        memory::{AllocReq, Allocator},
+        VulkanDevice,
     },
 };
+use type_list::{Cons, Nil, TypedNil};
 
 use super::{MaterialPack, MaterialPackPartial, MaterialPackRef, VulkanMaterial};
 

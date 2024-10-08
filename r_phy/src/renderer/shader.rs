@@ -3,10 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    core::{Cons, Nil},
-    renderer::model::{EmptyMaterial, Material, Vertex, VertexNone},
-};
+use crate::renderer::model::{EmptyMaterial, Material, Vertex, VertexNone};
+use type_list::{Cons, Nil};
 
 pub trait ShaderType: 'static {
     type Vertex: Vertex;

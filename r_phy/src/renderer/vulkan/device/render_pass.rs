@@ -12,10 +12,10 @@ use std::{
 
 use ash::vk;
 
-use crate::{
-    core::{Cons, TypedNil},
-    renderer::vulkan::device::{framebuffer::AttachmentList, AttachmentProperties, VulkanDevice},
+use crate::renderer::vulkan::device::{
+    framebuffer::AttachmentList, AttachmentProperties, VulkanDevice,
 };
+use type_list::{Cons, TypedNil};
 
 use super::framebuffer::{
     AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,

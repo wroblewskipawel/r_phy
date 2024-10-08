@@ -7,11 +7,9 @@ use self::device::resources::{
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
     MeshPackListBuilder, MeshPackListPartial,
 };
-use math::types::Matrix4;
-use crate::{
-    core::{Cons, Contains, Marker, Nil},
-};
 use core::Context;
+use math::types::Matrix4;
+use type_list::{Cons, Contains, Marker, Nil};
 
 use super::{
     camera::Camera,

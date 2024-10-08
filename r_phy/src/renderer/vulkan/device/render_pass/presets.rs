@@ -1,13 +1,10 @@
 use ash::vk;
 
-use crate::{
-    core::Nil,
-    renderer::vulkan::device::framebuffer::{
-        presets::AttachmentsGBuffer, AttachmentList, AttachmentReference,
-        AttachmentReferenceBuilder, AttachmentTarget, AttachmentTransition,
-        AttachmentTransitionBuilder, References, Transitions,
-    },
+use crate::renderer::vulkan::device::framebuffer::{
+    presets::AttachmentsGBuffer, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
+    AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, References, Transitions,
 };
+use type_list::Nil;
 
 use super::{Cons, RenderPassBuilder, Subpass, TransitionList, TypedNil};
 

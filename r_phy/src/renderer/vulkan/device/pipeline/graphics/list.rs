@@ -1,12 +1,10 @@
 use std::error::Error;
 
-use crate::{
-    core::{Cons, Nil},
-    renderer::{
-        shader::{ShaderType, ShaderTypeList},
-        vulkan::device::{pipeline::ModuleLoader, VulkanDevice},
-    },
+use crate::renderer::{
+    shader::{ShaderType, ShaderTypeList},
+    vulkan::device::{pipeline::ModuleLoader, VulkanDevice},
 };
+use type_list::{Cons, Nil};
 
 use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut};
 

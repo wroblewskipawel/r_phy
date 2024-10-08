@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::path::Path;
 
+use type_list::{Cons, Nil};
 use crate::{
-    core::{Cons, Nil},
     physics::shape,
     renderer::{
         camera::CameraMatrices,

@@ -12,8 +12,8 @@ use std::{
 
 use ash::vk;
 
+use type_list::{Cons, Nil};
 use crate::{
-    core::{Cons, Nil},
     renderer::vulkan::device::{descriptor::DescriptorLayout, VulkanDevice},
 };
 

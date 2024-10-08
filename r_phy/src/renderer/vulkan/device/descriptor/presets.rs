@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
+use type_list::{Cons, Nil};
 use crate::{
-    core::{Cons, Nil},
     renderer::{
         camera::CameraMatrices,
         vulkan::device::{

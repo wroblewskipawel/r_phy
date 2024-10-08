@@ -18,6 +18,7 @@ serde = "1.0.197"
 strum = { version = "0.26.1", features = ["derive"] }
 winit = "0.29.10"
 math = { path = "../math" }
+type_list = { path = "../type_list" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["windef"] }

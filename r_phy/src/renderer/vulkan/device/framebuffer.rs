@@ -4,10 +4,8 @@ use std::{error::Error, marker::PhantomData, usize};
 
 use ash::vk::{self, Extent2D};
 
-use crate::{
-    core::{Cons, Nil},
-    renderer::vulkan::device::{AttachmentProperties, VulkanDevice},
-};
+use crate::renderer::vulkan::device::{AttachmentProperties, VulkanDevice};
+use type_list::{Cons, Nil};
 
 use super::{
     memory::{Allocator, DeviceLocal},

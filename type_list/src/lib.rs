@@ -51,8 +51,8 @@ impl<T> TypedNil<T> {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Cons<H, T> {
-    pub(crate) head: H,
-    pub(crate) tail: T,
+    pub head: H,
+    pub tail: T,
 }
 
 impl<S, N> Contains<S, Here> for Cons<S, N> {
