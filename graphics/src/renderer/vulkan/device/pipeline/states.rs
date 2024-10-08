@@ -5,20 +5,18 @@ use std::marker::PhantomData;
 use ash::vk::{self, Extent2D};
 pub use presets::*;
 
-use type_list::{Cons, Nil};
-use crate::{
-    renderer::{
-        model::Vertex,
-        vulkan::device::{
-            framebuffer::{
-                AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
-                References,
-            },
-            render_pass::Subpass,
-            AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
+use crate::renderer::{
+    model::Vertex,
+    vulkan::device::{
+        framebuffer::{
+            AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
+            References,
         },
+        render_pass::Subpass,
+        AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
     },
 };
+use type_list::{Cons, Nil};
 
 pub struct VertexInputInfo {
     _bindings: Vec<vk::VertexInputBindingDescription>,

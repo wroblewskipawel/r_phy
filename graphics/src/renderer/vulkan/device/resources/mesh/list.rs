@@ -1,6 +1,5 @@
 use std::error::Error;
 
-use type_list::Contains;
 use crate::renderer::{
     model::{Mesh, MeshTypeList, Vertex},
     vulkan::device::{
@@ -9,6 +8,7 @@ use crate::renderer::{
         VulkanDevice,
     },
 };
+use type_list::Contains;
 use type_list::{Cons, Nil, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};

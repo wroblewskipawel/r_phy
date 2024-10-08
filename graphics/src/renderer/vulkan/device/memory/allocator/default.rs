@@ -2,14 +2,12 @@ use std::{error::Error, marker::PhantomData};
 
 use ash::vk;
 
-use type_list::Nil;
-use crate::{
-    renderer::vulkan::device::{
-        memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
-        resources::buffer::ByteRange,
-        VulkanDevice,
-    },
+use crate::renderer::vulkan::device::{
+    memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
+    resources::buffer::ByteRange,
+    VulkanDevice,
 };
+use type_list::Nil;
 
 use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
 

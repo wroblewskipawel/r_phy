@@ -3,10 +3,10 @@ pub mod model;
 pub mod shader;
 pub mod vulkan;
 
-use type_list::Nil;
 use math::types::Matrix4;
 use shader::{ShaderHandle, ShaderType, ShaderTypeList};
 use std::error::Error;
+use type_list::Nil;
 use winit::window::Window;
 
 use self::{

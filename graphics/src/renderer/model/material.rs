@@ -5,8 +5,8 @@ use std::{
 
 use bytemuck::AnyBitPattern;
 
-use type_list::{Cons, Nil, TypedNil};
 use math::types::{Vector3, Vector4};
+use type_list::{Cons, Nil, TypedNil};
 
 #[allow(dead_code)]
 pub const fn has_data<T: Material>() -> bool {

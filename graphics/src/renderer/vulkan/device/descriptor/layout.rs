@@ -8,10 +8,8 @@ use std::{
 
 use ash::vk;
 
+use crate::renderer::vulkan::device::VulkanDevice;
 use type_list::{Cons, Nil};
-use crate::{
-    renderer::vulkan::device::VulkanDevice,
-};
 
 // Check out once_cell and lazy_static crates to improve the implementation
 fn get_descriptor_set_layout_map(

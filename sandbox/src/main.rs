@@ -4,23 +4,21 @@ use winit::{
     window::{WindowBuilder, WindowButtons},
 };
 
+use graphics::renderer::{
+    camera::first_person::FirstPersonCameraBuilder,
+    model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
+    shader::Shader,
+    vulkan::{
+        DefaultAllocator, DeferredRenderer, DeferredShader, VulkanContextBuilder,
+        VulkanRendererBuilder, VulkanRendererConfig,
+    },
+};
 use math::{
     transform::Transform,
     types::{Matrix4, Vector3},
 };
-use system::{LoopBuilder, Object};
 use physics::shape::Cube;
-use graphics::{
-    renderer::{
-        camera::first_person::FirstPersonCameraBuilder,
-        model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
-        shader::Shader,
-        vulkan::{
-            DefaultAllocator, DeferredRenderer, DeferredShader, VulkanContextBuilder,
-            VulkanRendererBuilder, VulkanRendererConfig,
-        },
-    },
-};
+use system::{LoopBuilder, Object};
 
 const RENDERER_MEM_ALLOC_PAGE_SIZE: usize = 128 * 1024 * 1024;
 

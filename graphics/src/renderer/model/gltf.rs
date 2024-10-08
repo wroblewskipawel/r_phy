@@ -3,10 +3,8 @@ use base64::Engine;
 use gltf::{self, buffer, mesh::Mode, Gltf, Semantic};
 use std::{error::Error, path::Path};
 
+use crate::renderer::model::Image;
 use math::types::{Vector2, Vector3, Vector4};
-use crate::{
-    renderer::model::Image,
-};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct VertexBuilder {

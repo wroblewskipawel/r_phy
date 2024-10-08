@@ -2,8 +2,8 @@ use std::{marker::PhantomData, mem::offset_of, ops::Deref};
 
 use bytemuck::{Pod, Zeroable};
 
-use physics::shape;
 use math::types::{Vector2, Vector3, Vector4};
+use physics::shape;
 use type_list::{Cons, Nil, TypedNil};
 
 pub struct Component {

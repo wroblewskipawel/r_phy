@@ -10,13 +10,13 @@ use winit::{
 use math::{transform::Transform, types::Matrix4};
 use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
-use input::InputHandler;
 use graphics::renderer::{
     camera::{Camera, CameraBuilder, CameraNone},
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
     ContextBuilder, Renderer, RendererBuilder, RendererContext,
 };
+use input::InputHandler;
 
 #[derive(Clone, Copy)]
 pub struct DrawCommand<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>> {

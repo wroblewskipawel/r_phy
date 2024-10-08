@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::renderer::{
-    model::{MaterialTypeList, MaterialCollection},
+    model::{MaterialCollection, MaterialTypeList},
     vulkan::device::{
         memory::{AllocReq, Allocator},
         VulkanDevice,
