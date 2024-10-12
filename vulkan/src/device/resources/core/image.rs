@@ -17,7 +17,7 @@ use super::buffer::StagingBufferBuilder;
 use super::PartialBuilder;
 
 #[derive(Debug, Clone, Copy)]
-struct VulkanImageInfo {
+struct Image2DInfo {
     extent: vk::Extent2D,
     format: vk::Format,
     flags: vk::ImageCreateFlags,
@@ -29,14 +29,14 @@ struct VulkanImageInfo {
     mip_levels: u32,
 }
 
-pub struct VulkanImageBuilder<M: MemoryProperties> {
-    info: VulkanImageInfo,
+pub struct Image2DBuilder<M: MemoryProperties> {
+    info: Image2DInfo,
     _phantom: PhantomData<M>,
 }
 
-impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
-    type Config = VulkanImageBuilder<M>;
-    type Target<A: Allocator> = VulkanImage2D<M, A>;
+impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
+    type Config = Image2DBuilder<M>;
+    type Target<A: Allocator> = Image2D<M, A>;
 
     fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let info = config.info;
@@ -58,7 +58,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
             .usage(info.usage);
         let image = unsafe { device.create_image(&image_info, None)? };
         let req = device.get_alloc_req(image);
-        Ok(VulkanImagePartial { image, info, req })
+        Ok(Image2DPartial { image, info, req })
     }
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
@@ -70,7 +70,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
         device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
-        let VulkanImagePartial { image, info, req } = self;
+        let Image2DPartial { image, info, req } = self;
         let memory = allocator.allocate(device, req)?;
         device.bind_memory(image, &memory)?;
         let view_info = vk::ImageViewCreateInfo::builder()
@@ -86,7 +86,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
                 layer_count: info.array_layers,
             });
         let image_view = unsafe { device.create_image_view(&view_info, None)? };
-        Ok(VulkanImage2D {
+        Ok(Image2D {
             array_layers: info.array_layers,
             mip_levels: info.mip_levels,
             layout: vk::ImageLayout::UNDEFINED,
@@ -98,8 +98,8 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
     }
 }
 
-impl<M: MemoryProperties> VulkanImageBuilder<M> {
-    fn new(info: VulkanImageInfo) -> Self {
+impl<M: MemoryProperties> Image2DBuilder<M> {
+    fn new(info: Image2DInfo) -> Self {
         Self {
             info,
             _phantom: PhantomData,
@@ -107,9 +107,9 @@ impl<M: MemoryProperties> VulkanImageBuilder<M> {
     }
 }
 
-pub struct VulkanImagePartial<M: MemoryProperties> {
+pub struct Image2DPartial<M: MemoryProperties> {
     image: vk::Image,
-    info: VulkanImageInfo,
+    info: Image2DInfo,
     req: AllocReqTyped<M>,
 }
 
@@ -154,7 +154,7 @@ impl<'a, R: Read> PngImageReader<'a, R> {
         Ok(())
     }
 
-    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+    fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
         let info = self.reader.info();
         let extent = vk::Extent2D {
             width: info.width,
@@ -169,7 +169,7 @@ impl<'a, R: Read> PngImageReader<'a, R> {
             ))?,
         };
         let mip_levels = get_max_mip_level(extent);
-        Ok(VulkanImageInfo {
+        Ok(Image2DInfo {
             extent,
             format,
             mip_levels,
@@ -240,10 +240,10 @@ impl ImageCubeReader {
         Ok(Self { faces })
     }
 
-    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+    fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
         let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
         let info = reader.info()?;
-        Ok(VulkanImageInfo {
+        Ok(Image2DInfo {
             array_layers: 6,
             view_type: vk::ImageViewType::CUBE,
             flags: vk::ImageCreateFlags::CUBE_COMPATIBLE,
@@ -257,7 +257,7 @@ impl ImageCubeReader {
     }
 }
 
-pub struct VulkanImage2D<M: MemoryProperties, A: Allocator> {
+pub struct Image2D<M: MemoryProperties, A: Allocator> {
     pub array_layers: u32,
     pub mip_levels: u32,
     pub layout: vk::ImageLayout,
@@ -271,10 +271,10 @@ impl Device {
     pub fn create_color_attachment_image<A: Allocator>(
         &self,
         allocator: &mut A,
-    ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
+    ) -> Result<Image2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let image = VulkanImagePartial::prepare(
-            VulkanImageBuilder::new(VulkanImageInfo {
+        let image = Image2DPartial::prepare(
+            Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self.physical_device.attachment_properties.formats.color,
                 flags: vk::ImageCreateFlags::empty(),
@@ -296,10 +296,10 @@ impl Device {
     pub fn create_depth_stencil_attachment_image<A: Allocator>(
         &self,
         allocator: &mut A,
-    ) -> Result<VulkanImage2D<DeviceLocal, A>, Box<dyn Error>> {
+    ) -> Result<Image2D<DeviceLocal, A>, Box<dyn Error>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let image = VulkanImagePartial::prepare(
-            VulkanImageBuilder::new(VulkanImageInfo {
+        let image = Image2DPartial::prepare(
+            Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self
                     .physical_device
@@ -323,7 +323,7 @@ impl Device {
 
     pub fn destroy_image<'a, M: MemoryProperties, A: Allocator>(
         &self,
-        image: impl Into<&'a mut VulkanImage2D<M, A>>,
+        image: impl Into<&'a mut Image2D<M, A>>,
         allocator: &mut A,
     ) {
         let image = image.into();
@@ -375,7 +375,7 @@ impl<'a> ImageReaderInner<'a> {
         }
     }
 
-    fn info(&self) -> Result<VulkanImageInfo, Box<dyn Error>> {
+    fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
         match &self {
             ImageReaderInner::File(reader) => reader
                 .as_ref()
@@ -415,12 +415,12 @@ impl<'a> ImageReaderInner<'a> {
 }
 
 pub struct Texture2DPartial<'a> {
-    image: VulkanImagePartial<DeviceLocal>,
+    image: Image2DPartial<DeviceLocal>,
     reader: ImageReaderInner<'a>,
 }
 
 pub struct Texture2D<A: Allocator> {
-    pub image: VulkanImage2D<DeviceLocal, A>,
+    pub image: Image2D<DeviceLocal, A>,
     pub sampler: vk::Sampler,
 }
 
@@ -440,7 +440,7 @@ impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
 
     fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let ImageReader { reader } = config;
-        let image = VulkanImagePartial::prepare(VulkanImageBuilder::new(reader.info()?), device)?;
+        let image = Image2DPartial::prepare(Image2DBuilder::new(reader.info()?), device)?;
         Ok(Texture2DPartial { image, reader })
     }
 

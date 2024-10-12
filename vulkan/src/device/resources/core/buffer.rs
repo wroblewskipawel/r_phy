@@ -24,7 +24,7 @@ use crate::device::{
     Device,
 };
 
-use super::{image::VulkanImage2D, PartialBuilder};
+use super::{image::Image2D, PartialBuilder};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -343,7 +343,7 @@ impl<'a> StagingBuffer<'a> {
 
     pub fn transfer_image_data<'b, A: Allocator>(
         &self,
-        dst: impl Into<&'b mut VulkanImage2D<DeviceLocal, A>>,
+        dst: impl Into<&'b mut Image2D<DeviceLocal, A>>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
     ) -> Result<(), Box<dyn Error>> {

@@ -10,7 +10,7 @@ use type_list::{Cons, Nil};
 use super::{
     memory::{Allocator, DeviceLocal},
     render_pass::RenderPassConfig,
-    resources::image::VulkanImage2D,
+    resources::image::Image2D,
 };
 
 pub trait ClearValue {
@@ -154,8 +154,8 @@ pub struct InputAttachment {
     pub image_view: vk::ImageView,
 }
 
-impl<A: Allocator> From<VulkanImage2D<DeviceLocal, A>> for InputAttachment {
-    fn from(image: VulkanImage2D<DeviceLocal, A>) -> Self {
+impl<A: Allocator> From<Image2D<DeviceLocal, A>> for InputAttachment {
+    fn from(image: Image2D<DeviceLocal, A>) -> Self {
         Self {
             image_view: image.image_view,
         }

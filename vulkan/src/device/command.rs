@@ -15,7 +15,7 @@ use super::{
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
     resources::{
-        buffer::Buffer, image::VulkanImage2D, BufferType, LayoutSkybox, MeshPackBinding,
+        buffer::Buffer, image::Image2D, BufferType, LayoutSkybox, MeshPackBinding,
         MeshRangeBindData, Skybox,
     },
     swapchain::SwapchainFrame,
@@ -448,7 +448,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
 
     pub fn change_layout<'b, 'c, M: MemoryProperties, A: Allocator>(
         self,
-        image: impl Into<&'c mut VulkanImage2D<M, A>>,
+        image: impl Into<&'c mut Image2D<M, A>>,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
         array_layer: u32,
@@ -498,7 +498,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
 
     pub fn generate_mip<'b, 'c, M: MemoryProperties, A: Allocator>(
         self,
-        image: impl Into<&'c mut VulkanImage2D<M, A>>,
+        image: impl Into<&'c mut Image2D<M, A>>,
         array_layer: u32,
     ) -> Self {
         let image = image.into();
@@ -641,7 +641,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     >(
         self,
         src: impl Into<&'b Buffer<S, A1>>,
-        dst: impl Into<&'c mut VulkanImage2D<D, A2>>,
+        dst: impl Into<&'c mut Image2D<D, A2>>,
         dst_layer: u32,
     ) -> Self {
         let RecordingCommand(command, device) = self;

@@ -32,7 +32,7 @@ use crate::{
         render_pass::{
             DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
         },
-        resources::{image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox},
+        resources::{image::Image2D, MaterialPackList, MeshPack, MeshPackList, Skybox},
         swapchain::Swapchain,
         Device,
     },
@@ -74,11 +74,11 @@ impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
 }
 
 pub struct GBuffer<A: Allocator> {
-    pub combined: VulkanImage2D<DeviceLocal, A>,
-    pub albedo: VulkanImage2D<DeviceLocal, A>,
-    pub normal: VulkanImage2D<DeviceLocal, A>,
-    pub position: VulkanImage2D<DeviceLocal, A>,
-    pub depth: VulkanImage2D<DeviceLocal, A>,
+    pub combined: Image2D<DeviceLocal, A>,
+    pub albedo: Image2D<DeviceLocal, A>,
+    pub normal: Image2D<DeviceLocal, A>,
+    pub position: Image2D<DeviceLocal, A>,
+    pub depth: Image2D<DeviceLocal, A>,
 }
 
 struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
