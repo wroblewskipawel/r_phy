@@ -1,18 +1,17 @@
 pub mod camera;
-pub mod model;
-pub mod shader;
 pub mod vulkan;
 
 use math::types::Matrix4;
-use shader::{ShaderHandle, ShaderType, ShaderTypeList};
 use std::error::Error;
 use type_list::Nil;
 use winit::window::Window;
 
-use self::{
-    camera::Camera,
-    model::{Drawable, MaterialTypeList, MeshTypeList},
+use to_resolve::{
+    model::Drawable,
+    shader::{ShaderHandle, ShaderType},
 };
+
+use self::camera::Camera;
 
 pub trait Renderer: 'static {}
 
@@ -25,9 +24,9 @@ pub trait ContextBuilder {
 
 pub trait RendererContext: 'static {
     type Renderer: Renderer;
-    type Shaders: ShaderTypeList;
-    type Materials: MaterialTypeList;
-    type Meshes: MeshTypeList;
+    type Shaders;
+    type Materials;
+    type Meshes;
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>>;
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>>;

@@ -1,0 +1,16 @@
+[package]
+name = "vulkan"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ash = { workspace = true }
+winit = { workspace = true }
+colored = { workspace = true }
+bytemuck = { workspace = true }
+math = { path = "../math" }
+type_list = { path = "../type_list" }
+strum = { version = "0.26.1", features = ["derive"] }
+png = "0.17.13"
+to_resolve = {path = "../to_resolve" }
+physics = { path = "../physics" } 

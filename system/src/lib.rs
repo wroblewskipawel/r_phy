@@ -10,10 +10,13 @@ use winit::{
 use math::{transform::Transform, types::Matrix4};
 use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
-use graphics::renderer::{
-    camera::{Camera, CameraBuilder, CameraNone},
+use to_resolve::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
+};
+
+use graphics::renderer::{
+    camera::{Camera, CameraBuilder, CameraNone},
     ContextBuilder, Renderer, RendererBuilder, RendererContext,
 };
 use input::InputHandler;

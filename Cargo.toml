@@ -4,9 +4,15 @@ members = [
     "type_list",
     "math",
     "system",
-    "graphics", "input", "sandbox", "physics", 
+    "graphics",
+    "input",
+    "sandbox",
+    "physics",
+    "vulkan", "to_resolve", 
 ]
 
 [workspace.dependencies]
 bytemuck = { version = "1.18.0", features = ["derive"] }
 winit = "0.29.10"
+colored = "2.1.0"
+ash = "0.37.3"

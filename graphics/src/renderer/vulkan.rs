@@ -1,63 +1,27 @@
-mod core;
-mod debug;
-mod device;
-mod surface;
-
-use self::device::resources::{
+use math::types::Matrix4;
+use type_list::{Cons, Contains, Marker, Nil};
+use vulkan::device::memory::DefaultAllocator;
+use vulkan::device::renderer::deferred::DeferredRenderer;
+use vulkan::device::resources::{
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
     MeshPackListBuilder, MeshPackListPartial,
 };
-use core::Context;
-use math::types::Matrix4;
-use type_list::{Cons, Contains, Marker, Nil};
+use vulkan::Context;
 
-use super::{
-    camera::Camera,
+use super::{camera::Camera, ContextBuilder, Renderer, RendererBuilder, RendererContext};
+use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
+use to_resolve::{
     model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
     shader::{ShaderHandle, ShaderType},
-    ContextBuilder, Renderer, RendererBuilder, RendererContext,
 };
-use ash::vk;
-use device::{
+use vulkan::device::{
     frame::{Frame, FrameContext},
     memory::{AllocatorCreate, StaticAllocator, StaticAllocatorConfig},
     pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
 };
-use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
 use winit::window::Window;
 
-pub use device::memory::DefaultAllocator;
-pub use device::renderer::deferred::{DeferredRenderer, DeferredShader};
-
-#[derive(Debug, Clone, Copy)]
-pub struct VulkanRendererConfig {
-    pub page_size: vk::DeviceSize,
-}
-
-impl VulkanRendererConfig {
-    pub fn builder() -> VulkanRendererConfigBuilder {
-        VulkanRendererConfigBuilder::default()
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct VulkanRendererConfigBuilder {
-    page_size: Option<vk::DeviceSize>,
-}
-
-impl VulkanRendererConfigBuilder {
-    pub fn build(self) -> Result<VulkanRendererConfig, Box<dyn Error>> {
-        let config = VulkanRendererConfig {
-            page_size: self.page_size.ok_or("Page size not provided")?,
-        };
-        Ok(config)
-    }
-
-    pub fn with_page_size(mut self, size: usize) -> Self {
-        self.page_size = Some(size as vk::DeviceSize);
-        self
-    }
-}
+use to_resolve::vulkan::VulkanRendererConfig;
 
 #[derive(Debug)]
 pub struct VulkanRendererBuilder<R>
@@ -366,9 +330,9 @@ impl<
 
 impl<
         R: Frame,
-        M: MaterialPackList<StaticAllocator>,
-        V: MeshPackList<StaticAllocator>,
-        S: GraphicsPipelinePackList,
+        M: MaterialPackList<StaticAllocator> + 'static,
+        V: MeshPackList<StaticAllocator> + 'static,
+        S: GraphicsPipelinePackList + 'static,
     > RendererContext for VulkanRendererContext<R, M, V, S>
 {
     type Renderer = VulkanRenderer;

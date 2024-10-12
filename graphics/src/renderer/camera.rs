@@ -2,19 +2,11 @@ pub mod first_person;
 
 use std::{cell::RefCell, rc::Rc};
 
-use bytemuck::{Pod, Zeroable};
-
 use input::InputHandler;
-use math::types::{Matrix4, Vector3};
+use math::types::Vector3;
+use to_resolve::camera::CameraMatrices;
 
 pub const UP: Vector3 = Vector3::z();
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Zeroable, Pod)]
-pub struct CameraMatrices {
-    pub view: Matrix4,
-    pub proj: Matrix4,
-}
 
 pub trait Camera: 'static {
     fn get_position(&self) -> Vector3;

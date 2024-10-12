@@ -10,3 +10,5 @@ system = { path = "../system" }
 winit = { workspace = true }
 physics = { path = "../physics" }
 graphics = { path = "../graphics" }
+to_resolve = { path = "../to_resolve" }
+vulkan = { path = "../vulkan" }

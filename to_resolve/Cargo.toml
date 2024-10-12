@@ -1,0 +1,13 @@
+[package]
+name = "to_resolve"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+math = { path = "../math" }
+bytemuck = { workspace = true }
+type_list = { path = "../type_list" }
+physics = { path = "../physics" }
+ash = { workspace = true }
+gltf = "1.4.0"
+base64 = "0.22.0"

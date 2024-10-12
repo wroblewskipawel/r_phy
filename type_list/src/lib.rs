@@ -87,6 +87,12 @@ impl TypeList for Nil {
     type Next = Nil;
 }
 
+impl<N> TypeList for TypedNil<N> {
+    const LEN: usize = 0;
+    type Item = N;
+    type Next = Nil;
+}
+
 impl<T, N: TypeList> TypeList for Cons<T, N> {
     const LEN: usize = 1;
     type Item = T;
@@ -94,7 +100,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
 }
 
 pub trait Transmute<T> {
-    type Output;
+    type Output: 'static;
 
     fn transmute(self) -> Self::Output;
 }
