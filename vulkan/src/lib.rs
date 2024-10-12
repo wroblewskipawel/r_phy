@@ -12,7 +12,7 @@ use winit::window::Window;
 #[cfg(debug_assertions)]
 use debug::DebugUtils;
 use device::Device;
-use surface::VulkanSurface as Surface;
+use surface::Surface;
 
 fn check_required_extension_support(
     entry: &Entry,

@@ -10,7 +10,7 @@ pub mod resources;
 pub mod swapchain;
 
 use self::command::TransientCommandPools;
-use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
+use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
 use ash::{self, vk};
 use colored::Colorize;
 use std::ffi::c_char;
@@ -309,7 +309,7 @@ impl Deref for Device {
 fn check_physical_device_suitable(
     physical_device: vk::PhysicalDevice,
     instance: &ash::Instance,
-    surface: &VulkanSurface,
+    surface: &Surface,
 ) -> Result<PhysicalDevice, Box<dyn Error>> {
     let properties = PhysicalDeviceProperties::get(instance, physical_device)?;
     let surface_properties =
@@ -343,7 +343,7 @@ fn get_physical_device_name(
 
 fn pick_physical_device(
     instance: &ash::Instance,
-    surface: &VulkanSurface,
+    surface: &Surface,
 ) -> Result<PhysicalDevice, Box<dyn Error>> {
     let (physical_device_name, physical_device) = unsafe { instance.enumerate_physical_devices()? }
         .into_iter()
@@ -367,10 +367,7 @@ fn pick_physical_device(
 }
 
 impl Device {
-    pub fn create(
-        instance: &ash::Instance,
-        surface: &VulkanSurface,
-    ) -> Result<Device, Box<dyn Error>> {
+    pub fn create(instance: &ash::Instance, surface: &Surface) -> Result<Device, Box<dyn Error>> {
         let physical_device = pick_physical_device(instance, surface)?;
         let queue_builder = DeviceQueueBuilder::new(physical_device.queue_families);
         let device = unsafe {

@@ -1,31 +1,27 @@
-#[cfg(target_os = "windows")]
-use ash::extensions::khr::Win32Surface;
-use ash::{extensions::khr::Surface, vk, Entry, Instance};
+use ash::{self, extensions::khr, vk};
 use std::{
     collections::HashSet,
     error::Error,
     ffi::{c_void, CStr},
     ptr::null,
 };
-#[cfg(target_os = "windows")]
-use winit::raw_window_handle::Win32WindowHandle;
 use winit::{
-    raw_window_handle::{HasWindowHandle, RawWindowHandle},
+    raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle},
     window::Window,
 };
 
-pub struct VulkanSurface {
+pub struct Surface {
     handle: vk::SurfaceKHR,
-    loader: Surface,
+    loader: khr::Surface,
 }
 
 #[cfg(target_os = "windows")]
 fn create_platform_surface(
-    entry: &Entry,
-    instance: &Instance,
+    entry: &ash::Entry,
+    instance: &ash::Instance,
     window: &Window,
 ) -> Result<vk::SurfaceKHR, Box<dyn Error>> {
-    let win32_surface = Win32Surface::new(entry, instance);
+    let win32_surface = khr::Win32Surface::new(entry, instance);
     let (hwnd, hinstance) = match window.window_handle()?.as_raw() {
         RawWindowHandle::Win32(Win32WindowHandle {
             hwnd, hinstance, ..
@@ -56,10 +52,10 @@ fn create_platform_surface(
     compile_error!("Current platform not supported!");
 }
 
-impl VulkanSurface {
+impl Surface {
     #[cfg(target_os = "windows")]
     pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
-        const REQUIRED_EXTENSIONS: [&CStr; 2] = [Win32Surface::name(), Surface::name()];
+        const REQUIRED_EXTENSIONS: [&CStr; 2] = [khr::Win32Surface::name(), khr::Surface::name()];
         REQUIRED_EXTENSIONS.into_iter()
     }
 
@@ -69,12 +65,12 @@ impl VulkanSurface {
     }
 
     pub fn create(
-        entry: &Entry,
-        instance: &Instance,
+        entry: &ash::Entry,
+        instance: &ash::Instance,
         window: &Window,
     ) -> Result<Self, Box<dyn Error>> {
         let handle = create_platform_surface(entry, instance, window)?;
-        let loader = Surface::new(entry, instance);
+        let loader = khr::Surface::new(entry, instance);
         Ok(Self { handle, loader })
     }
 
@@ -83,8 +79,8 @@ impl VulkanSurface {
     }
 }
 
-impl From<&VulkanSurface> for vk::SurfaceKHR {
-    fn from(value: &VulkanSurface) -> Self {
+impl From<&Surface> for vk::SurfaceKHR {
+    fn from(value: &Surface) -> Self {
         value.handle
     }
 }
@@ -101,7 +97,7 @@ impl PhysicalDeviceSurfaceProperties {
         &[vk::Format::R8G8B8A8_SRGB, vk::Format::B8G8R8A8_SRGB];
 
     pub fn get(
-        surface: &VulkanSurface,
+        surface: &Surface,
         physical_device: vk::PhysicalDevice,
         quque_families: &[(vk::QueueFamilyProperties, u32)],
     ) -> Result<Self, Box<dyn Error>> {
