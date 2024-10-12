@@ -13,7 +13,7 @@ use crate::device::{
         PushConstant, PushConstantDataRef,
     },
     render_pass::RenderPassConfig,
-    VulkanDevice,
+    Device,
 };
 
 use super::GraphicsPipelineConfig;
@@ -195,7 +195,7 @@ impl<'a, T: GraphicsPipelineConfig> PipelinePackRefMut<'a, T> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create_pipeline_pack<T: GraphicsPipelineConfig>(
         &self,
     ) -> Result<PipelinePack<T>, Box<dyn Error>> {

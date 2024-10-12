@@ -14,7 +14,7 @@ use ash::vk;
 
 use crate::device::{
     descriptor::{DescriptorBinding, DescriptorLayout},
-    VulkanDevice,
+    Device,
 };
 use type_list::{Cons, Nil};
 
@@ -311,7 +311,7 @@ impl<L: Layout> From<PipelineLayout<L>> for vk::PipelineLayout {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     fn get_descriptor_list_entry<'a, T: DescriptorLayoutList>(
         &self,
         mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,

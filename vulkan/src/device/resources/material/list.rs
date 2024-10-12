@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::device::{
     memory::{AllocReq, Allocator},
-    VulkanDevice,
+    Device,
 };
 use to_resolve::model::{MaterialCollection, MaterialTypeList};
 use type_list::{Cons, Nil, TypeList, TypedNil};
@@ -14,7 +14,7 @@ pub trait MaterialPackListBuilder: MaterialTypeList {
 
     fn prepare<A: Allocator>(
         &self,
-        device: &VulkanDevice,
+        device: &Device,
     ) -> Result<impl MaterialPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>>;
 }
 
@@ -23,7 +23,7 @@ impl MaterialPackListBuilder for Nil {
 
     fn prepare<A: Allocator>(
         &self,
-        _device: &VulkanDevice,
+        _device: &Device,
     ) -> Result<impl MaterialPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
         Ok(Nil {})
     }
@@ -34,7 +34,7 @@ impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for 
 
     fn prepare<A: Allocator>(
         &self,
-        device: &VulkanDevice,
+        device: &Device,
     ) -> Result<impl MaterialPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
         let materials = self.get();
         let partial = if !materials.is_empty() {
@@ -56,7 +56,7 @@ pub trait MaterialPackListPartial: Sized {
 
     fn allocate<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>>;
 }
@@ -70,7 +70,7 @@ impl MaterialPackListPartial for Nil {
 
     fn allocate<A: Allocator>(
         self,
-        _device: &VulkanDevice,
+        _device: &Device,
         _allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         Ok(TypedNil::new())
@@ -92,7 +92,7 @@ impl<'a, M: VulkanMaterial, N: MaterialPackListPartial> MaterialPackListPartial
 
     fn allocate<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         let Self { head, tail } = self;
@@ -109,13 +109,13 @@ impl<'a, M: VulkanMaterial, N: MaterialPackListPartial> MaterialPackListPartial
 }
 
 pub trait MaterialPackList<A: Allocator>: TypeList {
-    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A);
+    fn destroy(&mut self, device: &Device, allocator: &mut A);
 
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>>;
 }
 
 impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
-    fn destroy(&mut self, _device: &VulkanDevice, _allocator: &mut A) {}
+    fn destroy(&mut self, _device: &Device, _allocator: &mut A) {}
     fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>> {
         None
     }
@@ -124,7 +124,7 @@ impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
 impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialPackList<A>
     for Cons<Option<MaterialPack<M, A>>, N>
 {
-    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A) {
+    fn destroy(&mut self, device: &Device, allocator: &mut A) {
         if let Some(material_pack) = &mut self.head {
             device.destroy_material_pack(material_pack, allocator);
         }
@@ -139,7 +139,7 @@ impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialPackList<A
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_materials<A: Allocator, M: MaterialPackList<A>>(
         &self,
         packs: &mut M,

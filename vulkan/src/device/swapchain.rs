@@ -11,7 +11,7 @@ use super::{
         level::Primary, operation::Graphics, FinishedCommand, Persistent, SubmitSemaphoreState,
     },
     framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
-    VulkanDevice,
+    Device,
 };
 #[derive(Debug, Clone, Copy)]
 pub struct SwapchainImageSync {
@@ -72,7 +72,7 @@ impl<A: AttachmentList> VulkanSwapchain<A> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn present_frame<A: AttachmentList>(
         &self,
         swapchain: &VulkanSwapchain<A>,

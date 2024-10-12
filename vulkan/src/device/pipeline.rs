@@ -8,10 +8,10 @@ pub use layout::*;
 pub use push_constant::*;
 pub use states::*;
 
-use ash::{vk, Device};
+use ash::{self, vk};
 use std::{error::Error, ffi::CStr, marker::PhantomData, path::Path};
 
-use super::VulkanDevice;
+use super::Device;
 
 struct ShaderModule {
     module: vk::ShaderModule,
@@ -47,7 +47,7 @@ impl ShaderModule {
 
 pub struct Modules<'a> {
     modules: Vec<ShaderModule>,
-    device: &'a Device,
+    device: &'a ash::Device,
 }
 
 impl<'a> Drop for Modules<'a> {
@@ -79,7 +79,7 @@ impl<'a> Modules<'a> {
 }
 
 pub trait ModuleLoader {
-    fn load<'a>(&self, device: &'a VulkanDevice) -> Result<Modules<'a>, Box<dyn Error>>;
+    fn load<'a>(&self, device: &'a Device) -> Result<Modules<'a>, Box<dyn Error>>;
 }
 
 pub struct ShaderDirectory<'a> {
@@ -93,7 +93,7 @@ impl<'a> ShaderDirectory<'a> {
 }
 
 impl<'b> ModuleLoader for ShaderDirectory<'b> {
-    fn load<'a>(&self, device: &'a VulkanDevice) -> Result<Modules<'a>, Box<dyn Error>> {
+    fn load<'a>(&self, device: &'a Device) -> Result<Modules<'a>, Box<dyn Error>> {
         let modules = Modules {
             modules: self
                 .path
@@ -112,7 +112,7 @@ impl<'b> ModuleLoader for ShaderDirectory<'b> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     fn load_shader_module(&self, path: &Path) -> Result<ShaderModule, Box<dyn Error>> {
         let code = std::fs::read(path)?;
         let stage = ShaderModule::get_shader_stage(path)?;

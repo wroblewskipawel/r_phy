@@ -16,7 +16,7 @@ use ash::vk;
 
 use super::{
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout},
-    VulkanDevice,
+    Device,
 };
 
 #[derive(Debug)]
@@ -135,7 +135,7 @@ impl<T: DescriptorLayout> Descriptor<T> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_descriptor_pool<'a>(&self, pool: impl Into<&'a mut DescriptorPoolData>) {
         let data = pool.into();
         unsafe {

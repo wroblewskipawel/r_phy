@@ -19,7 +19,7 @@ use crate::device::{
     render_pass::GBufferWritePass,
     resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
     swapchain::SwapchainFrame,
-    VulkanDevice,
+    Device,
 };
 use math::types::Matrix4;
 
@@ -180,7 +180,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
 
     pub(super) fn record_draw_calls(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         state: DeferredRendererFrameState<P>,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
     ) -> Result<Commands<P>, Box<dyn Error>> {

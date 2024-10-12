@@ -8,7 +8,7 @@ use crate::device::{
     descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
     memory::Allocator,
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
-    VulkanDevice,
+    Device,
 };
 use type_list::{Cons, Nil};
 
@@ -27,7 +27,7 @@ pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<
     pub pipeline: GraphicsPipeline<L>,
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create_skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>>(
         &self,
         allocator: &mut A,

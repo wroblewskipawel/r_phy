@@ -16,7 +16,7 @@ use crate::device::{
     pipeline::GraphicsPipelinePackList,
     render_pass::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
     swapchain::SwapchainFrame,
-    VulkanDevice,
+    Device,
 };
 use to_resolve::camera::CameraMatrices;
 
@@ -33,7 +33,7 @@ pub(super) struct Commands<P: GraphicsPipelinePackList> {
 impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
     pub(super) fn prepare_commands(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
@@ -99,7 +99,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
 
     pub(super) fn record_primary_command(
         &self,
-        device: &VulkanDevice,
+        device: &Device,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
         commands: Commands<P>,
         swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,

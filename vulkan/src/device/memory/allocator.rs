@@ -15,7 +15,7 @@ pub use default::*;
 pub use page::*;
 pub use r#static::*;
 
-use crate::device::VulkanDevice;
+use crate::device::Device;
 
 use super::{DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, Resource};
 
@@ -47,8 +47,8 @@ impl Error for DeviceAllocError {}
 pub trait AllocatorCreate: Sized + 'static {
     type Config;
 
-    fn create(device: &VulkanDevice, config: &Self::Config) -> Result<Self, Box<dyn Error>>;
-    fn destroy(&mut self, device: &VulkanDevice);
+    fn create(device: &Device, config: &Self::Config) -> Result<Self, Box<dyn Error>>;
+    fn destroy(&mut self, device: &Device);
 }
 
 pub trait Allocator: AllocatorCreate {
@@ -56,15 +56,11 @@ pub trait Allocator: AllocatorCreate {
 
     fn allocate<M: MemoryProperties>(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError>;
 
-    fn free<M: MemoryProperties>(
-        &mut self,
-        device: &VulkanDevice,
-        allocation: &mut Self::Allocation<M>,
-    );
+    fn free<M: MemoryProperties>(&mut self, device: &Device, allocation: &mut Self::Allocation<M>);
 }
 
 #[derive(Debug)]
@@ -193,7 +189,7 @@ impl<M: MemoryProperties> AllocReqTyped<M> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn get_alloc_req<T: Into<Resource>, M: MemoryProperties>(
         &self,
         resource: T,

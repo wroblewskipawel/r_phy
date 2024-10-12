@@ -34,7 +34,7 @@ use crate::{
         },
         resources::{image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox},
         swapchain::VulkanSwapchain,
-        VulkanDevice,
+        Device,
     },
     Context,
 };
@@ -68,7 +68,7 @@ impl<S: ShaderType> From<S> for DeferredShader<S> {
 }
 
 impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
-    fn load<'a>(&self, device: &'a VulkanDevice) -> Result<Modules<'a>, Box<dyn Error>> {
+    fn load<'a>(&self, device: &'a Device) -> Result<Modules<'a>, Box<dyn Error>> {
         ShaderDirectory::new(self.shader.source()).load(device)
     }
 }
@@ -152,7 +152,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> FrameContext for DeferredRendere
 
     fn begin_frame(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
         let (index, primary_command) = self.frames.primary_commands.next();
@@ -198,7 +198,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> FrameContext for DeferredRendere
         self.append_draw_call(material_packs, mesh_packs, shader, drawable, transform);
     }
 
-    fn end_frame(&mut self, device: &VulkanDevice) -> Result<(), Box<dyn Error>> {
+    fn end_frame(&mut self, device: &Device) -> Result<(), Box<dyn Error>> {
         let FrameData {
             swapchain_frame,
             primary_command,

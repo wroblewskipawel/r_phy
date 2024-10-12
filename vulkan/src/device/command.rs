@@ -1,7 +1,4 @@
-use ash::{
-    vk::{self, Extent2D, Offset3D},
-    Device,
-};
+use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
 use math::types::Vector4;
 use to_resolve::camera::CameraMatrices;
@@ -22,7 +19,7 @@ use super::{
         MeshRangeBindData, Skybox,
     },
     swapchain::SwapchainFrame,
-    QueueFamilies, VulkanDevice,
+    Device, QueueFamilies,
 };
 use std::{any::type_name, error::Error, marker::PhantomData};
 
@@ -34,7 +31,7 @@ pub mod level {
 
     use ash::vk;
 
-    use crate::device::VulkanDevice;
+    use crate::device::Device;
 
     pub trait Level {
         const LEVEL: vk::CommandBufferLevel;
@@ -44,15 +41,12 @@ pub mod level {
         fn buffer(command: &Self::CommandData) -> vk::CommandBuffer;
 
         fn create_persistent_allocator(
-            device: &VulkanDevice,
+            device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
         ) -> Result<Self::PersistentAllocator, Box<dyn Error>>;
 
-        fn destory_persistent_alocator(
-            device: &VulkanDevice,
-            allocator: &mut Self::PersistentAllocator,
-        );
+        fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator);
 
         fn allocate_persistent_command_buffer(
             allocator: &mut Self::PersistentAllocator,
@@ -90,7 +84,7 @@ pub mod level {
         }
 
         fn create_persistent_allocator(
-            device: &VulkanDevice,
+            device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
         ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
@@ -122,10 +116,7 @@ pub mod level {
             })
         }
 
-        fn destory_persistent_alocator(
-            device: &VulkanDevice,
-            allocator: &mut Self::PersistentAllocator,
-        ) {
+        fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator) {
             unsafe {
                 allocator
                     .fences
@@ -167,7 +158,7 @@ pub mod level {
         }
 
         fn create_persistent_allocator(
-            device: &VulkanDevice,
+            device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
         ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
@@ -182,7 +173,7 @@ pub mod level {
         }
 
         fn destory_persistent_alocator(
-            _device: &VulkanDevice,
+            _device: &Device,
             _allocator: &mut Self::PersistentAllocator,
         ) {
             // Buffers are destroyed with the command pool
@@ -197,7 +188,7 @@ pub mod level {
 pub mod operation {
     use ash::vk;
 
-    use crate::device::VulkanDevice;
+    use crate::device::Device;
 
     pub struct Graphics;
     pub struct Transfer;
@@ -207,41 +198,41 @@ pub mod operation {
     // some of it contents could be moved to separate module
     // placed higher in the source tree
     pub trait Operation {
-        fn get_queue(device: &VulkanDevice) -> vk::Queue;
-        fn get_queue_family_index(device: &VulkanDevice) -> u32;
-        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool;
+        fn get_queue(device: &Device) -> vk::Queue;
+        fn get_queue_family_index(device: &Device) -> u32;
+        fn get_transient_command_pool(device: &Device) -> vk::CommandPool;
     }
 
     impl Operation for Graphics {
-        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+        fn get_queue(device: &Device) -> vk::Queue {
             device.device_queues.graphics
         }
-        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+        fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.graphics
         }
-        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool {
+        fn get_transient_command_pool(device: &Device) -> vk::CommandPool {
             device.command_pools.graphics
         }
     }
     impl Operation for Compute {
-        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+        fn get_queue(device: &Device) -> vk::Queue {
             device.device_queues.compute
         }
-        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+        fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.compute
         }
-        fn get_transient_command_pool(_device: &VulkanDevice) -> vk::CommandPool {
+        fn get_transient_command_pool(_device: &Device) -> vk::CommandPool {
             unimplemented!()
         }
     }
     impl Operation for Transfer {
-        fn get_queue(device: &VulkanDevice) -> vk::Queue {
+        fn get_queue(device: &Device) -> vk::Queue {
             device.device_queues.transfer
         }
-        fn get_queue_family_index(device: &VulkanDevice) -> u32 {
+        fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.transfer
         }
-        fn get_transient_command_pool(device: &VulkanDevice) -> vk::CommandPool {
+        fn get_transient_command_pool(device: &Device) -> vk::CommandPool {
             device.command_pools.transfer
         }
     }
@@ -269,7 +260,7 @@ impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create_persistent_command_pool<L: Level, O: Operation>(
         &self,
         size: usize,
@@ -310,7 +301,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a NewCommand<T, L, O>> for &'a Comman
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn begin_secondary_command<
         T,
         O: Operation,
@@ -391,7 +382,7 @@ impl VulkanDevice {
     }
 }
 
-pub struct RecordingCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a VulkanDevice);
+pub struct RecordingCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a Device);
 
 impl<'a, T, L: Level, O: Operation> From<&'a RecordingCommand<'a, T, L, O>>
     for &'a Command<T, L, O>
@@ -533,16 +524,16 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     fn generate_mip_level(
         self,
         image: vk::Image,
-        extent: Extent2D,
+        extent: vk::Extent2D,
         level: u32,
         layer: u32,
     ) -> Self {
         debug_assert!(level > 0, "generate mip level called for base mip level!");
-        let base_level_extent = Extent2D {
+        let base_level_extent = vk::Extent2D {
             width: (extent.width / 2u32.pow(level - 1)).max(1),
             height: (extent.height / 2u32.pow(level - 1)).max(1),
         };
-        let level_extent = Extent2D {
+        let level_extent = vk::Extent2D {
             width: (base_level_extent.width / 2).max(1),
             height: (base_level_extent.height / 2).max(1),
         };
@@ -612,8 +603,8 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                         layer_count: 1,
                     },
                     src_offsets: [
-                        Offset3D { x: 0, y: 0, z: 0 },
-                        Offset3D {
+                        vk::Offset3D { x: 0, y: 0, z: 0 },
+                        vk::Offset3D {
                             x: base_level_extent.width as i32,
                             y: base_level_extent.height as i32,
                             z: 1,
@@ -626,8 +617,8 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                         layer_count: 1,
                     },
                     dst_offsets: [
-                        Offset3D { x: 0, y: 0, z: 0 },
-                        Offset3D {
+                        vk::Offset3D { x: 0, y: 0, z: 0 },
+                        vk::Offset3D {
                             x: level_extent.width as i32,
                             y: level_extent.height as i32,
                             z: 1,
@@ -833,7 +824,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a FinishedCommand<T, L, O>> for &'a C
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn submit_command<'a, T, O: Operation>(
         &'a self,
         command: FinishedCommand<T, Primary, O>,
@@ -860,7 +851,7 @@ impl VulkanDevice {
         Ok(SubmitedCommand(command, self))
     }
 }
-pub struct SubmitedCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a VulkanDevice);
+pub struct SubmitedCommand<'a, T, L: Level, O: Operation>(Command<T, L, O>, &'a Device);
 
 impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
     for &'a Command<T, L, O>
@@ -902,7 +893,10 @@ pub(super) struct TransientCommandPools {
 }
 
 impl TransientCommandPools {
-    pub fn create(device: &Device, queue_families: QueueFamilies) -> Result<Self, Box<dyn Error>> {
+    pub fn create(
+        device: &ash::Device,
+        queue_families: QueueFamilies,
+    ) -> Result<Self, Box<dyn Error>> {
         let transfer = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -922,7 +916,7 @@ impl TransientCommandPools {
         Ok(Self { transfer, graphics })
     }
 
-    pub fn destroy(&mut self, device: &Device) {
+    pub fn destroy(&mut self, device: &ash::Device) {
         unsafe {
             device.destroy_command_pool(self.transfer, None);
             device.destroy_command_pool(self.graphics, None)
@@ -930,7 +924,7 @@ impl TransientCommandPools {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn allocate_transient_command<O: Operation>(
         &self,
     ) -> Result<NewCommand<Transient, Primary, O>, Box<dyn Error>> {

@@ -5,7 +5,7 @@ use ash::vk;
 use crate::device::{
     memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
     resources::buffer::ByteRange,
-    VulkanDevice,
+    Device,
 };
 use type_list::Nil;
 
@@ -16,11 +16,11 @@ pub struct DefaultAllocator {}
 impl AllocatorCreate for DefaultAllocator {
     type Config = Nil;
 
-    fn create(_device: &VulkanDevice, _config: &Self::Config) -> Result<Self, Box<dyn Error>> {
+    fn create(_device: &Device, _config: &Self::Config) -> Result<Self, Box<dyn Error>> {
         Ok(DefaultAllocator {})
     }
 
-    fn destroy(&mut self, _device: &VulkanDevice) {}
+    fn destroy(&mut self, _device: &Device) {}
 }
 
 impl Allocator for DefaultAllocator {
@@ -28,7 +28,7 @@ impl Allocator for DefaultAllocator {
 
     fn allocate<M: MemoryProperties>(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let memory_type_index = request
@@ -53,11 +53,7 @@ impl Allocator for DefaultAllocator {
         })
     }
 
-    fn free<M: MemoryProperties>(
-        &mut self,
-        device: &VulkanDevice,
-        allocation: &mut Self::Allocation<M>,
-    ) {
+    fn free<M: MemoryProperties>(&mut self, device: &Device, allocation: &mut Self::Allocation<M>) {
         unsafe {
             device.free_memory(allocation.memory, None);
         }

@@ -11,7 +11,7 @@ pub mod swapchain;
 
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, VulkanSurface};
-use ash::{vk, Device, Instance};
+use ash::{self, vk};
 use colored::Colorize;
 use std::ffi::c_char;
 use std::ops::Deref;
@@ -105,7 +105,7 @@ impl DeviceQueueBuilder {
             .collect()
     }
 
-    pub fn get_device_queues(&self, device: &Device) -> DeviceQueues {
+    pub fn get_device_queues(&self, device: &ash::Device) -> DeviceQueues {
         let quque_map =
             HashMap::<u32, vk::Queue>::from_iter(self.unique.iter().map(|&queue_family_index| {
                 (queue_family_index, unsafe {
@@ -139,7 +139,7 @@ impl PhysicalDeviceProperties {
     }
 
     pub fn get(
-        instance: &Instance,
+        instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
     ) -> Result<Self, Box<dyn Error>> {
         let generic = unsafe { instance.get_physical_device_properties(physical_device) };
@@ -164,7 +164,7 @@ impl PhysicalDeviceProperties {
     }
 
     fn check_required_device_extension_support(
-        instance: &Instance,
+        instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
     ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
         let supported_extensions =
@@ -190,7 +190,7 @@ impl PhysicalDeviceProperties {
     }
 
     fn get_device_queue_families_properties(
-        instance: &Instance,
+        instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
     ) -> Vec<(vk::QueueFamilyProperties, u32)> {
         let mut quque_properties =
@@ -235,7 +235,7 @@ impl AttachmentProperties {
     ];
 
     pub fn get(
-        instance: &Instance,
+        instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
         properties: &PhysicalDeviceProperties,
         surface_properties: &PhysicalDeviceSurfaceProperties,
@@ -278,7 +278,7 @@ impl AttachmentProperties {
     }
 }
 
-struct VulkanPhysicalDevice {
+struct PhysicalDevice {
     properties: PhysicalDeviceProperties,
     surface_properties: PhysicalDeviceSurfaceProperties,
     attachment_properties: AttachmentProperties,
@@ -292,15 +292,15 @@ struct DeviceQueues {
     transfer: vk::Queue,
 }
 
-pub struct VulkanDevice {
-    physical_device: VulkanPhysicalDevice,
+pub struct Device {
+    physical_device: PhysicalDevice,
     command_pools: TransientCommandPools,
     device_queues: DeviceQueues,
-    device: Device,
+    device: ash::Device,
 }
 
-impl Deref for VulkanDevice {
-    type Target = Device;
+impl Deref for Device {
+    type Target = ash::Device;
     fn deref(&self) -> &Self::Target {
         &self.device
     }
@@ -308,16 +308,16 @@ impl Deref for VulkanDevice {
 
 fn check_physical_device_suitable(
     physical_device: vk::PhysicalDevice,
-    instance: &Instance,
+    instance: &ash::Instance,
     surface: &VulkanSurface,
-) -> Result<VulkanPhysicalDevice, Box<dyn Error>> {
+) -> Result<PhysicalDevice, Box<dyn Error>> {
     let properties = PhysicalDeviceProperties::get(instance, physical_device)?;
     let surface_properties =
         PhysicalDeviceSurfaceProperties::get(surface, physical_device, &properties.queue_families)?;
     let attachment_properties =
         AttachmentProperties::get(instance, physical_device, &properties, &surface_properties)?;
     let queue_families = QueueFamilies::get(&properties, &surface_properties)?;
-    Ok(VulkanPhysicalDevice {
+    Ok(PhysicalDevice {
         properties,
         surface_properties,
         attachment_properties,
@@ -326,7 +326,10 @@ fn check_physical_device_suitable(
     })
 }
 
-fn get_physical_device_name(instance: &Instance, physical_device: vk::PhysicalDevice) -> String {
+fn get_physical_device_name(
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
+) -> String {
     unsafe {
         CStr::from_ptr(
             &instance
@@ -339,9 +342,9 @@ fn get_physical_device_name(instance: &Instance, physical_device: vk::PhysicalDe
 }
 
 fn pick_physical_device(
-    instance: &Instance,
+    instance: &ash::Instance,
     surface: &VulkanSurface,
-) -> Result<VulkanPhysicalDevice, Box<dyn Error>> {
+) -> Result<PhysicalDevice, Box<dyn Error>> {
     let (physical_device_name, physical_device) = unsafe { instance.enumerate_physical_devices()? }
         .into_iter()
         .find_map(|physical_device| {
@@ -363,11 +366,11 @@ fn pick_physical_device(
     Ok(physical_device)
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create(
-        instance: &Instance,
+        instance: &ash::Instance,
         surface: &VulkanSurface,
-    ) -> Result<VulkanDevice, Box<dyn Error>> {
+    ) -> Result<Device, Box<dyn Error>> {
         let physical_device = pick_physical_device(instance, surface)?;
         let queue_builder = DeviceQueueBuilder::new(physical_device.queue_families);
         let device = unsafe {

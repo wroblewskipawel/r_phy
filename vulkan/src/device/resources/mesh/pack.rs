@@ -9,7 +9,7 @@ use crate::device::{
         buffer::{BufferBuilder, BufferInfo, BufferPartial, Range, StagingBufferBuilder},
         PartialBuilder,
     },
-    VulkanDevice,
+    Device,
 };
 use to_resolve::model::{Mesh, Vertex};
 
@@ -21,7 +21,7 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
     type Config = &'a [Mesh<V>];
     type Target<A: Allocator> = MeshPack<V, A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let num_vertices = config.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = config.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -54,7 +54,7 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let MeshPackPartial {
@@ -214,7 +214,7 @@ pub struct MeshRange<V: Vertex> {
     pub indices: Range<u32>,
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn load_mesh_pack<V: Vertex, A: Allocator>(
         &self,
         allocator: &mut A,

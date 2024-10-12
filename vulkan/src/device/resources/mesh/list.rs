@@ -3,7 +3,7 @@ use std::error::Error;
 use crate::device::{
     memory::{AllocReq, Allocator},
     resources::PartialBuilder,
-    VulkanDevice,
+    Device,
 };
 use to_resolve::model::{Mesh, MeshTypeList, Vertex};
 use type_list::{Cons, Nil, TypedNil};
@@ -12,13 +12,13 @@ use type_list::{Contains, TypeList};
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
 pub trait MeshPackList<A: Allocator>: TypeList {
-    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A);
+    fn destroy(&mut self, device: &Device, allocator: &mut A);
 
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>>;
 }
 
 impl<A: Allocator> MeshPackList<A> for TypedNil<A> {
-    fn destroy(&mut self, _device: &VulkanDevice, _allocator: &mut A) {}
+    fn destroy(&mut self, _device: &Device, _allocator: &mut A) {}
 
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>> {
         None
@@ -28,7 +28,7 @@ impl<A: Allocator> MeshPackList<A> for TypedNil<A> {
 impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
     for Cons<Option<MeshPack<V, A>>, N>
 {
-    fn destroy(&mut self, device: &VulkanDevice, allocator: &mut A) {
+    fn destroy(&mut self, device: &Device, allocator: &mut A) {
         if let Some(mesh_pack) = &mut self.head {
             device.destroy_mesh_pack(mesh_pack, allocator);
         }
@@ -48,7 +48,7 @@ pub trait MeshPackListBuilder: MeshTypeList {
 
     fn prepare<A: Allocator>(
         &self,
-        device: &VulkanDevice,
+        device: &Device,
     ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>>;
 }
 
@@ -57,7 +57,7 @@ impl MeshPackListBuilder for Nil {
 
     fn prepare<A: Allocator>(
         &self,
-        _device: &VulkanDevice,
+        _device: &Device,
     ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
         Ok(Nil {})
     }
@@ -68,7 +68,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
 
     fn prepare<A: Allocator>(
         &self,
-        device: &VulkanDevice,
+        device: &Device,
     ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
@@ -90,7 +90,7 @@ pub trait MeshPackListPartial: Sized {
 
     fn allocate<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>>;
 }
@@ -104,7 +104,7 @@ impl MeshPackListPartial for Nil {
 
     fn allocate<A: Allocator>(
         self,
-        _device: &VulkanDevice,
+        _device: &Device,
         _allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         Ok(TypedNil::new())
@@ -126,7 +126,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
 
     fn allocate<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         let Self { head, tail } = self;
@@ -142,7 +142,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_meshes<A: Allocator, M: MeshPackList<A>>(
         &self,
         packs: &mut M,

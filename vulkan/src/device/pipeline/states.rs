@@ -11,7 +11,7 @@ use crate::device::{
         References,
     },
     render_pass::Subpass,
-    AttachmentProperties, PhysicalDeviceProperties, VulkanPhysicalDevice,
+    AttachmentProperties, PhysicalDevice, PhysicalDeviceProperties,
 };
 use to_resolve::model::{Vertex, VertexNone};
 use type_list::{Cons, Nil};
@@ -376,7 +376,7 @@ pub struct PipelineStatesInfo<S: PipelineStates> {
 }
 
 pub(super) fn get_pipeline_states_info<A: AttachmentList, P: Subpass<A>, S: PipelineStates>(
-    physical_device: &VulkanPhysicalDevice,
+    physical_device: &PhysicalDevice,
     extent: Extent2D,
 ) -> PipelineStatesInfo<S> {
     PipelineStatesInfo {

@@ -31,7 +31,7 @@ use super::{
         MaterialPackList, MeshPackList, PartialBuilder,
     },
     swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
-    VulkanDevice,
+    Device,
 };
 
 pub trait Frame: 'static {
@@ -57,7 +57,7 @@ pub trait FrameContext: Sized {
 
     fn begin_frame(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         camera: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>>;
 
@@ -77,7 +77,7 @@ pub trait FrameContext: Sized {
         mesh_packs: &V,
     );
 
-    fn end_frame(&mut self, device: &VulkanDevice) -> Result<(), Box<dyn Error>>;
+    fn end_frame(&mut self, device: &Device) -> Result<(), Box<dyn Error>>;
 }
 
 pub struct CameraUniform {

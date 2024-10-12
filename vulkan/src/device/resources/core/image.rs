@@ -1,6 +1,6 @@
 use crate::device::{
     memory::{AllocReq, AllocReqTyped, Allocator, DeviceLocal, MemoryProperties},
-    VulkanDevice,
+    Device,
 };
 use to_resolve::model::Image;
 
@@ -38,7 +38,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
     type Config = VulkanImageBuilder<M>;
     type Target<A: Allocator> = VulkanImage2D<M, A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let info = config.info;
         let image_info = vk::ImageCreateInfo::builder()
             .flags(info.flags)
@@ -67,7 +67,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for VulkanImagePartial<M> {
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let VulkanImagePartial { image, info, req } = self;
@@ -267,7 +267,7 @@ pub struct VulkanImage2D<M: MemoryProperties, A: Allocator> {
     memory: A::Allocation<M>,
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create_color_attachment_image<A: Allocator>(
         &self,
         allocator: &mut A,
@@ -438,7 +438,7 @@ impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
     type Config = ImageReader<'a>;
     type Target<A: Allocator> = Texture2D<A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let ImageReader { reader } = config;
         let image = VulkanImagePartial::prepare(VulkanImageBuilder::new(reader.info()?), device)?;
         Ok(Texture2DPartial { image, reader })
@@ -450,7 +450,7 @@ impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let Texture2DPartial { image, mut reader } = self;
@@ -484,7 +484,7 @@ impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn load_texture<'a, A: Allocator>(
         &self,
         allocator: &mut A,

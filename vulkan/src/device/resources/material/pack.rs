@@ -12,7 +12,7 @@ use crate::device::{
         image::{ImageReader, Texture2D, Texture2DPartial},
         PartialBuilder,
     },
-    VulkanDevice,
+    Device,
 };
 
 use super::{TextureSamplers, VulkanMaterial};
@@ -101,7 +101,7 @@ impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     fn prepare_material_pack_textures<'a, M: VulkanMaterial>(
         &self,
         materials: &'a [M],
@@ -231,7 +231,7 @@ impl VulkanDevice {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_material_pack<'a, M: VulkanMaterial, A: Allocator>(
         &self,
         pack: impl Into<&'a mut MaterialPackData<M, A>>,

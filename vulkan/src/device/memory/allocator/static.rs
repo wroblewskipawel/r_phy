@@ -5,7 +5,7 @@ use ash::vk::{self, MemoryRequirements, PhysicalDeviceMemoryProperties};
 use crate::device::{
     memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
     resources::buffer::ByteRange,
-    VulkanDevice,
+    Device,
 };
 
 use super::{AllocReq, AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
@@ -17,7 +17,7 @@ pub struct StaticAllocatorConfig {
 }
 
 impl StaticAllocatorConfig {
-    pub fn create(device: &VulkanDevice) -> Self {
+    pub fn create(device: &Device) -> Self {
         let properties = &device.physical_device.properties.memory;
         Self {
             properties: properties.clone(),
@@ -41,10 +41,7 @@ pub struct StaticAllocator {
 impl AllocatorCreate for StaticAllocator {
     type Config = StaticAllocatorConfig;
 
-    fn create(
-        device: &VulkanDevice,
-        config: &Self::Config,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn create(device: &Device, config: &Self::Config) -> Result<Self, Box<dyn std::error::Error>> {
         let allocations = config
             .allocations
             .iter()
@@ -76,7 +73,7 @@ impl AllocatorCreate for StaticAllocator {
         Ok(StaticAllocator { allocations })
     }
 
-    fn destroy(&mut self, device: &VulkanDevice) {
+    fn destroy(&mut self, device: &Device) {
         self.allocations.drain(0..).for_each(|alloc| {
             if alloc.memory != vk::DeviceMemory::null() {
                 unsafe {
@@ -92,7 +89,7 @@ impl Allocator for StaticAllocator {
 
     fn allocate<M: MemoryProperties>(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         req: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let MemoryRequirements {
@@ -116,7 +113,7 @@ impl Allocator for StaticAllocator {
 
     fn free<M: MemoryProperties>(
         &mut self,
-        _device: &VulkanDevice,
+        _device: &Device,
         _allocation: &mut Self::Allocation<M>,
     ) {
     }

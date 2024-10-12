@@ -21,7 +21,7 @@ use crate::device::{
         AllocReq, AllocReqTyped, Allocator, DefaultAllocator, DeviceLocal, HostCoherent, Memory,
         MemoryProperties,
     },
-    VulkanDevice,
+    Device,
 };
 
 use super::{image::VulkanImage2D, PartialBuilder};
@@ -196,7 +196,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     type Config = BufferBuilder<'a, M>;
     type Target<A: Allocator> = Buffer<M, A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let BufferBuilder {
             info:
                 BufferInfo {
@@ -226,7 +226,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let BufferPartial { size, buffer, req } = self;
@@ -240,7 +240,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_buffer<'a, M: MemoryProperties, A: Allocator>(
         &self,
         buffer: impl Into<&'a mut Buffer<M, A>>,
@@ -279,7 +279,7 @@ impl StagingBufferBuilder {
 pub struct StagingBuffer<'a> {
     range: ByteRange,
     buffer: PersistentBuffer<DefaultAllocator>,
-    device: &'a VulkanDevice,
+    device: &'a Device,
 }
 
 pub struct WritableRange<T: AnyBitPattern> {
@@ -431,7 +431,7 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn create_stagging_buffer(
         &self,
         builder: StagingBufferBuilder,
@@ -478,7 +478,7 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
     type Config = BufferBuilder<'a, HostCoherent>;
     type Target<A: Allocator> = PersistentBuffer<A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let buffer = BufferPartial::prepare(config, device)?;
         Ok(PersistentBufferPartial { buffer })
     }
@@ -489,7 +489,7 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let mut buffer = self.buffer.finalize(device, allocator)?;
@@ -537,7 +537,7 @@ impl<'a, U: AnyBitPattern, O: Operation> PartialBuilder<'a> for UniformBufferPar
     type Config = UniformBufferBuilder<U, O>;
     type Target<A: Allocator> = UniformBuffer<U, O, A>;
 
-    fn prepare(config: Self::Config, device: &VulkanDevice) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
         let info = BufferInfo {
             size: size_of::<U>() * config.len,
             usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -558,7 +558,7 @@ impl<'a, U: AnyBitPattern, O: Operation> PartialBuilder<'a> for UniformBufferPar
 
     fn finalize<A: Allocator>(
         self,
-        device: &VulkanDevice,
+        device: &Device,
         allocator: &mut A,
     ) -> Result<Self::Target<A>, Box<dyn Error>> {
         let len = self.len;

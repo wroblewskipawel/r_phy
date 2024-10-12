@@ -13,7 +13,7 @@ use to_resolve::model::{Mesh, Vertex};
 
 use crate::device::{
     memory::{Allocator, DeviceLocal},
-    VulkanDevice,
+    Device,
 };
 
 use super::buffer::{Buffer, BufferPartial, ByteRange};
@@ -93,7 +93,7 @@ impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLo
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn destroy_mesh_pack<'a, A: Allocator>(
         &self,
         pack: impl Into<&'a mut MeshPackData<A>>,

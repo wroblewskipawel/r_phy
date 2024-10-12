@@ -8,9 +8,9 @@ use std::{
     ops::Deref,
 };
 
-use ash::{vk, Device};
+use ash::{self, vk};
 
-use super::{resources::buffer::ByteRange, VulkanDevice};
+use super::{resources::buffer::ByteRange, Device};
 
 pub use allocator::*;
 
@@ -63,7 +63,7 @@ impl From<vk::Buffer> for Resource {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn bind_memory<T: Into<Resource>, C: Memory>(
         &self,
         resource: T,
@@ -133,8 +133,8 @@ impl<M: MemoryProperties> Deref for MemoryChunk<M> {
 pub trait Memory: 'static + Debug {
     type Properties: MemoryProperties;
     fn chunk(&self) -> MemoryChunk<Self::Properties>;
-    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result>;
-    fn unmap(&mut self, device: &Device);
+    fn map(&mut self, device: &ash::Device, range: ByteRange) -> Result<*mut c_void, vk::Result>;
+    fn unmap(&mut self, device: &ash::Device);
 }
 
 impl<M: MemoryProperties> Memory for MemoryChunk<M> {
@@ -143,7 +143,7 @@ impl<M: MemoryProperties> Memory for MemoryChunk<M> {
         *self
     }
 
-    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
+    fn map(&mut self, device: &ash::Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
         // TODO: Add checks for valid memory properties, consinder panic or returning dedicated result type
         unsafe {
             device.map_memory(
@@ -155,7 +155,7 @@ impl<M: MemoryProperties> Memory for MemoryChunk<M> {
         }
     }
 
-    fn unmap(&mut self, device: &Device) {
+    fn unmap(&mut self, device: &ash::Device) {
         unsafe {
             device.unmap_memory(self.memory);
         }

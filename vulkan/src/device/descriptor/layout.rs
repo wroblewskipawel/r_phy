@@ -8,7 +8,7 @@ use std::{
 
 use ash::vk;
 
-use crate::device::VulkanDevice;
+use crate::device::Device;
 use type_list::{Cons, Nil};
 
 // Check out once_cell and lazy_static crates to improve the implementation
@@ -204,7 +204,7 @@ pub struct DescriptorSetLayout<T: DescriptorLayout> {
     _phantom: PhantomData<T>,
 }
 
-impl VulkanDevice {
+impl Device {
     pub fn get_descriptor_set_layout<T: DescriptorLayout>(
         &self,
     ) -> Result<DescriptorSetLayout<T>, Box<dyn Error>> {

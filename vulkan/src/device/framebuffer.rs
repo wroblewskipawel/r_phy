@@ -4,7 +4,7 @@ use std::{error::Error, marker::PhantomData, usize};
 
 use ash::vk::{self, Extent2D};
 
-use crate::device::{AttachmentProperties, VulkanDevice};
+use crate::device::{AttachmentProperties, Device};
 use type_list::{Cons, Nil};
 
 use super::{
@@ -617,7 +617,7 @@ impl<A: AttachmentList> From<&Framebuffer<A>> for FramebufferHandle<A> {
 
 impl<A: AttachmentList> Copy for FramebufferHandle<A> {}
 
-impl VulkanDevice {
+impl Device {
     pub fn build_framebuffer<C: RenderPassConfig>(
         &self,
         builder: Builder<C::Attachments>,

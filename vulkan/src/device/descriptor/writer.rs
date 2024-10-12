@@ -4,8 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::device::{
-    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer,
-    VulkanDevice,
+    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer, Device,
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};
@@ -141,7 +140,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
     }
 }
 
-impl VulkanDevice {
+impl Device {
     // TODO: sets Vec of incorrect length could be passed here
     fn write_descriptors<T: DescriptorLayout>(
         &self,

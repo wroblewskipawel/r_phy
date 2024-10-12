@@ -12,7 +12,7 @@ use std::{
 
 use ash::vk;
 
-use crate::device::{framebuffer::AttachmentList, AttachmentProperties, VulkanDevice};
+use crate::device::{framebuffer::AttachmentList, AttachmentProperties, Device};
 use type_list::{Cons, TypedNil};
 
 use super::framebuffer::{
@@ -475,7 +475,7 @@ impl<C: RenderPassConfig> Clone for RenderPass<C> {
 
 impl<C: RenderPassConfig> Copy for RenderPass<C> {}
 
-impl VulkanDevice {
+impl Device {
     fn create_render_pass_raw<C: RenderPassConfig>(
         &self,
     ) -> Result<vk::RenderPass, Box<dyn Error>> {

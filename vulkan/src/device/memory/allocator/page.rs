@@ -7,13 +7,13 @@ use std::{
     rc::Rc,
 };
 
-use ash::{vk, Device};
+use ash::{self, vk};
 use to_resolve::vulkan::VulkanRendererConfig;
 
 use crate::device::{
     memory::{Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
     resources::buffer::ByteRange,
-    VulkanDevice,
+    Device,
 };
 
 use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
@@ -40,14 +40,14 @@ impl<M: MemoryProperties> Memory for PageChunk<M> {
         self.chunk
     }
 
-    fn map(&mut self, device: &Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
+    fn map(&mut self, device: &ash::Device, range: ByteRange) -> Result<*mut c_void, vk::Result> {
         if self.ptr.is_none() {
             self.ptr = Some(self.page.borrow_mut().map_page(device)?);
         }
         Ok(unsafe { self.ptr.unwrap().byte_add(self.chunk.range.beg + range.beg) })
     }
 
-    fn unmap(&mut self, device: &Device) {
+    fn unmap(&mut self, device: &ash::Device) {
         if self.ptr.is_some() {
             self.page.borrow_mut().unmap_page(device);
             self.ptr = None;
@@ -91,7 +91,7 @@ impl Page {
         }
     }
 
-    pub fn map_page(&mut self, device: &Device) -> Result<*mut c_void, vk::Result> {
+    pub fn map_page(&mut self, device: &ash::Device) -> Result<*mut c_void, vk::Result> {
         if self.ptr.is_none() {
             self.ptr = Some(unsafe {
                 device.map_memory(self.memory, 0, self.alloc_size, vk::MemoryMapFlags::empty())?
@@ -101,7 +101,7 @@ impl Page {
         Ok(self.ptr.unwrap())
     }
 
-    pub fn unmap_page(&mut self, device: &Device) {
+    pub fn unmap_page(&mut self, device: &ash::Device) {
         if let Some(mapped_chunks) = self.mapped_chunks.checked_sub(1) {
             self.mapped_chunks = mapped_chunks;
             if self.mapped_chunks == 0 {
@@ -123,7 +123,7 @@ struct PageType {
 impl PageType {
     pub fn allocate_page(
         &mut self,
-        device: &Device,
+        device: &ash::Device,
         page_size: vk::DeviceSize,
     ) -> Result<Rc<RefCell<Page>>, DeviceAllocError> {
         self.pages.push(Rc::new(RefCell::new(Page {
@@ -168,7 +168,7 @@ pub struct PageAllocator {
 impl AllocatorCreate for PageAllocator {
     type Config = PageAllocatorConfig;
 
-    fn create(device: &VulkanDevice, config: &Self::Config) -> Result<Self, Box<dyn Error>> {
+    fn create(device: &Device, config: &Self::Config) -> Result<Self, Box<dyn Error>> {
         let properties = &device.physical_device.properties;
         let memory_types = (0..properties.memory.memory_types.len() as u32)
             .map(|index| PageType {
@@ -182,7 +182,7 @@ impl AllocatorCreate for PageAllocator {
         })
     }
 
-    fn destroy(&mut self, device: &VulkanDevice) {
+    fn destroy(&mut self, device: &Device) {
         self.memory_types.drain(0..).for_each(|mut memory_type| {
             memory_type.pages.drain(0..).for_each(|page| unsafe {
                 device.free_memory(page.borrow_mut().memory, None);
@@ -196,7 +196,7 @@ impl Allocator for PageAllocator {
 
     fn allocate<M: MemoryProperties>(
         &mut self,
-        device: &VulkanDevice,
+        device: &Device,
         request: AllocReqTyped<M>,
     ) -> Result<Self::Allocation<M>, DeviceAllocError> {
         let memory_type_index = request
@@ -222,7 +222,7 @@ impl Allocator for PageAllocator {
 
     fn free<M: MemoryProperties>(
         &mut self,
-        _device: &VulkanDevice,
+        _device: &Device,
         _allocation: &mut Self::Allocation<M>,
     ) {
     }
