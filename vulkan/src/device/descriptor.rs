@@ -43,11 +43,19 @@ impl<'a, T: DescriptorLayout> From<&'a mut DescriptorPool<T>> for &'a mut Descri
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Descriptor<T: DescriptorLayout> {
     set: vk::DescriptorSet,
     _phantom: PhantomData<T>,
 }
+
+impl<T: DescriptorLayout> Clone for Descriptor<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: DescriptorLayout> Copy for Descriptor<T> {}
 
 impl<T: DescriptorLayout> From<Descriptor<T>> for vk::DescriptorSet {
     fn from(descriptor: Descriptor<T>) -> Self {
