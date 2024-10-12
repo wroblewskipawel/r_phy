@@ -33,7 +33,7 @@ use crate::{
             DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
         },
         resources::{image::VulkanImage2D, MaterialPackList, MeshPack, MeshPackList, Skybox},
-        swapchain::VulkanSwapchain,
+        swapchain::Swapchain,
         Device,
     },
     Context,
@@ -89,7 +89,7 @@ struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
 
 struct DeferredRendererFrameData<A: Allocator> {
     g_buffer: GBuffer<A>,
-    swapchain: VulkanSwapchain<AttachmentsGBuffer>,
+    swapchain: Swapchain<AttachmentsGBuffer>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
 }
 

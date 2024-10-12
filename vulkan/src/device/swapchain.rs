@@ -1,7 +1,4 @@
-use ash::{
-    extensions::khr::Swapchain,
-    vk::{self, Extent2D, SurfaceFormatKHR},
-};
+use ash::{extensions::khr, vk};
 use std::{error::Error, ffi::CStr};
 
 use crate::{surface::PhysicalDeviceSurfaceProperties, Context};
@@ -31,21 +28,21 @@ struct SwapchainImage {
     view: vk::ImageView,
 }
 
-pub struct VulkanSwapchain<A: AttachmentList> {
+pub struct Swapchain<A: AttachmentList> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
     pub framebuffers: Vec<Framebuffer<A>>,
     images: Vec<SwapchainImage>,
     handle: vk::SwapchainKHR,
-    loader: Swapchain,
+    loader: khr::Swapchain,
 }
 
 pub const fn required_extensions() -> &'static [&'static CStr; 1] {
-    const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[Swapchain::name()];
+    const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[khr::Swapchain::name()];
     REQUIRED_DEVICE_EXTENSIONS
 }
 
-impl<A: AttachmentList> VulkanSwapchain<A> {
+impl<A: AttachmentList> Swapchain<A> {
     pub fn get_frame(
         &self,
         image_sync: SwapchainImageSync,
@@ -75,7 +72,7 @@ impl<A: AttachmentList> VulkanSwapchain<A> {
 impl Device {
     pub fn present_frame<A: AttachmentList>(
         &self,
-        swapchain: &VulkanSwapchain<A>,
+        swapchain: &Swapchain<A>,
         command: FinishedCommand<Persistent, Primary, Graphics>,
         frame: SwapchainFrame<A>,
     ) -> Result<(), Box<dyn Error>> {
@@ -112,7 +109,7 @@ impl Device {
 impl Context {
     pub fn create_swapchain_image_sync<A: AttachmentList>(
         &self,
-        swapchain: &VulkanSwapchain<A>,
+        swapchain: &Swapchain<A>,
     ) -> Result<Vec<SwapchainImageSync>, Box<dyn Error>> {
         unsafe {
             swapchain
@@ -142,8 +139,11 @@ impl Context {
 
     pub fn create_swapchain<A: AttachmentList>(
         &self,
-        framebuffer_builder: impl Fn(vk::ImageView, Extent2D) -> Result<Framebuffer<A>, Box<dyn Error>>,
-    ) -> Result<VulkanSwapchain<A>, Box<dyn Error>> {
+        framebuffer_builder: impl Fn(
+            vk::ImageView,
+            vk::Extent2D,
+        ) -> Result<Framebuffer<A>, Box<dyn Error>>,
+    ) -> Result<Swapchain<A>, Box<dyn Error>> {
         let PhysicalDeviceSurfaceProperties {
             capabilities:
                 vk::SurfaceCapabilitiesKHR {
@@ -171,7 +171,7 @@ impl Context {
             .clipped(true)
             .image_array_layers(1)
             .surface((&self.surface).into());
-        let loader = Swapchain::new(&self.instance, &self.device);
+        let loader = khr::Swapchain::new(&self.instance, &self.device);
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let images = unsafe {
             loader
@@ -184,7 +184,7 @@ impl Context {
             .iter()
             .map(|image| framebuffer_builder(image.view, image_extent))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(VulkanSwapchain {
+        Ok(Swapchain {
             num_images: images.len(),
             extent: image_extent,
             images,
@@ -197,7 +197,7 @@ impl Context {
     fn create_swapchain_image(
         &self,
         image: vk::Image,
-        surface_format: SurfaceFormatKHR,
+        surface_format: vk::SurfaceFormatKHR,
     ) -> Result<SwapchainImage, Box<dyn Error>> {
         unsafe {
             let view = self.device.create_image_view(
@@ -223,7 +223,7 @@ impl Context {
         }
     }
 
-    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut VulkanSwapchain<A>) {
+    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut Swapchain<A>) {
         swapchain.framebuffers.iter_mut().for_each(|framebuffer| {
             self.destroy_framebuffer(framebuffer);
         });

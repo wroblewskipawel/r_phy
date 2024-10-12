@@ -30,7 +30,7 @@ use super::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
         MaterialPackList, MeshPackList, PartialBuilder,
     },
-    swapchain::{SwapchainFrame, SwapchainImageSync, VulkanSwapchain},
+    swapchain::{Swapchain, SwapchainFrame, SwapchainImageSync},
     Device,
 };
 
@@ -122,7 +122,7 @@ impl Context {
 
     pub fn create_frame_pool<F: FrameContext>(
         &self,
-        swapchain: &VulkanSwapchain<F::Attachments>,
+        swapchain: &Swapchain<F::Attachments>,
     ) -> Result<FramePool<F>, Box<dyn Error>> {
         let image_sync = self.create_swapchain_image_sync(swapchain)?;
         let primary_commands = self.create_persistent_command_pool(swapchain.num_images)?;
