@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::device::{
     descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
-    resources::VulkanMaterial,
+    resources::Material,
 };
 use math::types::{Matrix3, Matrix4};
 use to_resolve::camera::CameraMatrices;
@@ -65,7 +65,7 @@ impl PushConstant for CameraMatrices {
 }
 
 pub type PipelineLayoutMaterial<M> = PipelineLayoutBuilder<
-    Cons<<M as VulkanMaterial>::DescriptorLayout, Cons<CameraDescriptorSet, Nil>>,
+    Cons<<M as Material>::DescriptorLayout, Cons<CameraDescriptorSet, Nil>>,
     Cons<ModelNormalMatrix, Nil>,
 >;
 

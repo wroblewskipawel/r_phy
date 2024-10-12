@@ -7,7 +7,7 @@ pub use list::*;
 pub use pack::*;
 
 use ash::vk;
-use to_resolve::model::Material;
+use to_resolve::model::Material as MaterialBase;
 use type_list::{Cons, Nil};
 
 use crate::device::descriptor::{
@@ -51,11 +51,11 @@ impl<T: Material> DescriptorBinding for TextureSamplers<T> {
     }
 }
 
-pub trait VulkanMaterial: Material {
+pub trait Material: MaterialBase {
     type DescriptorLayout: DescriptorLayout;
 }
 
-impl<T: Material> VulkanMaterial for T {
+impl<T: MaterialBase> Material for T {
     type DescriptorLayout = DescriptorLayoutBuilder<
         Cons<PodUniform<T::Uniform, FragmentStage>, Cons<TextureSamplers<T>, Nil>>,
     >;

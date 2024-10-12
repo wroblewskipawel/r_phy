@@ -7,7 +7,7 @@ use crate::device::{
 use to_resolve::model::{MaterialCollection, MaterialTypeList};
 use type_list::{Cons, Nil, TypeList, TypedNil};
 
-use super::{MaterialPack, MaterialPackPartial, MaterialPackRef, VulkanMaterial};
+use super::{Material, MaterialPack, MaterialPackPartial, MaterialPackRef};
 
 pub trait MaterialPackListBuilder: MaterialTypeList {
     type Pack<A: Allocator>: MaterialPackList<A>;
@@ -29,7 +29,7 @@ impl MaterialPackListBuilder for Nil {
     }
 }
 
-impl<M: VulkanMaterial, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
+impl<M: Material, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
     type Pack<A: Allocator> = Cons<Option<MaterialPack<M, A>>, N::Pack<A>>;
 
     fn prepare<A: Allocator>(
@@ -77,7 +77,7 @@ impl MaterialPackListPartial for Nil {
     }
 }
 
-impl<'a, M: VulkanMaterial, N: MaterialPackListPartial> MaterialPackListPartial
+impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
     for Cons<Option<MaterialPackPartial<'a, M>>, N>
 {
     type Pack<A: Allocator> = Cons<Option<MaterialPack<M, A>>, N::Pack<A>>;
@@ -111,17 +111,17 @@ impl<'a, M: VulkanMaterial, N: MaterialPackListPartial> MaterialPackListPartial
 pub trait MaterialPackList<A: Allocator>: TypeList {
     fn destroy(&mut self, device: &Device, allocator: &mut A);
 
-    fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>>;
+    fn try_get<M: Material>(&self) -> Option<MaterialPackRef<M>>;
 }
 
 impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
     fn destroy(&mut self, _device: &Device, _allocator: &mut A) {}
-    fn try_get<M: VulkanMaterial>(&self) -> Option<MaterialPackRef<M>> {
+    fn try_get<M: Material>(&self) -> Option<MaterialPackRef<M>> {
         None
     }
 }
 
-impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialPackList<A>
+impl<A: Allocator, M: Material, N: MaterialPackList<A>> MaterialPackList<A>
     for Cons<Option<MaterialPack<M, A>>, N>
 {
     fn destroy(&mut self, device: &Device, allocator: &mut A) {
@@ -131,7 +131,7 @@ impl<A: Allocator, M: VulkanMaterial, N: MaterialPackList<A>> MaterialPackList<A
         self.tail.destroy(device, allocator);
     }
 
-    fn try_get<T: VulkanMaterial>(&self) -> Option<MaterialPackRef<T>> {
+    fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
         self.head
             .as_ref()
             .and_then(|pack| pack.try_into().ok())

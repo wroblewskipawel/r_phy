@@ -15,26 +15,26 @@ use crate::device::{
     Device,
 };
 
-use super::{TextureSamplers, VulkanMaterial};
+use super::{Material, TextureSamplers};
 
-struct MaterialUniformPartial<'a, M: VulkanMaterial> {
+struct MaterialUniformPartial<'a, M: Material> {
     uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,
     data: Vec<&'a M::Uniform>,
 }
 
-pub struct MaterialPackData<M: VulkanMaterial, A: Allocator> {
+pub struct MaterialPackData<M: Material, A: Allocator> {
     textures: Option<Vec<Texture2D<A>>>,
     uniforms: Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
     descriptors: DescriptorPool<M::DescriptorLayout>,
 }
 
-pub struct MaterialPackPartial<'a, M: VulkanMaterial> {
+pub struct MaterialPackPartial<'a, M: Material> {
     textures: Option<Vec<Texture2DPartial<'a>>>,
     uniforms: Option<MaterialUniformPartial<'a, M>>,
     num_materials: usize,
 }
 
-impl<'a, M: VulkanMaterial> MaterialPackPartial<'a, M> {
+impl<'a, M: Material> MaterialPackPartial<'a, M> {
     pub fn get_alloc_req(&self) -> impl Iterator<Item = AllocReq> {
         let mut alloc_reqs: Vec<AllocReq> = if let Some(buffer) = &self.uniforms {
             buffer.uniform.requirements().collect()
@@ -53,19 +53,17 @@ impl<'a, M: VulkanMaterial> MaterialPackPartial<'a, M> {
     }
 }
 
-pub struct MaterialPack<M: VulkanMaterial, A: Allocator> {
+pub struct MaterialPack<M: Material, A: Allocator> {
     data: MaterialPackData<M, A>,
 }
 
-impl<'a, M: VulkanMaterial, A: Allocator> From<&'a MaterialPack<M, A>>
-    for &'a MaterialPackData<M, A>
-{
+impl<'a, M: Material, A: Allocator> From<&'a MaterialPack<M, A>> for &'a MaterialPackData<M, A> {
     fn from(pack: &'a MaterialPack<M, A>) -> Self {
         &pack.data
     }
 }
 
-impl<'a, M: VulkanMaterial, A: Allocator> From<&'a mut MaterialPack<M, A>>
+impl<'a, M: Material, A: Allocator> From<&'a mut MaterialPack<M, A>>
     for &'a mut MaterialPackData<M, A>
 {
     fn from(pack: &'a mut MaterialPack<M, A>) -> Self {
@@ -73,12 +71,12 @@ impl<'a, M: VulkanMaterial, A: Allocator> From<&'a mut MaterialPack<M, A>>
     }
 }
 
-pub struct MaterialPackRef<'a, M: VulkanMaterial> {
+pub struct MaterialPackRef<'a, M: Material> {
     descriptors: DescriptorPoolRef<'a, M::DescriptorLayout>,
     _phantom: PhantomData<M>,
 }
 
-impl<'a, A: Allocator, M: VulkanMaterial, T: VulkanMaterial> TryFrom<&'a MaterialPack<M, A>>
+impl<'a, A: Allocator, M: Material, T: Material> TryFrom<&'a MaterialPack<M, A>>
     for MaterialPackRef<'a, T>
 {
     type Error = &'static str;
@@ -95,14 +93,14 @@ impl<'a, A: Allocator, M: VulkanMaterial, T: VulkanMaterial> TryFrom<&'a Materia
     }
 }
 
-impl<'a, M: VulkanMaterial> MaterialPackRef<'a, M> {
+impl<'a, M: Material> MaterialPackRef<'a, M> {
     pub fn get_descriptor(&self, index: usize) -> Descriptor<M::DescriptorLayout> {
         self.descriptors.get(index)
     }
 }
 
 impl Device {
-    fn prepare_material_pack_textures<'a, M: VulkanMaterial>(
+    fn prepare_material_pack_textures<'a, M: Material>(
         &self,
         materials: &'a [M],
     ) -> Result<Option<Vec<Texture2DPartial<'a>>>, Box<dyn Error>> {
@@ -136,7 +134,7 @@ impl Device {
             .collect()
     }
 
-    fn prepare_material_pack_uniforms<'a, M: VulkanMaterial>(
+    fn prepare_material_pack_uniforms<'a, M: Material>(
         &self,
         materials: &'a [M],
     ) -> Result<Option<MaterialUniformPartial<'a, M>>, Box<dyn Error>> {
@@ -153,7 +151,7 @@ impl Device {
         }
     }
 
-    fn allocate_material_pack_uniforms_memory<'a, M: VulkanMaterial, A: Allocator>(
+    fn allocate_material_pack_uniforms_memory<'a, M: Material, A: Allocator>(
         &self,
         allocator: &mut A,
         partial: MaterialUniformPartial<'a, M>,
@@ -167,7 +165,7 @@ impl Device {
         Ok(uniform_buffer)
     }
 
-    pub fn prepare_material_pack<'a, M: VulkanMaterial>(
+    pub fn prepare_material_pack<'a, M: Material>(
         &self,
         materials: &'a [M],
     ) -> Result<MaterialPackPartial<'a, M>, Box<dyn Error>> {
@@ -180,7 +178,7 @@ impl Device {
         })
     }
 
-    pub fn allocate_material_pack_memory<'a, M: VulkanMaterial, A: Allocator>(
+    pub fn allocate_material_pack_memory<'a, M: Material, A: Allocator>(
         &self,
         allocator: &mut A,
         partial: MaterialPackPartial<'a, M>,
@@ -220,7 +218,7 @@ impl Device {
         Ok(MaterialPack { data })
     }
 
-    pub fn load_material_pack<M: VulkanMaterial, A: Allocator>(
+    pub fn load_material_pack<M: Material, A: Allocator>(
         &self,
         allocator: &mut A,
         materials: &[M],
@@ -232,7 +230,7 @@ impl Device {
 }
 
 impl Device {
-    pub fn destroy_material_pack<'a, M: VulkanMaterial, A: Allocator>(
+    pub fn destroy_material_pack<'a, M: Material, A: Allocator>(
         &self,
         pack: impl Into<&'a mut MaterialPackData<M, A>>,
         allocator: &mut A,
