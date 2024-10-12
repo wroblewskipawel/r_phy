@@ -1,9 +1,11 @@
+#![allow(unused)]
+
 use std::{
     error::Error,
-    ffi::{c_void, CStr},
+    ffi::{c_char, c_void, CStr},
 };
 
-use ash::{extensions::ext::DebugUtils, vk, Entry, Instance};
+use ash::{extensions::ext, vk, Entry, Instance};
 use colored::{self, Colorize};
 
 unsafe extern "system" fn debug_messenger_callback(
@@ -35,12 +37,12 @@ unsafe extern "system" fn debug_messenger_callback(
     vk::FALSE
 }
 
-pub(super) struct VulkanDebugUtils {
+pub(super) struct DebugUtils {
     messenger: vk::DebugUtilsMessengerEXT,
-    loader: DebugUtils,
+    loader: ext::DebugUtils,
 }
 
-impl VulkanDebugUtils {
+impl DebugUtils {
     pub fn create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
         vk::DebugUtilsMessengerCreateInfoEXT {
             message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
@@ -54,26 +56,47 @@ impl VulkanDebugUtils {
         }
     }
 
-    pub fn required_layers() -> &'static [&'static CStr; 1] {
-        const REQUIRED_LAYERS: &[&CStr; 1] =
-            &[unsafe { &CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
-        REQUIRED_LAYERS
+    pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
+        const REQUIRED_EXTENSIONS: [&CStr; 1] = [ext::DebugUtils::name()];
+        REQUIRED_EXTENSIONS.into_iter()
     }
 
-    pub fn required_extensions() -> &'static [&'static CStr; 1] {
-        const REQUIRED_EXTENSIONS: &[&CStr; 1] = &[DebugUtils::name()];
-        REQUIRED_EXTENSIONS
+    fn iterate_required_layers() -> impl Iterator<Item = &'static CStr> {
+        const REQUIRED_LAYERS: [&CStr; 1] =
+            [unsafe { &CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
+        REQUIRED_LAYERS.into_iter()
     }
 
-    pub fn build(entry: &Entry, instance: &Instance) -> Result<VulkanDebugUtils, Box<dyn Error>> {
-        let loader = DebugUtils::new(entry, instance);
+    pub fn check_required_layer_support(
+        entry: &Entry,
+    ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
+        let supported_layers = entry.enumerate_instance_layer_properties()?;
+        let supported =
+            Self::iterate_required_layers().try_fold(Vec::new(), |mut supported, req| {
+                supported_layers
+                    .iter()
+                    .any(|sup| unsafe { CStr::from_ptr(&sup.layer_name as *const _) } == req)
+                    .then(|| {
+                        supported.push(req.as_ptr());
+                        supported
+                    })
+                    .ok_or(format!(
+                        "Required layer {} not supported!",
+                        req.to_string_lossy()
+                    ))
+            })?;
+        Ok(supported)
+    }
+
+    pub fn build(entry: &Entry, instance: &Instance) -> Result<DebugUtils, Box<dyn Error>> {
+        let loader = ext::DebugUtils::new(entry, instance);
         let messenger = unsafe { loader.create_debug_utils_messenger(&Self::create_info(), None)? };
         Ok(Self { messenger, loader })
     }
 }
 
-impl Drop for VulkanDebugUtils {
-    fn drop(&mut self) {
+impl DebugUtils {
+    pub fn destroy(&mut self) {
         unsafe {
             self.loader
                 .destroy_debug_utils_messenger(self.messenger, None);

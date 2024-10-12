@@ -58,13 +58,13 @@ fn create_platform_surface(
 
 impl VulkanSurface {
     #[cfg(target_os = "windows")]
-    pub fn required_extensions() -> &'static [&'static CStr; 2] {
-        const REQUIRED_EXTENSIONS: &[&CStr; 2] = &[Win32Surface::name(), Surface::name()];
-        REQUIRED_EXTENSIONS
+    pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
+        const REQUIRED_EXTENSIONS: [&CStr; 2] = [Win32Surface::name(), Surface::name()];
+        REQUIRED_EXTENSIONS.into_iter()
     }
 
     #[cfg(not(target_os = "windows"))]
-    pub fn required_extensions() -> &'static [&'static CStr; 2] {
+    pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
         compile_error!("Current platform not supported!");
     }
 
