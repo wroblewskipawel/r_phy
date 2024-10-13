@@ -1,4 +1,4 @@
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, StartCause, WindowEvent},
@@ -249,7 +249,7 @@ pub trait DrawableCollection: DrawableTypeList {
 impl DrawableCollection for Nil {
     type DrawCommands = Self;
     fn update(&mut self, _elapsed_time: f32) -> Self::DrawCommands {
-        Self {}
+        Nil::new()
     }
 }
 
@@ -324,7 +324,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
     ) -> Result<Scene<Nil, B>, Box<dyn Error>> {
         Ok(Scene {
             builder,
-            objects: Nil {},
+            objects: Nil::new(),
         })
     }
 

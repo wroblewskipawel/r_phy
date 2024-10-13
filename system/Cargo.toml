@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-type_list = { path = "../type_list" }
+type_kit= { path = "../type_kit" }
 math = { path = "../math" }
 winit = { workspace = true }
 input = { path = "../input" }

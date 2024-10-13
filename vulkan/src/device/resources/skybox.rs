@@ -10,7 +10,7 @@ use crate::device::{
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
     Device,
 };
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use super::{
     image::{ImageReader, Texture2D},

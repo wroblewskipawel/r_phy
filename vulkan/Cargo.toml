@@ -9,7 +9,7 @@ winit = { workspace = true }
 colored = { workspace = true }
 bytemuck = { workspace = true }
 math = { path = "../math" }
-type_list = { path = "../type_list" }
+type_kit= { path = "../type_kit" }
 strum = { version = "0.26.1", features = ["derive"] }
 png = "0.17.13"
 to_resolve = {path = "../to_resolve" }

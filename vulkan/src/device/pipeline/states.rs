@@ -14,7 +14,7 @@ use crate::device::{
     AttachmentProperties, PhysicalDevice, PhysicalDeviceProperties,
 };
 use to_resolve::model::{Vertex, VertexNone};
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 pub struct VertexInputInfo {
     _bindings: Vec<vk::VertexInputBindingDescription>,

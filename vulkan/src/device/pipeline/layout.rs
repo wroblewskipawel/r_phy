@@ -16,7 +16,7 @@ use crate::device::{
     descriptor::{DescriptorBinding, DescriptorLayout},
     Device,
 };
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 // TODO: Create macro to avoid code repetition
 fn get_pipeline_layout_map() -> &'static RwLock<HashMap<std::any::TypeId, vk::PipelineLayout>> {

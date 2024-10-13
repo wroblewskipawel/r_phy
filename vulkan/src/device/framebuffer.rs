@@ -5,7 +5,7 @@ use std::{error::Error, marker::PhantomData, usize};
 use ash::vk::{self, Extent2D};
 
 use crate::device::{AttachmentProperties, Device};
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use super::{
     memory::{Allocator, DeviceLocal},
@@ -120,7 +120,7 @@ impl Default for ClearValueBuilder<Nil> {
 impl ClearValueBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            clear_values: Nil {},
+            clear_values: Nil::new(),
         }
     }
 }
@@ -259,7 +259,9 @@ impl Default for AttachmentReferenceBuilder<Nil> {
 
 impl AttachmentReferenceBuilder<Nil> {
     pub fn new() -> Self {
-        Self { references: Nil {} }
+        Self {
+            references: Nil::new(),
+        }
     }
 }
 
@@ -397,7 +399,7 @@ impl Default for AttachmentTransitionBuilder<Nil> {
 impl AttachmentTransitionBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            transitions: Nil {},
+            transitions: Nil::new(),
         }
     }
 }
@@ -551,7 +553,7 @@ impl Default for AttachmentsBuilder<Nil> {
 impl AttachmentsBuilder<Nil> {
     pub fn new() -> Self {
         Self {
-            attachments: Nil {},
+            attachments: Nil::new(),
         }
     }
 }

@@ -7,16 +7,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'type_list'",
+            "name": "Debug unit tests in library 'type_kit'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=type_list"
+                    "--package=type_kit"
                 ],
                 "filter": {
-                    "name": "type_list",
+                    "name": "type_kit",
                     "kind": "lib"
                 }
             },

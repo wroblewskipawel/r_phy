@@ -9,7 +9,7 @@ use std::{
 use ash::vk;
 
 use crate::device::Device;
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 // Check out once_cell and lazy_static crates to improve the implementation
 fn get_descriptor_set_layout_map(

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 math = { path = "../math" }
 bytemuck = { workspace = true }
-type_list = { path = "../type_list" }
+type_kit= { path = "../type_kit" }
 physics = { path = "../physics" }
 ash = { workspace = true }
 gltf = "1.4.0"

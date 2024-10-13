@@ -3,7 +3,7 @@ pub mod vulkan;
 
 use math::types::Matrix4;
 use std::error::Error;
-use type_list::Nil;
+use type_kit::Nil;
 use winit::window::Window;
 
 use to_resolve::{
@@ -50,7 +50,7 @@ impl ContextBuilder for Nil {
     type Context = Nil;
 
     fn build(self, _renderer: &Self::Renderer) -> Result<Self::Context, Box<dyn Error>> {
-        Ok(Nil {})
+        Ok(Nil::new())
     }
 }
 

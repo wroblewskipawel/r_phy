@@ -1,5 +1,5 @@
 use math::types::Matrix4;
-use type_list::{Cons, Contains, Marker, Nil};
+use type_kit::{Cons, Contains, Marker, Nil};
 use vulkan::device::memory::DefaultAllocator;
 use vulkan::device::renderer::deferred::DeferredRenderer;
 use vulkan::device::resources::{
@@ -244,9 +244,9 @@ impl Default
 impl VulkanContextBuilder<Rc<RefCell<DeferredRenderer<DefaultAllocator>>>, Nil, Nil, Nil> {
     pub fn new() -> Self {
         VulkanContextBuilder {
-            shaders: Nil {},
-            materials: Nil {},
-            meshes: Nil {},
+            shaders: Nil::new(),
+            materials: Nil::new(),
+            meshes: Nil::new(),
             _phantom: PhantomData,
         }
     }

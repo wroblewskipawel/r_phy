@@ -7,7 +7,7 @@ use crate::device::{
     resources::buffer::ByteRange,
     Device,
 };
-use type_list::Nil;
+use type_kit::Nil;
 
 use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
 

@@ -8,7 +8,7 @@ pub use pack::*;
 
 use ash::vk;
 use to_resolve::model::Material as MaterialBase;
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use crate::device::descriptor::{
     DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder, FragmentStage, PodUniform,

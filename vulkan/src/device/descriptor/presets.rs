@@ -5,7 +5,7 @@ use bytemuck::{AnyBitPattern, Zeroable};
 
 use crate::device::{framebuffer::InputAttachment, memory::Allocator, resources::image::Texture2D};
 use to_resolve::camera::CameraMatrices;
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use super::{DescriptorBinding, DescriptorLayoutBuilder};
 

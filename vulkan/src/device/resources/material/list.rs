@@ -5,7 +5,7 @@ use crate::device::{
     Device,
 };
 use to_resolve::model::{MaterialCollection, MaterialTypeList};
-use type_list::{Cons, Nil, TypeList, TypedNil};
+use type_kit::{Cons, Nil, TypeList, TypedNil};
 
 use super::{Material, MaterialPack, MaterialPackPartial, MaterialPackRef};
 
@@ -25,7 +25,7 @@ impl MaterialPackListBuilder for Nil {
         &self,
         _device: &Device,
     ) -> Result<impl MaterialPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
-        Ok(Nil {})
+        Ok(Nil::new())
     }
 }
 

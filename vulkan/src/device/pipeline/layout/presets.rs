@@ -9,7 +9,7 @@ use crate::device::{
 };
 use math::types::{Matrix3, Matrix4};
 use to_resolve::camera::CameraMatrices;
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use super::{PipelineLayoutBuilder, PushConstant};
 

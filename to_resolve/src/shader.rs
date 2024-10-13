@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::model::{EmptyMaterial, Material, Vertex, VertexNone};
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 pub trait ShaderType: 'static {
     type Vertex: Vertex;

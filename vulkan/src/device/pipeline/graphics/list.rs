@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::device::{pipeline::ModuleLoader, Device};
 use to_resolve::shader::ShaderType;
-use type_list::{Cons, Nil, TypeList};
+use type_kit::{Cons, Nil, TypeList};
 
 use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut};
 
@@ -24,7 +24,7 @@ impl GraphicsPipelineListBuilder for Nil {
     type Pack = Nil;
 
     fn build(&self, _device: &Device) -> Result<Self::Pack, Box<dyn Error>> {
-        Ok(Nil {})
+        Ok(Nil::new())
     }
 }
 

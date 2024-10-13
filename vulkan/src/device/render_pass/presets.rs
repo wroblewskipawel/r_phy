@@ -4,7 +4,7 @@ use crate::device::framebuffer::{
     presets::AttachmentsGBuffer, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
     AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, References, Transitions,
 };
-use type_list::Nil;
+use type_kit::Nil;
 
 use super::{Cons, RenderPassBuilder, Subpass, TransitionList, TypedNil};
 

@@ -1,14 +1,15 @@
 [workspace]
 resolver = "2"
 members = [ 
-    "type_list",
+    "type_kit",
     "math",
     "system",
     "graphics",
     "input",
     "sandbox",
     "physics",
-    "vulkan", "to_resolve", 
+    "vulkan",
+    "to_resolve", 
 ]
 
 [workspace.dependencies]

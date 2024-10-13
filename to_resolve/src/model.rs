@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 pub use material::*;
 pub use mesh::*;
-use type_list::Nil;
+use type_kit::Nil;
 
 pub trait DrawableType: 'static {
     type Vertex: Vertex;

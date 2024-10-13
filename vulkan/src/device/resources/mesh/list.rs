@@ -6,8 +6,8 @@ use crate::device::{
     Device,
 };
 use to_resolve::model::{Mesh, MeshTypeList, Vertex};
-use type_list::{Cons, Nil, TypedNil};
-use type_list::{Contains, TypeList};
+use type_kit::TypeList;
+use type_kit::{Cons, Nil, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
@@ -59,7 +59,7 @@ impl MeshPackListBuilder for Nil {
         &self,
         _device: &Device,
     ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
-        Ok(Nil {})
+        Ok(Nil::new())
     }
 }
 

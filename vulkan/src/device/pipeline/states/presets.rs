@@ -2,7 +2,7 @@ use ash::vk;
 
 use crate::device::{AttachmentProperties, PhysicalDeviceProperties};
 use to_resolve::model::CommonVertex;
-use type_list::{Cons, Nil};
+use type_kit::{Cons, Nil};
 
 use super::{
     Blend, ColorBlendBuilder, DepthStencil, Multisample, PipelineStatesBuilder, Rasterization,

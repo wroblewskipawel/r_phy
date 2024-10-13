@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use math::types::{Vector2, Vector3, Vector4};
 use physics::shape;
-use type_list::{Cons, Nil, TypedNil};
+use type_kit::{Cons, Nil, TypedNil};
 
 pub struct Component {
     pub size: usize,
@@ -347,12 +347,6 @@ pub trait MeshCollection: MeshTypeList {
     fn next(&self) -> &Self::Next;
 }
 
-impl MeshTypeList for Nil {
-    const LEN: usize = 0;
-    type Vertex = VertexNone;
-    type Next = Self;
-}
-
 impl<T: 'static> MeshTypeList for TypedNil<T> {
     const LEN: usize = 0;
     type Vertex = VertexNone;
@@ -396,7 +390,7 @@ impl Default for Meshes<Nil> {
 
 impl Meshes<Nil> {
     pub fn new() -> Self {
-        Self { list: Nil {} }
+        Self { list: Nil::new() }
     }
 }
 

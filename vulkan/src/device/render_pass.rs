@@ -13,7 +13,7 @@ use std::{
 use ash::vk;
 
 use crate::device::{framebuffer::AttachmentList, AttachmentProperties, Device};
-use type_list::{Cons, TypedNil};
+use type_kit::{Cons, TypedNil};
 
 use super::framebuffer::{
     AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,
