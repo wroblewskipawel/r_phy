@@ -1,9 +1,12 @@
+use std::any::type_name;
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
+use std::ops::{Deref, DerefMut};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_types::{A, B};
 
     #[test]
     fn test_push_and_get() {
@@ -126,6 +129,47 @@ mod tests {
         // The new index should reuse the old index1 position
         assert_eq!(index3.index, index1.index);
         assert_eq!(collection.get(index3).unwrap(), &"Item 3");
+    }
+
+    #[test]
+    fn test_guard_collection_entry_valid_index() {
+        let mut collection = GuardCollection::<u32>::default();
+        let index_a = collection.push(A(42).into_guard()).unwrap();
+        let index_b = collection.push(B(31).into_guard()).unwrap();
+
+        let entry: ScopedEntry<'_, A> = collection.entry(index_a).unwrap();
+        assert_eq!(entry.0, 42);
+        let entry: ScopedEntry<'_, B> = collection.entry(index_b).unwrap();
+        assert_eq!(entry.0, 31);
+    }
+
+    #[test]
+    fn test_guard_collection_entry_invalid_index() {
+        let mut collection = GuardCollection::<u32>::default();
+        let index_a = collection.push(A(42).into_guard()).unwrap();
+        let index_b = collection.push(B(31).into_guard()).unwrap();
+
+        let entry: ScopedResult<B> = collection.entry(index_a);
+        assert!(entry.is_err());
+        let entry: ScopedResult<A> = collection.entry(index_b);
+        assert!(entry.is_err());
+    }
+
+    #[test]
+    fn test_guard_collection_mut_entry_update_on_drop() {
+        let mut collection = GuardCollection::<u32>::default();
+        let index = collection.push(A(42).into_guard()).unwrap();
+
+        {
+            let mut entry: ScopedEntryMut<'_, A> = collection.entry_mut(index).unwrap();
+            assert_eq!(entry.0, 42);
+            entry.0 = 31;
+        }
+
+        {
+            let entry: ScopedEntryMut<'_, A> = collection.entry_mut(index).unwrap();
+            assert_eq!(entry.0, 31);
+        }
     }
 }
 
@@ -307,11 +351,51 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-#[derive(Debug, Clone, Copy)]
+use crate::{FromGuard, Guard, TypeGuard, TypeGuardConversionError, Valid};
+
+#[derive(Clone, Copy)]
 pub struct GenIndex<T> {
     index: usize,
     generation: usize,
     _phantom: PhantomData<T>,
+}
+
+impl<T> Debug for GenIndex<T> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "GenIndex<{}> {{ index: {}, generation: {} }}",
+            type_name::<T>(),
+            self.index,
+            self.generation
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GenIndexRaw {
+    index: usize,
+    generation: usize,
+}
+
+impl<T: 'static> FromGuard for GenIndex<T> {
+    type Inner = GenIndexRaw;
+
+    #[inline]
+    fn into_inner(self) -> GenIndexRaw {
+        GenIndexRaw {
+            index: self.index,
+            generation: self.generation,
+        }
+    }
+}
+
+impl<T> From<Valid<GenIndex<T>>> for GenIndex<T> {
+    #[inline]
+    fn from(value: Valid<GenIndex<T>>) -> Self {
+        let GenIndexRaw { index, generation } = value.into_inner();
+        GenIndex::wrap(generation, index)
+    }
 }
 
 impl<T> GenIndex<T> {
@@ -325,12 +409,24 @@ impl<T> GenIndex<T> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GenCollection<T> {
     items: Vec<T>,
     indices: Vec<LockedCell>,
     mapping: Vec<usize>,
     next_free: Option<usize>,
+}
+
+impl<T> Default for GenCollection<T> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            indices: Vec::new(),
+            mapping: Vec::new(),
+            next_free: None,
+        }
+    }
 }
 
 impl<T> GenCollection<T> {
@@ -484,5 +580,107 @@ impl<T> IntoIterator for GenCollection<T> {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.items.into_iter()
+    }
+}
+
+pub struct ScopedEntry<'a, T: FromGuard> {
+    resource: T,
+    _raw: &'a T::Inner,
+}
+
+impl<'a, T: FromGuard> Deref for ScopedEntry<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resource
+    }
+}
+
+pub struct ScopedEntryMut<'a, T: FromGuard> {
+    resource: Option<T>,
+    raw: &'a mut T::Inner,
+}
+
+impl<'a, T: FromGuard> Drop for ScopedEntryMut<'a, T> {
+    fn drop(&mut self) {
+        *self.raw = self.resource.take().unwrap().into_inner();
+    }
+}
+
+impl<'a, T: FromGuard> Deref for ScopedEntryMut<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.resource.as_ref().unwrap()
+    }
+}
+
+impl<'a, T: FromGuard> DerefMut for ScopedEntryMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resource.as_mut().unwrap()
+    }
+}
+
+pub type GuardIndex<T> = GenIndex<Guard<T>>;
+pub type GuardCollection<T> = GenCollection<TypeGuard<T>>;
+
+#[derive(Debug, Clone, Copy)]
+pub enum GuardCollectionError {
+    GenCollection(GenCollectionError),
+    TypeGuardConversion(TypeGuardConversionError),
+}
+
+impl Display for GuardCollectionError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            GuardCollectionError::GenCollection(error) => {
+                write!(f, "GenCollection error: {}", error)
+            }
+            GuardCollectionError::TypeGuardConversion(error) => {
+                write!(f, "TypeGuard conversion error: {}", error)
+            }
+        }
+    }
+}
+
+impl From<GenCollectionError> for GuardCollectionError {
+    #[inline]
+    fn from(error: GenCollectionError) -> Self {
+        GuardCollectionError::GenCollection(error)
+    }
+}
+
+impl From<TypeGuardConversionError> for GuardCollectionError {
+    #[inline]
+    fn from(error: TypeGuardConversionError) -> Self {
+        GuardCollectionError::TypeGuardConversion(error)
+    }
+}
+
+impl Error for GuardCollectionError {}
+
+pub type ScopedResult<'a, T> = Result<ScopedEntry<'a, T>, GuardCollectionError>;
+pub type ScopedMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GuardCollectionError>;
+
+impl<I: Clone + Copy> GuardCollection<I> {
+    #[inline]
+    pub fn entry<'a, T: FromGuard<Inner = I>>(&'a self, index: GuardIndex<T>) -> ScopedResult<T> {
+        let guard = self.get(index)?;
+        Ok(ScopedEntry {
+            resource: T::try_from_guard(*guard)?,
+            _raw: guard.inner(),
+        })
+    }
+
+    #[inline]
+    pub fn entry_mut<'a, T: FromGuard<Inner = I>>(
+        &'a mut self,
+        index: GuardIndex<T>,
+    ) -> ScopedMutResult<'a, T> {
+        let guard = self.get_mut(index)?;
+        Ok(ScopedEntryMut {
+            resource: Some(T::try_from_guard(*guard)?),
+            raw: guard.inner_mut(),
+        })
     }
 }

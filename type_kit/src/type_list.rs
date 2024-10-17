@@ -141,7 +141,7 @@ impl<H, T> Cons<H, T> {
     }
 
     #[inline]
-    pub fn get_mut<S, M: Marker>(&mut self) -> &S
+    pub fn get_mut<S, M: Marker>(&mut self) -> &mut S
     where
         Self: Contains<S, M>,
     {
@@ -180,4 +180,32 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
     const LEN: usize = N::LEN + 1;
     type Item = T;
     type Next = N;
+}
+
+#[cfg(test)]
+mod test_macro {
+    use crate::{type_list, Cons, Nil};
+
+    trait AssertEqualTypes<A, B> {}
+
+    impl<T> AssertEqualTypes<T, T> for () {}
+
+    #[test]
+    fn test_type_list_macro_generates_correct_type() {
+        type GeneratedList = type_list![u8, u16, u32];
+        type ExpectedList = Cons<u8, Cons<u16, Cons<u32, Nil>>>;
+
+        // Compile-time assertion to check if the types are the same
+        let _: &dyn AssertEqualTypes<GeneratedList, ExpectedList> = &();
+    }
+}
+
+#[macro_export]
+macro_rules! type_list {
+    [] => {
+        Nil
+    };
+    [$head:ty $(, $tail:ty)*] => {
+        Cons<$head, type_list![$($tail),*]>
+    };
 }
