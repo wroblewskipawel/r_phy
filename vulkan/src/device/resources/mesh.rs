@@ -4,6 +4,7 @@ mod pack;
 use ash::vk;
 pub use list::*;
 pub use pack::*;
+use type_kit::Destroy;
 
 use std::ops::Index;
 
@@ -93,14 +94,12 @@ impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLo
     }
 }
 
-impl Device {
-    pub fn destroy_mesh_pack<'a, A: Allocator>(
-        &self,
-        pack: impl Into<&'a mut MeshPackData<A>>,
-        allocator: &mut A,
-    ) {
-        let pack = pack.into();
-        self.destroy_buffer(&mut pack.buffer, allocator);
+impl<A: Allocator> Destroy for MeshPackData<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.buffer.destroy((device, allocator));
     }
 }
 

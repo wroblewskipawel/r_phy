@@ -124,12 +124,6 @@ impl Device {
         let module = unsafe { self.device.create_shader_module(&create_info, None)? };
         Ok(ShaderModule { module, stage })
     }
-
-    pub fn destroy_pipeline(&self, pipeline: impl Into<vk::Pipeline>) {
-        unsafe {
-            self.device.destroy_pipeline(pipeline.into(), None);
-        }
-    }
 }
 
 pub struct PipelineBindData {

@@ -13,6 +13,7 @@ use to_resolve::{
     model::{CommonVertex, Drawable, MeshBuilder},
     shader::{ShaderHandle, ShaderType},
 };
+use type_kit::{Destroy, DropGuard};
 
 use crate::{
     device::{
@@ -74,32 +75,32 @@ impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
 }
 
 pub struct GBuffer<A: Allocator> {
-    pub combined: Image2D<DeviceLocal, A>,
-    pub albedo: Image2D<DeviceLocal, A>,
-    pub normal: Image2D<DeviceLocal, A>,
-    pub position: Image2D<DeviceLocal, A>,
-    pub depth: Image2D<DeviceLocal, A>,
+    pub combined: DropGuard<Image2D<DeviceLocal, A>>,
+    pub albedo: DropGuard<Image2D<DeviceLocal, A>>,
+    pub normal: DropGuard<Image2D<DeviceLocal, A>>,
+    pub position: DropGuard<Image2D<DeviceLocal, A>>,
+    pub depth: DropGuard<Image2D<DeviceLocal, A>>,
 }
 
 struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
     write_pass: P,
-    depth_prepass: GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>,
-    shading_pass: GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>,
+    depth_prepass: DropGuard<GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>>,
+    shading_pass: DropGuard<GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>>,
 }
 
 struct DeferredRendererFrameData<A: Allocator> {
-    g_buffer: GBuffer<A>,
-    swapchain: Swapchain<AttachmentsGBuffer>,
+    g_buffer: DropGuard<GBuffer<A>>,
+    swapchain: DropGuard<Swapchain<AttachmentsGBuffer>>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
 }
 
 struct DeferredRendererResources<A: Allocator> {
-    mesh: MeshPack<CommonVertex, A>,
-    skybox: Skybox<A, GBufferSkyboxPipeline<AttachmentsGBuffer, A>>,
+    mesh: DropGuard<MeshPack<CommonVertex, A>>,
+    skybox: DropGuard<Skybox<A, GBufferSkyboxPipeline<AttachmentsGBuffer, A>>>,
 }
 
 pub struct DeferredRendererContext<A: Allocator, P: GraphicsPipelinePackList> {
-    renderer: Rc<RefCell<DeferredRenderer<A>>>,
+    renderer: Rc<RefCell<DropGuard<DeferredRenderer<A>>>>,
     pipelines: DeferredRendererPipelines<P>,
     frames: FramePool<Self>,
     current_frame: Option<FrameData<Self>>,
@@ -112,11 +113,11 @@ pub struct DeferredRendererFrameState<P: GraphicsPipelinePackList> {
 
 pub struct DeferredRenderer<A: Allocator> {
     render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
-    frame_data: DeferredRendererFrameData<A>,
-    resources: DeferredRendererResources<A>,
+    frame_data: DropGuard<DeferredRendererFrameData<A>>,
+    resources: DropGuard<DeferredRendererResources<A>>,
 }
 
-impl<A: Allocator> Frame for Rc<RefCell<DeferredRenderer<A>>> {
+impl<A: Allocator> Frame for Rc<RefCell<DropGuard<DeferredRenderer<A>>>> {
     type Shader<S: ShaderType> = DeferredShader<S>;
     type Context<P: GraphicsPipelinePackList> = DeferredRendererContext<A, P>;
 
@@ -134,14 +135,6 @@ impl<A: Allocator> Frame for Rc<RefCell<DeferredRenderer<A>>> {
             frames,
             current_frame: None,
         })
-    }
-
-    fn destroy_context<P: GraphicsPipelinePackList>(
-        renderer_context: &mut Self::Context<P>,
-        context: &Context,
-    ) {
-        context.destroy_pipelines(&mut renderer_context.pipelines);
-        context.destroy_frame_pool(&mut renderer_context.frames);
     }
 }
 
@@ -249,8 +242,8 @@ impl Context {
         )?;
         Ok(DeferredRendererPipelines {
             write_pass,
-            depth_prepass,
-            shading_pass,
+            depth_prepass: DropGuard::new(depth_prepass),
+            shading_pass: DropGuard::new(shading_pass),
         })
     }
 
@@ -272,9 +265,9 @@ impl Context {
             ),
         )?;
         Ok(DeferredRendererFrameData {
-            g_buffer,
+            g_buffer: DropGuard::new(g_buffer),
             descriptors,
-            swapchain,
+            swapchain: DropGuard::new(swapchain),
         })
     }
 
@@ -300,7 +293,10 @@ impl Context {
             .build()],
         )?;
 
-        Ok(DeferredRendererResources { mesh, skybox })
+        Ok(DeferredRendererResources {
+            mesh: DropGuard::new(mesh),
+            skybox: DropGuard::new(skybox),
+        })
     }
 
     pub fn create_deferred_renderer<A: Allocator>(
@@ -311,47 +307,10 @@ impl Context {
         let render_pass = self.get_render_pass()?;
         let resources = self.create_renderer_resources(allocator)?;
         Ok(DeferredRenderer {
-            frame_data,
             render_pass,
-            resources,
+            frame_data: DropGuard::new(frame_data),
+            resources: DropGuard::new(resources),
         })
-    }
-
-    fn destroy_pipelines<P: GraphicsPipelinePackList>(
-        &self,
-        pipelines: &mut DeferredRendererPipelines<P>,
-    ) {
-        pipelines.write_pass.destroy(&self);
-        self.destroy_pipeline(&mut pipelines.depth_prepass);
-        self.destroy_pipeline(&mut pipelines.shading_pass);
-    }
-
-    fn destroy_frame_state<A: Allocator>(
-        &self,
-        frames: &mut DeferredRendererFrameData<A>,
-        allocator: &mut A,
-    ) {
-        self.destroy_descriptor_pool(&mut frames.descriptors);
-        self.destroy_swapchain(&mut frames.swapchain);
-        self.destroy_g_buffer(&mut frames.g_buffer, allocator);
-    }
-
-    fn destroy_renderer_resources<A: Allocator>(
-        &self,
-        resources: &mut DeferredRendererResources<A>,
-        allocator: &mut A,
-    ) {
-        self.destroy_mesh_pack(&mut resources.mesh, allocator);
-        self.destroy_skybox(&mut resources.skybox, allocator);
-    }
-
-    pub fn destroy_deferred_renderer<A: Allocator>(
-        &self,
-        renderer: &mut DeferredRenderer<A>,
-        allocator: &mut A,
-    ) {
-        self.destroy_frame_state(&mut renderer.frame_data, allocator);
-        self.destroy_renderer_resources(&mut renderer.resources, allocator);
     }
 
     fn create_g_buffer<A: Allocator>(
@@ -364,19 +323,74 @@ impl Context {
         let position = self.create_color_attachment_image(allocator)?;
         let depth = self.create_depth_stencil_attachment_image(allocator)?;
         Ok(GBuffer {
-            combined,
-            albedo,
-            normal,
-            position,
-            depth,
+            combined: DropGuard::new(combined),
+            albedo: DropGuard::new(albedo),
+            normal: DropGuard::new(normal),
+            position: DropGuard::new(position),
+            depth: DropGuard::new(depth),
         })
     }
+}
 
-    fn destroy_g_buffer<A: Allocator>(&self, g_buffer: &mut GBuffer<A>, allocator: &mut A) {
-        self.destroy_image(&mut g_buffer.combined, allocator);
-        self.destroy_image(&mut g_buffer.albedo, allocator);
-        self.destroy_image(&mut g_buffer.normal, allocator);
-        self.destroy_image(&mut g_buffer.position, allocator);
-        self.destroy_image(&mut g_buffer.depth, allocator);
+impl<A: Allocator> Destroy for GBuffer<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.combined.destroy((device, allocator));
+        self.albedo.destroy((device, allocator));
+        self.normal.destroy((device, allocator));
+        self.position.destroy((device, allocator));
+        self.depth.destroy((device, allocator));
+    }
+}
+
+impl<A: Allocator> Destroy for DeferredRendererFrameData<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.descriptors.destroy(device);
+        self.swapchain.destroy(device);
+        self.g_buffer.destroy((device, allocator));
+    }
+}
+
+impl<A: Allocator> Destroy for DeferredRendererResources<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.mesh.destroy((device, allocator));
+        self.skybox.destroy((device, allocator));
+    }
+}
+
+impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPipelines<P> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.write_pass.destroy(context);
+        self.depth_prepass.destroy(context);
+        self.shading_pass.destroy(context);
+    }
+}
+
+impl<A: Allocator> Destroy for DeferredRenderer<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.frame_data.destroy((device, allocator));
+        self.resources.destroy((device, allocator));
+    }
+}
+
+impl<A: Allocator, P: GraphicsPipelinePackList> Destroy for DeferredRendererContext<A, P> {
+    type Context<'a> = &'a Context;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.pipelines.destroy(context);
+        self.frames.destroy(context);
     }
 }

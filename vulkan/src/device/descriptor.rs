@@ -10,6 +10,7 @@ use std::{
 
 pub use layout::*;
 pub use presets::*;
+use type_kit::Destroy;
 pub use writer::*;
 
 use ash::vk;
@@ -135,11 +136,20 @@ impl<T: DescriptorLayout> Descriptor<T> {
     }
 }
 
-impl Device {
-    pub fn destroy_descriptor_pool<'a>(&self, pool: impl Into<&'a mut DescriptorPoolData>) {
-        let data = pool.into();
+impl Destroy for DescriptorPoolData {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
         unsafe {
-            self.device.destroy_descriptor_pool(data.pool, None);
+            context.destroy_descriptor_pool(self.pool, None);
         };
+    }
+}
+
+impl<L: DescriptorLayout> Destroy for DescriptorPool<L> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.data.destroy(context);
     }
 }

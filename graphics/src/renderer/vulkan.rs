@@ -1,5 +1,5 @@
 use math::types::Matrix4;
-use type_kit::{Cons, Contains, Marker, Nil};
+use type_kit::{Cons, Contains, Destroy, DropGuard, Marker, Nil};
 use vulkan::device::memory::DefaultAllocator;
 use vulkan::device::renderer::deferred::DeferredRenderer;
 use vulkan::device::resources::{
@@ -24,17 +24,17 @@ use winit::window::Window;
 use to_resolve::vulkan::VulkanRendererConfig;
 
 #[derive(Debug)]
-pub struct VulkanRendererBuilder<R>
+pub struct VulkanRendererBuilder<R: Destroy>
 where
-    Rc<RefCell<R>>: Frame,
+    Rc<RefCell<DropGuard<R>>>: Frame,
 {
     config: Option<VulkanRendererConfig>,
     _phantom: PhantomData<R>,
 }
 
-impl<R> VulkanRendererBuilder<R>
+impl<R: Destroy> VulkanRendererBuilder<R>
 where
-    Rc<RefCell<R>>: Frame,
+    Rc<RefCell<DropGuard<R>>>: Frame,
 {
     pub fn new() -> Self {
         Self {
@@ -48,9 +48,9 @@ where
         self
     }
 
-    pub fn with_renderer_type<N>(self) -> VulkanRendererBuilder<N>
+    pub fn with_renderer_type<N: Destroy>(self) -> VulkanRendererBuilder<N>
     where
-        Rc<RefCell<N>>: Frame,
+        Rc<RefCell<DropGuard<N>>>: Frame,
     {
         VulkanRendererBuilder {
             config: self.config,
@@ -59,9 +59,9 @@ where
     }
 }
 
-impl<R> RendererBuilder for VulkanRendererBuilder<R>
+impl<R: Destroy> RendererBuilder for VulkanRendererBuilder<R>
 where
-    Rc<RefCell<R>>: Frame,
+    Rc<RefCell<DropGuard<R>>>: Frame,
 {
     type Renderer = VulkanRenderer;
 
@@ -74,7 +74,7 @@ where
 
 pub struct VulkanRenderer {
     context: Rc<RefCell<Context>>,
-    renderer: Rc<RefCell<DeferredRenderer<DefaultAllocator>>>,
+    renderer: Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
     _config: VulkanRendererConfig,
 }
 
@@ -83,7 +83,7 @@ impl Drop for VulkanRenderer {
         let context = self.context.borrow();
         let _ = context.wait_idle();
         let mut renderer = self.renderer.borrow_mut();
-        context.destroy_deferred_renderer(&mut renderer, &mut DefaultAllocator {});
+        renderer.destroy((&*context, &mut DefaultAllocator {}));
     }
 }
 
@@ -135,12 +135,22 @@ impl<
             allocator,
         })
     }
+}
 
-    fn destroy(&mut self, context: &Context) {
+impl<
+        R: Frame,
+        M: MaterialPackList<StaticAllocator>,
+        V: MeshPackList<StaticAllocator>,
+        S: GraphicsPipelinePackList,
+    > Destroy for VulkanResourcePack<R, M, V, S>
+{
+    type Context<'a> = &'a Context;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
         context.destroy_materials(&mut self.materials, &mut self.allocator);
         context.destroy_meshes(&mut self.meshes, &mut self.allocator);
-        R::destroy_context(&mut self.renderer_context, &context);
-        self.allocator.destroy(&context)
+        self.renderer_context.destroy(context);
+        self.allocator.destroy(context)
     }
 }
 
@@ -166,7 +176,7 @@ impl VulkanRenderer {
         let renderer = context.create_deferred_renderer(&mut DefaultAllocator {})?;
         Ok(Self {
             context: Rc::new(RefCell::new(context)),
-            renderer: Rc::new(RefCell::new(renderer)),
+            renderer: Rc::new(RefCell::new(DropGuard::new(renderer))),
             _config: config,
         })
     }
@@ -207,11 +217,11 @@ impl<
         M: MaterialPackListBuilder,
         V: MeshPackListBuilder,
     > ContextBuilder
-    for VulkanContextBuilder<Rc<RefCell<DeferredRenderer<DefaultAllocator>>>, S, M, V>
+    for VulkanContextBuilder<Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>, S, M, V>
 {
     type Renderer = VulkanRenderer;
     type Context = VulkanRendererContext<
-        Rc<RefCell<DeferredRenderer<DefaultAllocator>>>,
+        Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
         M::Pack<StaticAllocator>,
         V::Pack<StaticAllocator>,
         S::Pack,
@@ -234,14 +244,21 @@ impl<
 }
 
 impl Default
-    for VulkanContextBuilder<Rc<RefCell<DeferredRenderer<DefaultAllocator>>>, Nil, Nil, Nil>
+    for VulkanContextBuilder<
+        Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
+        Nil,
+        Nil,
+        Nil,
+    >
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VulkanContextBuilder<Rc<RefCell<DeferredRenderer<DefaultAllocator>>>, Nil, Nil, Nil> {
+impl
+    VulkanContextBuilder<Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>, Nil, Nil, Nil>
+{
     pub fn new() -> Self {
         VulkanContextBuilder {
             shaders: Nil::new(),

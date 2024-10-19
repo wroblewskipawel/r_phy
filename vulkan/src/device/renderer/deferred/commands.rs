@@ -49,7 +49,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
                 )?,
                 |command| {
                     command
-                        .bind_pipeline(&self.pipelines.depth_prepass)
+                        .bind_pipeline(&*self.pipelines.depth_prepass)
                         .bind_descriptor_set(
                             &camera_descriptor
                                 .get_binding_data(&self.pipelines.depth_prepass)
@@ -66,7 +66,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
         )?;
         let shading_pass = device.record_command(shading_pass, |command| {
             command
-                .bind_pipeline(&self.pipelines.shading_pass)
+                .bind_pipeline(&*self.pipelines.shading_pass)
                 .bind_descriptor_set(
                     &renderer
                         .frame_data
@@ -75,7 +75,7 @@ impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
                         .get_binding_data(&self.pipelines.shading_pass)
                         .unwrap(),
                 )
-                .bind_mesh_pack(&renderer.resources.mesh)
+                .bind_mesh_pack(&*renderer.resources.mesh)
                 .draw_mesh(renderer.resources.mesh.get(0))
         });
         let (_, skybox_pass) = self.frames.secondary_commands.next();

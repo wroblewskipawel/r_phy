@@ -9,18 +9,18 @@ pub(crate) mod test_types {
     pub struct A;
 
     impl Destroy for A {
-        type Context = C;
+        type Context<'a> = &'a mut C;
 
-        fn destroy(&mut self, _context: &mut Self::Context) {}
+        fn destroy<'a>(&mut self, _context: Self::Context<'a>) {}
     }
 
     #[derive(Debug)]
     pub struct B;
 
     impl Destroy for B {
-        type Context = ();
+        type Context<'a> = ();
 
-        fn destroy(&mut self, _context: &mut Self::Context) {}
+        fn destroy<'a>(&mut self, _context: Self::Context<'a>) {}
     }
 }
 
@@ -62,22 +62,37 @@ use std::{
 };
 
 pub trait Destroy: Sized {
-    type Context;
+    type Context<'a>;
 
-    fn destroy(&mut self, context: &mut Self::Context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>);
 }
 
 pub trait Finalize: Destroy
 where
-    Self::Context: Default,
+    Self::Context<'static>: Default,
 {
     #[inline]
     fn finalize(&mut self) {
-        self.destroy(&mut Self::Context::default());
+        self.destroy(Self::Context::default());
     }
 }
 
-impl<T: Destroy> Finalize for T where T::Context: Default {}
+impl<T: Destroy> Finalize for T where T::Context<'static>: Default {}
+
+impl<I: Destroy + 'static, T> Destroy for T
+where
+    for<'a> I::Context<'a>: Clone + Copy,
+    for<'a> &'a mut T: IntoIterator<Item = &'a mut I>,
+{
+    type Context<'b> = I::Context<'b>;
+
+    #[inline]
+    fn destroy<'b>(&mut self, context: Self::Context<'b>) {
+        for item in self.into_iter() {
+            item.destroy(context);
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct DropGuard<T: Destroy> {
@@ -97,10 +112,10 @@ impl<T: Destroy> DropGuard<T> {
 }
 
 impl<T: Destroy> Destroy for DropGuard<T> {
-    type Context = T::Context;
+    type Context<'a> = T::Context<'a>;
 
     #[inline]
-    fn destroy(&mut self, context: &mut Self::Context) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
         #[cfg(debug_assertions)]
         let mut inner_mut = self.inner.take();
         #[cfg(not(debug_assertions))]

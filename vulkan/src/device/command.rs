@@ -2,6 +2,7 @@ use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
 use math::types::Vector4;
 use to_resolve::camera::CameraMatrices;
+use type_kit::Destroy;
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -280,15 +281,15 @@ impl Device {
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destroy_persistent_command_pool<L: Level, O: Operation>(
-        &self,
-        command_pool: &mut PersistentCommandPool<L, O>,
-    ) {
-        L::destory_persistent_alocator(self, &mut command_pool.allocator);
+impl<L: Level, O: Operation> Destroy for PersistentCommandPool<L, O> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        L::destory_persistent_alocator(context, &mut self.allocator);
         unsafe {
-            self.device
-                .destroy_command_pool(command_pool.command_pool, None);
+            context.destroy_command_pool(self.command_pool, None);
         }
     }
 }
@@ -747,7 +748,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         mut camera_matrices: CameraMatrices,
     ) -> Self {
         camera_matrices.view[3] = Vector4::w();
-        self.bind_pipeline(&skybox.pipeline)
+        self.bind_pipeline(&*skybox.pipeline)
             .bind_descriptor_set(
                 &skybox
                     .descriptor
@@ -755,7 +756,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                     .get_binding_data(&skybox.pipeline)
                     .unwrap(),
             )
-            .bind_mesh_pack(&skybox.mesh_pack)
+            .bind_mesh_pack(&*skybox.mesh_pack)
             .push_constants(skybox.pipeline.get_push_range(&camera_matrices))
             .draw_mesh(skybox.mesh_pack.get(0))
     }

@@ -7,6 +7,7 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
+use type_kit::Destroy;
 
 use crate::device::{
     command::operation::Operation,
@@ -199,5 +200,21 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize>
         debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_mut().unwrap() }
+    }
+}
+
+impl<O: Operation, A: Allocator> Destroy for UniformBufferTypeErased<O, A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.buffer.destroy(context);
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation, A: Allocator> Destroy for UniformBuffer<U, O, A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.buffer.destroy(context);
     }
 }

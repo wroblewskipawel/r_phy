@@ -5,8 +5,11 @@ use std::{
     ffi::{c_char, c_void, CStr},
 };
 
-use ash::{extensions::ext, vk, Entry, Instance};
+use ash::{extensions::ext, vk};
 use colored::{self, Colorize};
+use type_kit::Destroy;
+
+use crate::Instance;
 
 unsafe extern "system" fn debug_messenger_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -68,7 +71,7 @@ impl DebugUtils {
     }
 
     pub fn check_required_layer_support(
-        entry: &Entry,
+        entry: &ash::Entry,
     ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
         let supported_layers = entry.enumerate_instance_layer_properties()?;
         let supported =
@@ -88,15 +91,17 @@ impl DebugUtils {
         Ok(supported)
     }
 
-    pub fn build(entry: &Entry, instance: &Instance) -> Result<DebugUtils, Box<dyn Error>> {
-        let loader = ext::DebugUtils::new(entry, instance);
+    pub fn create(instance: &Instance) -> Result<DebugUtils, Box<dyn Error>> {
+        let loader: ext::DebugUtils = instance.load();
         let messenger = unsafe { loader.create_debug_utils_messenger(&Self::create_info(), None)? };
         Ok(Self { messenger, loader })
     }
 }
 
-impl DebugUtils {
-    pub fn destroy(&mut self) {
+impl Destroy for DebugUtils {
+    type Context<'a> = ();
+
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
         unsafe {
             self.loader
                 .destroy_debug_utils_messenger(self.messenger, None);

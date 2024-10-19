@@ -1,5 +1,7 @@
 use std::{error::Error, ffi::c_void};
 
+use type_kit::Destroy;
+
 use crate::device::{
     memory::{AllocReq, Allocator, HostCoherent, Memory},
     resources::PartialBuilder,
@@ -59,5 +61,18 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
             buffer,
             ptr: Some(ptr),
         })
+    }
+}
+
+impl<A: Allocator> Destroy for PersistentBuffer<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        if let Some(..) = self.ptr {
+            self.buffer.memory.unmap(device);
+            self.ptr = None;
+        }
+        self.buffer.destroy((device, allocator));
     }
 }

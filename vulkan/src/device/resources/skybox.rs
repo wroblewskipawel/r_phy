@@ -10,7 +10,7 @@ use crate::device::{
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
     Device,
 };
-use type_kit::{Cons, Nil};
+use type_kit::{Cons, Destroy, DropGuard, Nil};
 
 use super::{
     image::{ImageReader, Texture2D},
@@ -21,10 +21,10 @@ pub type LayoutSkybox<A> =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet<A>, Nil>, Cons<CameraMatrices, Nil>>;
 
 pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> {
-    cubemap: Texture2D<A>,
-    pub mesh_pack: MeshPack<CommonVertex, A>,
-    pub descriptor: DescriptorPool<TextureDescriptorSet<A>>,
-    pub pipeline: GraphicsPipeline<L>,
+    cubemap: DropGuard<Texture2D<A>>,
+    pub mesh_pack: DropGuard<MeshPack<CommonVertex, A>>,
+    pub descriptor: DropGuard<DescriptorPool<TextureDescriptorSet<A>>>,
+    pub pipeline: DropGuard<GraphicsPipeline<L>>,
 }
 
 impl Device {
@@ -43,21 +43,22 @@ impl Device {
         let pipeline = self.create_graphics_pipeline(layout, &modules)?;
         let mesh_pack = self.load_mesh_pack(allocator, &[shape::Cube::new(1.0).into()])?;
         Ok(Skybox {
-            cubemap,
-            mesh_pack,
-            descriptor,
-            pipeline,
+            cubemap: DropGuard::new(cubemap),
+            mesh_pack: DropGuard::new(mesh_pack),
+            descriptor: DropGuard::new(descriptor),
+            pipeline: DropGuard::new(pipeline),
         })
     }
+}
 
-    pub fn destroy_skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>>(
-        &self,
-        skybox: &mut Skybox<A, L>,
-        allocator: &mut A,
-    ) {
-        self.destroy_descriptor_pool(&mut skybox.descriptor);
-        self.destroy_texture(&mut skybox.cubemap, allocator);
-        self.destroy_pipeline(&mut skybox.pipeline);
-        self.destroy_mesh_pack(&mut skybox.mesh_pack, allocator);
+impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Destroy for Skybox<A, L> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
+        self.descriptor.destroy(device);
+        self.mesh_pack.destroy((device, allocator));
+        self.cubemap.destroy((device, allocator));
+        self.pipeline.destroy(device);
     }
 }

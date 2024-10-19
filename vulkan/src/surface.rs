@@ -5,10 +5,13 @@ use std::{
     ffi::{c_void, CStr},
     ptr::null,
 };
+use type_kit::Destroy;
 use winit::{
     raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle},
     window::Window,
 };
+
+use crate::Instance;
 
 pub struct Surface {
     handle: vk::SurfaceKHR,
@@ -17,11 +20,10 @@ pub struct Surface {
 
 #[cfg(target_os = "windows")]
 fn create_platform_surface(
-    entry: &ash::Entry,
-    instance: &ash::Instance,
+    instance: &Instance,
     window: &Window,
 ) -> Result<vk::SurfaceKHR, Box<dyn Error>> {
-    let win32_surface = khr::Win32Surface::new(entry, instance);
+    let win32_surface: khr::Win32Surface = instance.load();
     let (hwnd, hinstance) = match window.window_handle()?.as_raw() {
         RawWindowHandle::Win32(Win32WindowHandle {
             hwnd, hinstance, ..
@@ -64,17 +66,17 @@ impl Surface {
         compile_error!("Current platform not supported!");
     }
 
-    pub fn create(
-        entry: &ash::Entry,
-        instance: &ash::Instance,
-        window: &Window,
-    ) -> Result<Self, Box<dyn Error>> {
-        let handle = create_platform_surface(entry, instance, window)?;
-        let loader = khr::Surface::new(entry, instance);
+    pub(crate) fn create(instance: &Instance, window: &Window) -> Result<Self, Box<dyn Error>> {
+        let handle = create_platform_surface(instance, window)?;
+        let loader: khr::Surface = instance.load();
         Ok(Self { handle, loader })
     }
+}
 
-    pub fn destroy(&mut self) {
+impl Destroy for Surface {
+    type Context<'a> = ();
+
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
         unsafe { self.loader.destroy_surface(self.handle, None) };
     }
 }

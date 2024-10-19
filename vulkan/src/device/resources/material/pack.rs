@@ -1,5 +1,7 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
+use type_kit::{Destroy, DropGuard};
+
 use crate::device::{
     command::operation::Graphics,
     descriptor::{
@@ -24,8 +26,8 @@ struct MaterialUniformPartial<'a, M: Material> {
 
 pub struct MaterialPackData<M: Material, A: Allocator> {
     textures: Option<Vec<Texture2D<A>>>,
-    uniforms: Option<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>,
-    descriptors: DescriptorPool<M::DescriptorLayout>,
+    uniforms: Option<DropGuard<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>>,
+    descriptors: DropGuard<DescriptorPool<M::DescriptorLayout>>,
 }
 
 pub struct MaterialPackPartial<'a, M: Material> {
@@ -84,7 +86,7 @@ impl<'a, A: Allocator, M: Material, T: Material> TryFrom<&'a MaterialPack<M, A>>
     fn try_from(value: &'a MaterialPack<M, A>) -> Result<Self, Self::Error> {
         if TypeId::of::<M>() == TypeId::of::<T>() {
             Ok(Self {
-                descriptors: (&value.data.descriptors).try_into().unwrap(),
+                descriptors: (&*value.data.descriptors).try_into().unwrap(),
                 _phantom: PhantomData,
             })
         } else {
@@ -194,7 +196,9 @@ impl Device {
             None
         };
         let uniforms = if let Some(uniforms) = uniforms {
-            Some(self.allocate_material_pack_uniforms_memory(allocator, uniforms)?)
+            Some(DropGuard::new(
+                self.allocate_material_pack_uniforms_memory(allocator, uniforms)?,
+            ))
         } else {
             None
         };
@@ -213,7 +217,7 @@ impl Device {
         let data = MaterialPackData {
             textures,
             uniforms,
-            descriptors,
+            descriptors: DropGuard::new(descriptors),
         };
         Ok(MaterialPack { data })
     }
@@ -239,11 +243,11 @@ impl Device {
         if let Some(textures) = data.textures.as_mut() {
             textures
                 .iter_mut()
-                .for_each(|texture| self.destroy_texture(texture, allocator));
+                .for_each(|texture| texture.destroy((self, allocator)));
         }
         if let Some(uniforms) = data.uniforms.as_mut() {
-            self.destroy_buffer(uniforms, allocator);
+            uniforms.destroy((self, allocator));
         }
-        self.destroy_descriptor_pool(&mut data.descriptors);
+        data.descriptors.destroy(self);
     }
 }

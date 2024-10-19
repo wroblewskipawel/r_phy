@@ -2,6 +2,7 @@ use std::{borrow::BorrowMut, error::Error, marker::PhantomData, ptr::copy_nonove
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
+use type_kit::Destroy;
 
 use crate::device::{
     command::{
@@ -66,7 +67,7 @@ impl<'a, 'b> From<&'b mut StagingBuffer<'a>> for &'b mut Buffer<HostCoherent, De
 
 impl<'a> Drop for StagingBuffer<'a> {
     fn drop(&mut self) {
-        self.device.destroy_buffer(self, &mut DefaultAllocator {});
+        self.buffer.destroy((self.device, &mut DefaultAllocator {}));
     }
 }
 

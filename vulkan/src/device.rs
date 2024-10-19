@@ -9,6 +9,8 @@ pub mod renderer;
 pub mod resources;
 pub mod swapchain;
 
+use crate::Instance;
+
 use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
 use ash::{self, vk};
@@ -20,6 +22,7 @@ use std::{
     error::Error,
     ffi::CStr,
 };
+use type_kit::Destroy;
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -367,7 +370,7 @@ fn pick_physical_device(
 }
 
 impl Device {
-    pub fn create(instance: &ash::Instance, surface: &Surface) -> Result<Device, Box<dyn Error>> {
+    pub(crate) fn create(instance: &Instance, surface: &Surface) -> Result<Device, Box<dyn Error>> {
         let physical_device = pick_physical_device(instance, surface)?;
         let queue_builder = DeviceQueueBuilder::new(physical_device.queue_families);
         let device = unsafe {
@@ -390,17 +393,24 @@ impl Device {
         })
     }
 
-    pub fn destroy(&mut self) {
-        unsafe {
-            self.command_pools.destroy(&self.device);
-            self.device.destroy_device(None);
-        }
-    }
-
     pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
         unsafe {
             self.device.device_wait_idle()?;
         }
         Ok(())
+    }
+}
+
+impl Destroy for Device {
+    type Context<'a> = ();
+
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
+        self.destroy_render_passes();
+        self.destroy_pipeline_layouts();
+        self.destroy_descriptor_set_layouts();
+        unsafe {
+            self.command_pools.destroy(&self.device);
+            self.device.destroy_device(None);
+        }
     }
 }

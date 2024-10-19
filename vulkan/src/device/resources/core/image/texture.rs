@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use ash::vk;
+use type_kit::Destroy;
 
 use crate::device::{
     memory::{AllocReq, Allocator, DeviceLocal},
@@ -90,16 +91,16 @@ impl Device {
     ) -> Result<Texture2D<A>, Box<dyn Error>> {
         Texture2DPartial::prepare(image, self)?.finalize(self, allocator)
     }
+}
 
-    pub fn destroy_texture<'a, A: Allocator>(
-        &self,
-        texture: impl Into<&'a mut Texture2D<A>>,
-        allocator: &mut A,
-    ) {
-        let texture = texture.into();
+impl<A: Allocator> Destroy for Texture2D<A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
         unsafe {
-            self.device.destroy_sampler(texture.sampler, None);
-            self.destroy_image(&mut texture.image, allocator);
+            device.destroy_sampler(self.sampler, None);
         }
+        self.image.destroy((device, allocator));
     }
 }

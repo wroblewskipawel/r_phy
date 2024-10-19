@@ -9,6 +9,7 @@ use crate::device::{
 use super::PartialBuilder;
 use ash::vk;
 use std::{error::Error, marker::PhantomData};
+use type_kit::Destroy;
 
 pub use reader::*;
 pub use texture::*;
@@ -173,17 +174,17 @@ impl Device {
         .finalize(self, allocator)?;
         Ok(image)
     }
+}
 
-    pub fn destroy_image<'a, M: MemoryProperties, A: Allocator>(
-        &self,
-        image: impl Into<&'a mut Image2D<M, A>>,
-        allocator: &mut A,
-    ) {
-        let image = image.into();
+impl<M: MemoryProperties, A: Allocator> Destroy for Image2D<M, A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
         unsafe {
-            self.device.destroy_image_view(image.image_view, None);
-            self.device.destroy_image(image.image, None);
-            allocator.free(self, &mut image.memory);
+            device.destroy_image_view(self.image_view, None);
+            device.destroy_image(self.image, None);
+            allocator.free(device, &mut self.memory);
         }
     }
 }

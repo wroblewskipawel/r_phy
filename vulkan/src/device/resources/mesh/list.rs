@@ -6,8 +6,7 @@ use crate::device::{
     Device,
 };
 use to_resolve::model::{Mesh, MeshTypeList, Vertex};
-use type_kit::TypeList;
-use type_kit::{Cons, Nil, TypedNil};
+use type_kit::{Cons, Destroy, Nil, TypeList, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
@@ -30,7 +29,7 @@ impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
 {
     fn destroy(&mut self, device: &Device, allocator: &mut A) {
         if let Some(mesh_pack) = &mut self.head {
-            device.destroy_mesh_pack(mesh_pack, allocator);
+            mesh_pack.destroy((device, allocator));
         }
         self.tail.destroy(device, allocator);
     }

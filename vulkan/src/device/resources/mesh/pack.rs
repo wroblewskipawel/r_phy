@@ -1,6 +1,7 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
 use ash::vk;
+use type_kit::{Destroy, DropGuard};
 
 use crate::device::{
     command::operation::{self, Operation},
@@ -100,7 +101,7 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
             meshes,
         };
         Ok(MeshPack {
-            data,
+            data: DropGuard::new(data),
             _phantom: PhantomData,
         })
     }
@@ -112,8 +113,16 @@ pub struct MeshPackPartial<'a, V: Vertex> {
 
 #[derive(Debug)]
 pub struct MeshPack<V: Vertex, A: Allocator> {
-    pub data: MeshPackData<A>,
+    pub data: DropGuard<MeshPackData<A>>,
     _phantom: PhantomData<V>,
+}
+
+impl<V: Vertex, A: Allocator> Destroy for MeshPack<V, A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.data.destroy(context);
+    }
 }
 
 #[derive(Debug)]
@@ -181,7 +190,7 @@ impl<'a, V: Vertex, A: Allocator> From<&'a mut MeshPack<V, A>> for &'a mut MeshP
 
 impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for MeshPackBinding {
     fn from(value: &'a MeshPack<V, A>) -> Self {
-        (&value.data).into()
+        (&*value.data).into()
     }
 }
 

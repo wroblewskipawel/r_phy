@@ -10,6 +10,7 @@ use to_resolve::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };
+use type_kit::{Destroy, DropGuard};
 
 use crate::Context;
 use math::types::Matrix4;
@@ -36,18 +37,14 @@ use super::{
 
 pub trait Frame: 'static {
     type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;
-    type Context<P: GraphicsPipelinePackList>: FrameContext;
+    type Context<P: GraphicsPipelinePackList>: FrameContext
+        + for<'a> Destroy<Context<'a> = &'a Context>;
 
     fn load_context<P: GraphicsPipelinePackList>(
         &self,
         context: &Context,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
     ) -> Result<Self::Context<P>, Box<dyn Error>>;
-
-    fn destroy_context<P: GraphicsPipelinePackList>(
-        renderer_context: &mut Self::Context<P>,
-        context: &Context,
-    );
 }
 
 pub trait FrameContext: Sized {
@@ -81,8 +78,8 @@ pub trait FrameContext: Sized {
 }
 
 pub struct CameraUniform {
-    pub descriptors: DescriptorPool<CameraDescriptorSet>,
-    pub uniform_buffer: UniformBuffer<CameraMatrices, Graphics, DefaultAllocator>,
+    pub descriptors: DropGuard<DescriptorPool<CameraDescriptorSet>>,
+    pub uniform_buffer: DropGuard<UniformBuffer<CameraMatrices, Graphics, DefaultAllocator>>,
 }
 
 pub struct FrameData<C: FrameContext> {
@@ -110,14 +107,9 @@ impl Context {
                 .write_buffer(&uniform_buffer),
         )?;
         Ok(CameraUniform {
-            descriptors,
-            uniform_buffer,
+            descriptors: DropGuard::new(descriptors),
+            uniform_buffer: DropGuard::new(uniform_buffer),
         })
-    }
-
-    fn destroy_camera_uniform(&self, camera: &mut CameraUniform) {
-        self.destroy_descriptor_pool(&mut camera.descriptors);
-        self.destroy_buffer(&mut camera.uniform_buffer, &mut DefaultAllocator {});
     }
 
     pub fn create_frame_pool<F: FrameContext>(
@@ -138,11 +130,25 @@ impl Context {
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destroy_frame_pool<F: FrameContext>(&self, pool: &mut FramePool<F>) {
-        self.destroy_swapchain_image_sync(&mut pool.image_sync);
-        self.destroy_persistent_command_pool(&mut pool.primary_commands);
-        self.destroy_persistent_command_pool(&mut pool.secondary_commands);
-        self.destroy_camera_uniform(&mut pool.camera_uniform);
+impl Destroy for CameraUniform {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.descriptors.destroy(context);
+        self.uniform_buffer
+            .destroy((context, &mut DefaultAllocator {}));
+    }
+}
+
+impl<F: FrameContext> Destroy for FramePool<F> {
+    type Context<'a> = &'a Context;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.image_sync.destroy(context);
+        self.primary_commands.destroy(context);
+        self.secondary_commands.destroy(context);
+        self.camera_uniform.destroy(context);
     }
 }

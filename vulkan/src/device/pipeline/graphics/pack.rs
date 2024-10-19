@@ -6,6 +6,7 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
+use type_kit::{Destroy, DropGuard};
 
 use crate::device::{
     pipeline::{
@@ -26,7 +27,7 @@ pub struct PipelinePackData {
 
 #[derive(Debug)]
 pub struct PipelinePack<T: GraphicsPipelineConfig> {
-    data: PipelinePackData,
+    data: DropGuard<PipelinePackData>,
     _phantom: PhantomData<T>,
 }
 
@@ -35,6 +36,16 @@ pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
     handle: vk::Pipeline,
     layout: vk::PipelineLayout,
     _phantom: PhantomData<T>,
+}
+
+impl<T: GraphicsPipelineConfig> Destroy for GraphicsPipeline<T> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        unsafe {
+            context.destroy_pipeline(self.handle, None);
+        }
+    }
 }
 
 impl<C: GraphicsPipelineConfig> From<&GraphicsPipeline<C>> for PipelineBindData {
@@ -200,11 +211,12 @@ impl Device {
         &self,
     ) -> Result<PipelinePack<T>, Box<dyn Error>> {
         let layout = self.get_pipeline_layout::<T::Layout>()?.into();
+        let data = PipelinePackData {
+            pipelines: Vec::new(),
+            layout,
+        };
         Ok(PipelinePack {
-            data: PipelinePackData {
-                pipelines: Vec::new(),
-                layout,
-            },
+            data: DropGuard::new(data),
             _phantom: PhantomData,
         })
     }
@@ -269,11 +281,22 @@ impl Device {
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destory_pipeline_pack<T: GraphicsPipelineConfig>(&self, pack: &mut PipelinePack<T>) {
-        pack.data
-            .pipelines
-            .iter()
-            .for_each(|&p| self.destroy_pipeline(p));
+impl Destroy for PipelinePackData {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.pipelines.iter().for_each(|&p| unsafe {
+            context.destroy_pipeline(p, None);
+        });
+    }
+}
+
+impl<T: GraphicsPipelineConfig> Destroy for PipelinePack<T> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.data.destroy(context);
     }
 }

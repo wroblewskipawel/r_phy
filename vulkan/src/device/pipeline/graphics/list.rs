@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::device::{pipeline::ModuleLoader, Device};
 use to_resolve::shader::ShaderType;
-use type_kit::{Cons, Nil, TypeList};
+use type_kit::{Cons, Destroy, Nil, TypeList};
 
 use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackRefMut};
 
@@ -79,7 +79,7 @@ impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> Graphi
     for Cons<PipelinePack<T>, N>
 {
     fn destroy(&mut self, device: &Device) {
-        device.destory_pipeline_pack(&mut self.head);
+        self.head.destroy(device);
         self.tail.destroy(device);
     }
 

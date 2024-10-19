@@ -1,5 +1,6 @@
 use ash::{extensions::khr, vk};
 use std::{error::Error, ffi::CStr};
+use type_kit::Destroy;
 
 use crate::{surface::PhysicalDeviceSurfaceProperties, Context};
 
@@ -128,15 +129,6 @@ impl Context {
         }
     }
 
-    pub fn destroy_swapchain_image_sync(&self, sync: &mut [SwapchainImageSync]) {
-        unsafe {
-            sync.iter_mut().for_each(|sync| {
-                self.device.destroy_semaphore(sync.draw_ready, None);
-                self.device.destroy_semaphore(sync.draw_finished, None);
-            });
-        }
-    }
-
     pub fn create_swapchain<A: AttachmentList>(
         &self,
         framebuffer_builder: impl Fn(
@@ -170,8 +162,8 @@ impl Context {
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .clipped(true)
             .image_array_layers(1)
-            .surface((&self.surface).into());
-        let loader = khr::Swapchain::new(&self.instance, &self.device);
+            .surface((&*self.surface).into());
+        let loader: khr::Swapchain = self.load();
         let handle = unsafe { loader.create_swapchain(&create_info, None)? };
         let images = unsafe {
             loader
@@ -222,17 +214,31 @@ impl Context {
             })
         }
     }
+}
 
-    pub fn destroy_swapchain<A: AttachmentList>(&self, swapchain: &mut Swapchain<A>) {
-        swapchain.framebuffers.iter_mut().for_each(|framebuffer| {
-            self.destroy_framebuffer(framebuffer);
+impl Destroy for SwapchainImageSync {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        unsafe {
+            context.destroy_semaphore(self.draw_ready, None);
+            context.destroy_semaphore(self.draw_finished, None);
+        }
+    }
+}
+
+impl<A: AttachmentList> Destroy for Swapchain<A> {
+    type Context<'a> = &'a Device;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        self.framebuffers.iter_mut().for_each(|framebuffer| {
+            context.destroy_framebuffer(framebuffer);
         });
         unsafe {
-            swapchain
-                .images
+            self.images
                 .iter_mut()
-                .for_each(|image| self.device.destroy_image_view(image.view, None));
-            swapchain.loader.destroy_swapchain(swapchain.handle, None);
+                .for_each(|image| context.destroy_image_view(image.view, None));
+            self.loader.destroy_swapchain(self.handle, None);
         }
     }
 }

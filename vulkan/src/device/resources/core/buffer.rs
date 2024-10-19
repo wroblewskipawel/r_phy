@@ -6,6 +6,7 @@ mod uniform;
 pub use persistent::*;
 pub use range::*;
 pub use staging::*;
+use type_kit::Destroy;
 pub use uniform::*;
 
 use ash::vk;
@@ -113,16 +114,14 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     }
 }
 
-impl Device {
-    pub fn destroy_buffer<'a, M: MemoryProperties, A: Allocator>(
-        &self,
-        buffer: impl Into<&'a mut Buffer<M, A>>,
-        allocator: &mut A,
-    ) {
-        let buffer = buffer.into();
+impl<M: MemoryProperties, A: Allocator> Destroy for Buffer<M, A> {
+    type Context<'a> = (&'a Device, &'a mut A);
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+        let (device, allocator) = context;
         unsafe {
-            self.device.destroy_buffer(buffer.buffer, None);
-            allocator.free(self, &mut buffer.memory);
+            device.destroy_buffer(self.buffer, None);
         }
+        allocator.free(device, &mut self.memory);
     }
 }
