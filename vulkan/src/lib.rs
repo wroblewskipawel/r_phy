@@ -102,24 +102,6 @@ impl Context {
     }
 }
 
-impl<'a> From<&'a Context> for &'a Device {
-    fn from(context: &'a Context) -> Self {
-        &context.device
-    }
-}
-
-impl<'a> From<&'a Context> for &'a Surface {
-    fn from(context: &'a Context) -> Self {
-        &context.surface
-    }
-}
-
-impl<'a> From<&'a Context> for &'a Instance {
-    fn from(context: &'a Context) -> Self {
-        &context.instance
-    }
-}
-
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
