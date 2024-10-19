@@ -60,7 +60,8 @@ mod tests {
     }
 
     #[test]
-    fn test_type_guard_invalid_conversion() {
+    #[cfg(debug_assertions)]
+    fn test_type_guard_checks_type_in_debug_build() {
         let a = A(42);
         let a_guard = a.into_guard();
         assert!(B::try_from_guard(a_guard).is_err());
@@ -71,28 +72,33 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
+    fn test_type_guard_skips_type_check_in_release_build() {
+        let a = A(42);
+        let a_guard = a.into_guard();
+        let b_invalid = B::try_from_guard(a_guard).unwrap();
+        assert_eq!(b_invalid.0, 42);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
     fn test_type_guard_error_value() {
         let b_type_name = type_name::<B>();
-        #[cfg(debug_assertions)]
         let a_type_name = type_name::<A>();
-        #[cfg(not(debug_assertions))]
-        let a_type_id = TypeId::of::<A>();
 
         let a = A(42);
         let a_guard = a.into_guard();
         match B::try_from_guard(a_guard) {
             Err(TypeGuardConversionError { to, from }) => {
                 assert_eq!(to, b_type_name);
-                #[cfg(debug_assertions)]
                 assert_eq!(from, a_type_name);
-                #[cfg(not(debug_assertions))]
-                assert_eq!(from, a_type_id);
             }
             _ => assert!(false),
         }
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn test_type_guard_error_display() {
         let b_type_name = format!("{:?}", type_name::<B>());
         let a_type_name = format!("{:?}", type_name::<A>());
@@ -163,12 +169,29 @@ impl<T: FromGuard> TryFrom<Guard<T>> for Conv<T> {
     }
 }
 
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy)]
+pub struct GuardType {
+    type_id: TypeId,
+    type_name: &'static str,
+}
+
+#[cfg(debug_assertions)]
+impl GuardType {
+    #[inline]
+    pub fn new<T: 'static>() -> Self {
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: type_name::<T>(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TypeGuard<T> {
     inner: T,
-    type_id: TypeId,
     #[cfg(debug_assertions)]
-    type_name: &'static str,
+    guard_type: GuardType,
 }
 
 impl<I> TypeGuard<I> {
@@ -186,21 +209,21 @@ impl<I> TypeGuard<I> {
     pub unsafe fn from_inner<T: FromGuard<Inner = I>>(inner: T::Inner) -> Self {
         Self {
             inner,
-            type_id: TypeId::of::<T>(),
             #[cfg(debug_assertions)]
-            type_name: type_name::<T>(),
+            guard_type: GuardType::new::<T>(),
         }
     }
 
+    #[cfg(debug_assertions)]
     #[inline]
     pub fn type_id(&self) -> TypeId {
-        self.type_id
+        self.guard_type.type_id
     }
 
     #[cfg(debug_assertions)]
     #[inline]
     pub fn type_name(&self) -> &'static str {
-        self.type_name
+        self.guard_type.type_name
     }
 
     #[inline]
@@ -231,31 +254,27 @@ impl<T, U> TryFrom<TypeGuard<T>> for TypeGuardUnlocked<T, U> {
     type Error = TypeGuardConversionError;
 
     fn try_from(value: TypeGuard<T>) -> Result<Self, Self::Error> {
-        let type_id = TypeId::of::<U>();
-        if type_id != value.type_id {
-            Err(TypeGuardConversionError {
-                to: type_name::<U>(),
-                #[cfg(debug_assertions)]
-                from: value.type_name,
-                #[cfg(not(debug_assertions))]
-                from: value.type_id,
-            })
-        } else {
-            Ok(TypeGuardUnlocked {
-                inner: value.inner,
-                _phantom: PhantomData,
-            })
+        #[cfg(debug_assertions)]
+        {
+            let type_id = TypeId::of::<U>();
+            if type_id != value.type_id() {
+                return Err(TypeGuardConversionError {
+                    to: type_name::<U>(),
+                    from: value.type_name(),
+                });
+            }
         }
+        Ok(TypeGuardUnlocked {
+            inner: value.inner,
+            _phantom: PhantomData,
+        })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct TypeGuardConversionError {
     to: &'static str,
-    #[cfg(debug_assertions)]
     from: &'static str,
-    #[cfg(not(debug_assertions))]
-    from: TypeId,
 }
 
 impl Display for TypeGuardConversionError {

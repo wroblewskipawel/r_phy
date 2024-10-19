@@ -144,7 +144,8 @@ mod tests {
     }
 
     #[test]
-    fn test_guard_collection_entry_invalid_index() {
+    #[cfg(debug_assertions)]
+    fn test_guard_collection_entry_invalid_index_type_checked_in_debug() {
         let mut collection = GuardCollection::<u32>::default();
         let index_a = collection.push(A(42).into_guard()).unwrap();
         let index_b = collection.push(B(31).into_guard()).unwrap();
@@ -153,6 +154,19 @@ mod tests {
         assert!(entry.is_err());
         let entry: ScopedResult<A> = collection.entry(index_b);
         assert!(entry.is_err());
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn test_guard_collection_entry_invalid_index_type_check_skip_in_release() {
+        let mut collection = GuardCollection::<u32>::default();
+        let index_a = collection.push(A(42).into_guard()).unwrap();
+        let index_b = collection.push(B(31).into_guard()).unwrap();
+
+        let entry_b_invalid: ScopedEntry<'_, B> = collection.entry(index_a).unwrap();
+        assert_eq!(entry_b_invalid.0, 42);
+        let entry_a_invalid: ScopedEntry<'_, A> = collection.entry(index_b).unwrap();
+        assert_eq!(entry_a_invalid.0, 31);
     }
 
     #[test]
