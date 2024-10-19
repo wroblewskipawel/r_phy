@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_types::{A, B};
+    use crate::type_guard::test_types::{A, B};
 
     #[test]
     fn test_push_and_get() {

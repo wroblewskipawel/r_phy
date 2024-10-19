@@ -42,7 +42,7 @@ mod tests {
     use std::any::{type_name, TypeId};
 
     use crate::{
-        test_types::{A, B},
+        type_guard::test_types::{A, B},
         FromGuard, TypeGuardConversionError,
     };
 
