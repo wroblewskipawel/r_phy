@@ -2,13 +2,16 @@ use std::{error::Error, marker::PhantomData};
 
 use ash::vk::{self, MemoryRequirements, PhysicalDeviceMemoryProperties};
 
-use crate::device::{
-    memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
-    resources::buffer::ByteRange,
-    Device,
+use crate::{
+    device::{
+        memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
+        resources::buffer::ByteRange,
+        Device,
+    },
+    error::{AllocError, AllocResult},
 };
 
-use super::{AllocReq, AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReq, AllocReqTyped, Allocator, AllocatorCreate};
 
 #[derive(Debug, Default)]
 pub struct StaticAllocatorConfig {
@@ -91,13 +94,13 @@ impl Allocator for StaticAllocator {
         &mut self,
         device: &Device,
         req: AllocReqTyped<M>,
-    ) -> Result<Self::Allocation<M>, DeviceAllocError> {
+    ) -> AllocResult<Self::Allocation<M>> {
         let MemoryRequirements {
             size, alignment, ..
         } = req.requirements;
-        let memory_type_index =
-            req.get_memory_type_index(&device.physical_device.properties.memory)
-                .ok_or(DeviceAllocError::UnsupportedMemoryType)? as usize;
+        let memory_type_index = req
+            .get_memory_type_index(&device.physical_device.properties.memory)
+            .ok_or(AllocError::UnsupportedMemoryType)? as usize;
         let allocation = &mut self.allocations[memory_type_index];
         Ok(MemoryChunk {
             raw: MemoryChunkRaw {
@@ -105,7 +108,7 @@ impl Allocator for StaticAllocator {
                 range: allocation
                     .range
                     .alloc_raw(size as usize, alignment as usize)
-                    .ok_or(DeviceAllocError::OutOfMemory)?,
+                    .ok_or(AllocError::OutOfMemory)?,
             },
             _phantom: PhantomData,
         })

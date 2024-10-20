@@ -7,9 +7,12 @@ use std::{
 
 use ash::{extensions::ext, vk};
 use colored::{self, Colorize};
-use type_kit::Destroy;
+use type_kit::{Create, Destroy};
 
-use crate::Instance;
+use crate::{
+    error::{VkError, VkResult},
+    Instance,
+};
 
 unsafe extern "system" fn debug_messenger_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -70,9 +73,7 @@ impl DebugUtils {
         REQUIRED_LAYERS.into_iter()
     }
 
-    pub fn check_required_layer_support(
-        entry: &ash::Entry,
-    ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
+    pub fn check_required_layer_support(entry: &ash::Entry) -> VkResult<Vec<*const c_char>> {
         let supported_layers = entry.enumerate_instance_layer_properties()?;
         let supported =
             Self::iterate_required_layers().try_fold(Vec::new(), |mut supported, req| {
@@ -83,25 +84,30 @@ impl DebugUtils {
                         supported.push(req.as_ptr());
                         supported
                     })
-                    .ok_or(format!(
-                        "Required layer {} not supported!",
-                        req.to_string_lossy()
-                    ))
+                    .ok_or(VkError::LayerNotSupported(req))
             })?;
         Ok(supported)
     }
+}
 
-    pub fn create(instance: &Instance) -> Result<DebugUtils, Box<dyn Error>> {
-        let loader: ext::DebugUtils = instance.load();
+impl Create for DebugUtils {
+    type Config<'a> = ();
+    type CreateError = VkError;
+
+    fn create<'a>(
+        _config: Self::Config<'a>,
+        context: Self::Context<'a>,
+    ) -> Result<Self, Self::CreateError> {
+        let loader: ext::DebugUtils = context.load();
         let messenger = unsafe { loader.create_debug_utils_messenger(&Self::create_info(), None)? };
         Ok(Self { messenger, loader })
     }
 }
 
 impl Destroy for DebugUtils {
-    type Context<'a> = ();
+    type Context<'a> = &'a Instance;
 
-    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, _: Self::Context<'a>) {
         unsafe {
             self.loader
                 .destroy_debug_utils_messenger(self.messenger, None);

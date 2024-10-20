@@ -10,10 +10,12 @@ use std::{
 
 pub use layout::*;
 pub use presets::*;
-use type_kit::Destroy;
+use type_kit::{Create, Destroy};
 pub use writer::*;
 
 use ash::vk;
+
+use crate::error::VkError;
 
 use super::{
     pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout},
@@ -136,13 +138,40 @@ impl<T: DescriptorLayout> Descriptor<T> {
     }
 }
 
-impl Destroy for DescriptorPoolData {
-    type Context<'a> = &'a Device;
+impl<L: DescriptorLayout> Create for DescriptorPool<L> {
+    type Config<'a> = DescriptorSetWriter<L>;
+    type CreateError = VkError;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        unsafe {
-            context.destroy_descriptor_pool(self.pool, None);
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let pool_sizes = L::get_descriptor_pool_sizes(config.num_sets() as u32);
+        let pool_create_info = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(&pool_sizes)
+            .max_sets(config.num_sets() as u32);
+        let pool = unsafe {
+            context
+                .device
+                .create_descriptor_pool(&pool_create_info, None)?
         };
+        let layout = context.get_descriptor_set_layout::<L>()?;
+        let sets = unsafe {
+            context.device.allocate_descriptor_sets(
+                &vk::DescriptorSetAllocateInfo::builder()
+                    .descriptor_pool(pool)
+                    .set_layouts(&vec![layout.layout; config.num_sets()]),
+            )?
+        };
+        let sets = context
+            .write_descriptors(config, sets)
+            .into_iter()
+            .map(Into::<vk::DescriptorSet>::into)
+            .collect();
+        Ok(DescriptorPool {
+            data: DescriptorPoolData { pool, sets },
+            _phantom: PhantomData,
+        })
     }
 }
 
@@ -150,6 +179,8 @@ impl<L: DescriptorLayout> Destroy for DescriptorPool<L> {
     type Context<'a> = &'a Device;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.data.destroy(context);
+        unsafe {
+            context.destroy_descriptor_pool(self.data.pool, None);
+        };
     }
 }

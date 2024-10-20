@@ -9,7 +9,9 @@ pub use push_constant::*;
 pub use states::*;
 
 use ash::{self, vk};
-use std::{error::Error, ffi::CStr, marker::PhantomData, path::Path};
+use std::{ffi::CStr, marker::PhantomData, path::Path};
+
+use crate::error::{ShaderError, ShaderResult};
 
 use super::Device;
 
@@ -30,17 +32,14 @@ impl ShaderModule {
         }
     }
 
-    fn get_shader_stage(path: &Path) -> Result<vk::ShaderStageFlags, Box<dyn Error>> {
+    fn get_shader_stage(path: &Path) -> ShaderResult<vk::ShaderStageFlags> {
         match path.file_stem().map(|stem| stem.to_str().unwrap_or("")) {
             Some(stem) => match stem {
                 "frag" => Ok(vk::ShaderStageFlags::FRAGMENT),
                 "vert" => Ok(vk::ShaderStageFlags::VERTEX),
-                stem => Err(format!(
-                    "Invalid shader module path - unknown shader file type: {}!",
-                    stem
-                ))?,
+                stem => Err(ShaderError::UnknowStage(stem.to_string()))?,
             },
-            None => Err("Invalid shader module path - mising file name component!")?,
+            None => Err(ShaderError::InvalidFile(path.to_string_lossy().to_string()))?,
         }
     }
 }
@@ -79,7 +78,7 @@ impl<'a> Modules<'a> {
 }
 
 pub trait ModuleLoader {
-    fn load<'a>(&self, device: &'a Device) -> Result<Modules<'a>, Box<dyn Error>>;
+    fn load<'a>(&self, device: &'a Device) -> ShaderResult<Modules<'a>>;
 }
 
 pub struct ShaderDirectory<'a> {
@@ -93,7 +92,7 @@ impl<'a> ShaderDirectory<'a> {
 }
 
 impl<'b> ModuleLoader for ShaderDirectory<'b> {
-    fn load<'a>(&self, device: &'a Device) -> Result<Modules<'a>, Box<dyn Error>> {
+    fn load<'a>(&self, device: &'a Device) -> ShaderResult<Modules<'a>> {
         let modules = Modules {
             modules: self
                 .path
@@ -113,7 +112,7 @@ impl<'b> ModuleLoader for ShaderDirectory<'b> {
 }
 
 impl Device {
-    fn load_shader_module(&self, path: &Path) -> Result<ShaderModule, Box<dyn Error>> {
+    fn load_shader_module(&self, path: &Path) -> ShaderResult<ShaderModule> {
         let code = std::fs::read(path)?;
         let stage = ShaderModule::get_shader_stage(path)?;
         let create_info = vk::ShaderModuleCreateInfo {

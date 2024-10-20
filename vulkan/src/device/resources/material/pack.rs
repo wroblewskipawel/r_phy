@@ -1,20 +1,23 @@
 use std::{any::TypeId, error::Error, marker::PhantomData};
 
-use type_kit::{Destroy, DropGuard};
+use type_kit::{Create, Destroy, DropGuard};
 
-use crate::device::{
-    command::operation::Graphics,
-    descriptor::{
-        Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
-        PodUniform,
+use crate::{
+    device::{
+        command::operation::Graphics,
+        descriptor::{
+            Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
+            PodUniform,
+        },
+        memory::{AllocReq, Allocator},
+        resources::{
+            buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
+            image::{ImageReader, Texture2D, Texture2DPartial},
+            PartialBuilder,
+        },
+        Device,
     },
-    memory::{AllocReq, Allocator},
-    resources::{
-        buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
-        image::{ImageReader, Texture2D, Texture2DPartial},
-        PartialBuilder,
-    },
-    Device,
+    error::VkResult,
 };
 
 use super::{Material, TextureSamplers};
@@ -105,7 +108,7 @@ impl Device {
     fn prepare_material_pack_textures<'a, M: Material>(
         &self,
         materials: &'a [M],
-    ) -> Result<Option<Vec<Texture2DPartial<'a>>>, Box<dyn Error>> {
+    ) -> VkResult<Option<Vec<Texture2DPartial<'a>>>> {
         if M::NUM_IMAGES > 0 {
             let textures = materials
                 .iter()
@@ -129,10 +132,10 @@ impl Device {
         &self,
         allocator: &mut A,
         textures: Vec<Texture2DPartial<'a>>,
-    ) -> Result<Vec<Texture2D<A>>, Box<dyn Error>> {
+    ) -> VkResult<Vec<Texture2D<A>>> {
         textures
             .into_iter()
-            .map(|texture| texture.finalize(self, allocator))
+            .map(|texture| Texture2D::create(texture, (self, allocator)))
             .collect()
     }
 
@@ -160,7 +163,7 @@ impl Device {
     ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
     {
         let MaterialUniformPartial { uniform, data } = partial;
-        let mut uniform_buffer = uniform.finalize(self, allocator)?;
+        let mut uniform_buffer = UniformBuffer::create(uniform, (self, allocator))?;
         for (index, uniform) in data.into_iter().enumerate() {
             *uniform_buffer[index].as_inner_mut() = *uniform;
         }
@@ -213,7 +216,7 @@ impl Device {
         } else {
             writer
         };
-        let descriptors = self.create_descriptor_pool(writer)?;
+        let descriptors = DescriptorPool::create(writer, self)?;
         let data = MaterialPackData {
             textures,
             uniforms,

@@ -5,16 +5,18 @@ pub use presets::*;
 use std::{
     any::TypeId,
     collections::HashMap,
-    error::Error,
     marker::PhantomData,
     sync::{Once, RwLock},
 };
 
 use ash::vk;
 
-use crate::device::{
-    descriptor::{DescriptorBinding, DescriptorLayout},
-    Device,
+use crate::{
+    device::{
+        descriptor::{DescriptorBinding, DescriptorLayout},
+        Device,
+    },
+    error::VkResult,
 };
 use type_kit::{Cons, Nil};
 
@@ -315,7 +317,7 @@ impl Device {
     fn get_descriptor_list_entry<'a, T: DescriptorLayoutList>(
         &self,
         mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> VkResult<()> {
         if !T::exhausted() {
             if let Some(entry) = iter.next() {
                 *entry = self.get_descriptor_set_layout::<T::Item>()?.layout;
@@ -328,13 +330,13 @@ impl Device {
 
     pub fn get_descriptor_layouts<T: DescriptorLayoutList>(
         &self,
-    ) -> Result<Vec<vk::DescriptorSetLayout>, Box<dyn Error>> {
+    ) -> VkResult<Vec<vk::DescriptorSetLayout>> {
         let mut layouts = vec![vk::DescriptorSetLayout::null(); T::len()];
         self.get_descriptor_list_entry::<T>(layouts.iter_mut().rev())?;
         Ok(layouts)
     }
 
-    pub fn get_pipeline_layout<L: Layout>(&self) -> Result<PipelineLayout<L>, Box<dyn Error>> {
+    pub fn get_pipeline_layout<L: Layout>(&self) -> VkResult<PipelineLayout<L>> {
         let push_ranges = PushConstantRanges::<L::PushConstants>::get_ranges();
         let layout_map = get_pipeline_layout_map();
         let layout = if let Some(layout) = {

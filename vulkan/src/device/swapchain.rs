@@ -1,12 +1,18 @@
 use ash::{extensions::khr, vk};
 use std::{error::Error, ffi::CStr};
-use type_kit::Destroy;
+use type_kit::{Create, CreateResult, Destroy};
 
-use crate::{surface::PhysicalDeviceSurfaceProperties, Context};
+use crate::{
+    error::{VkError, VkResult},
+    surface::PhysicalDeviceSurfaceProperties,
+    Context,
+};
 
 use super::{
     command::{
-        level::Primary, operation::Graphics, FinishedCommand, Persistent, SubmitSemaphoreState,
+        level::Primary,
+        operation::{Graphics, Operation},
+        FinishedCommand, Persistent, SubmitSemaphoreState,
     },
     framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
     Device,
@@ -108,89 +114,11 @@ impl Device {
 }
 
 impl Context {
-    pub fn create_swapchain_image_sync<A: AttachmentList>(
-        &self,
-        swapchain: &Swapchain<A>,
-    ) -> Result<Vec<SwapchainImageSync>, Box<dyn Error>> {
-        unsafe {
-            swapchain
-                .images
-                .iter()
-                .map(|_| {
-                    let create_info = vk::SemaphoreCreateInfo::default();
-                    let draw_ready = self.device.create_semaphore(&create_info, None)?;
-                    let draw_finished = self.device.create_semaphore(&create_info, None)?;
-                    Ok(SwapchainImageSync {
-                        draw_ready,
-                        draw_finished,
-                    })
-                })
-                .collect()
-        }
-    }
-
-    pub fn create_swapchain<A: AttachmentList>(
-        &self,
-        framebuffer_builder: impl Fn(
-            vk::ImageView,
-            vk::Extent2D,
-        ) -> Result<Framebuffer<A>, Box<dyn Error>>,
-    ) -> Result<Swapchain<A>, Box<dyn Error>> {
-        let PhysicalDeviceSurfaceProperties {
-            capabilities:
-                vk::SurfaceCapabilitiesKHR {
-                    current_transform, ..
-                },
-            surface_format,
-            present_mode,
-            ..
-        } = self.physical_device.surface_properties;
-        let min_image_count = self.physical_device.surface_properties.get_image_count();
-        let image_extent = self.physical_device.surface_properties.get_current_extent();
-        let queue_family_indices = [self.physical_device.queue_families.graphics];
-        let create_info = vk::SwapchainCreateInfoKHR::builder()
-            .pre_transform(current_transform)
-            .image_extent(image_extent)
-            .min_image_count(min_image_count)
-            .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
-            .image_format(surface_format.format)
-            .image_color_space(surface_format.color_space)
-            .present_mode(present_mode)
-            .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-            .queue_family_indices(&queue_family_indices)
-            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-            .clipped(true)
-            .image_array_layers(1)
-            .surface((&*self.surface).into());
-        let loader: khr::Swapchain = self.load();
-        let handle = unsafe { loader.create_swapchain(&create_info, None)? };
-        let images = unsafe {
-            loader
-                .get_swapchain_images(handle)?
-                .into_iter()
-                .map(|image| self.create_swapchain_image(image, surface_format))
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let framebuffers = images
-            .iter()
-            .map(|image| framebuffer_builder(image.view, image_extent))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Swapchain {
-            num_images: images.len(),
-            extent: image_extent,
-            images,
-            framebuffers,
-            loader,
-            handle,
-        })
-    }
-
     fn create_swapchain_image(
         &self,
         image: vk::Image,
         surface_format: vk::SurfaceFormatKHR,
-    ) -> Result<SwapchainImage, Box<dyn Error>> {
+    ) -> VkResult<SwapchainImage> {
         unsafe {
             let view = self.device.create_image_view(
                 &vk::ImageViewCreateInfo::builder()
@@ -216,6 +144,23 @@ impl Context {
     }
 }
 
+impl Create for SwapchainImageSync {
+    type Config<'a> = ();
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(_: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let create_info = vk::SemaphoreCreateInfo::default();
+        unsafe {
+            let draw_ready = context.device.create_semaphore(&create_info, None)?;
+            let draw_finished = context.device.create_semaphore(&create_info, None)?;
+            Ok(SwapchainImageSync {
+                draw_ready,
+                draw_finished,
+            })
+        }
+    }
+}
+
 impl Destroy for SwapchainImageSync {
     type Context<'a> = &'a Device;
 
@@ -227,8 +172,79 @@ impl Destroy for SwapchainImageSync {
     }
 }
 
+pub trait FramebufferBuilder<A: AttachmentList> {
+    fn build(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> VkResult<Framebuffer<A>>;
+}
+
+impl<A: AttachmentList, F> FramebufferBuilder<A> for F
+where
+    F: Fn(vk::ImageView, vk::Extent2D) -> VkResult<Framebuffer<A>>,
+{
+    #[inline]
+    fn build(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> VkResult<Framebuffer<A>> {
+        self(image_view, extent)
+    }
+}
+
+impl<A: AttachmentList> Create for Swapchain<A> {
+    type Config<'a> = &'a dyn FramebufferBuilder<A>;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let surface_properties = &context.physical_device.surface_properties;
+        let &PhysicalDeviceSurfaceProperties {
+            capabilities:
+                vk::SurfaceCapabilitiesKHR {
+                    current_transform, ..
+                },
+            surface_format,
+            present_mode,
+            ..
+        } = surface_properties;
+        let min_image_count = surface_properties.get_image_count();
+        let image_extent = surface_properties.get_current_extent();
+        let queue_family_indices = [Graphics::get_queue_family_index(context)];
+        let create_info = vk::SwapchainCreateInfoKHR::builder()
+            .pre_transform(current_transform)
+            .image_extent(image_extent)
+            .min_image_count(min_image_count)
+            .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
+            .image_format(surface_format.format)
+            .image_color_space(surface_format.color_space)
+            .present_mode(present_mode)
+            .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .queue_family_indices(&queue_family_indices)
+            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .clipped(true)
+            .image_array_layers(1)
+            .surface((&*context.surface).into());
+        let loader: khr::Swapchain = context.load();
+        let handle = unsafe { loader.create_swapchain(&create_info, None)? };
+        let images = unsafe {
+            loader
+                .get_swapchain_images(handle)?
+                .into_iter()
+                .map(|image| context.create_swapchain_image(image, surface_format))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let framebuffers = images
+            .iter()
+            .map(|image| config.build(image.view, image_extent))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Swapchain {
+            num_images: images.len(),
+            extent: image_extent,
+            images,
+            framebuffers,
+            loader,
+            handle,
+        })
+    }
+}
+
 impl<A: AttachmentList> Destroy for Swapchain<A> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
         self.framebuffers.iter_mut().for_each(|framebuffer| {

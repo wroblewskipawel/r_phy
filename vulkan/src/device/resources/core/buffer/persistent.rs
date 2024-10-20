@@ -1,11 +1,14 @@
-use std::{error::Error, ffi::c_void};
+use std::ffi::c_void;
 
-use type_kit::Destroy;
+use type_kit::{Create, Destroy};
 
-use crate::device::{
-    memory::{AllocReq, Allocator, HostCoherent, Memory},
-    resources::PartialBuilder,
-    Device,
+use crate::{
+    device::{
+        memory::{AllocReq, Allocator, HostCoherent, Memory},
+        resources::PartialBuilder,
+        Device,
+    },
+    error::{VkError, VkResult},
 };
 
 use super::{Buffer, BufferBuilder, BufferPartial, ByteRange};
@@ -35,7 +38,7 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
     type Config = BufferBuilder<'a, HostCoherent>;
     type Target<A: Allocator> = PersistentBuffer<A>;
 
-    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
         let buffer = BufferPartial::prepare(config, device)?;
         Ok(PersistentBufferPartial { buffer })
     }
@@ -43,13 +46,18 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         self.buffer.requirements()
     }
+}
 
-    fn finalize<A: Allocator>(
-        self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Target<A>, Box<dyn Error>> {
-        let mut buffer = self.buffer.finalize(device, allocator)?;
+impl<A: Allocator> Create for PersistentBuffer<A> {
+    type Config<'a> = PersistentBufferPartial;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (device, allocator) = context;
+        let mut buffer = Buffer::create(config.buffer, (device, allocator))?;
         let ptr = buffer.memory.map(
             &device,
             ByteRange {

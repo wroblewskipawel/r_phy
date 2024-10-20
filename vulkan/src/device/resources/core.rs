@@ -1,8 +1,9 @@
-use std::error::Error;
-
-use crate::device::{
-    memory::{AllocReq, Allocator},
-    Device,
+use crate::{
+    device::{
+        memory::{AllocReq, Allocator},
+        Device,
+    },
+    error::VkResult,
 };
 
 pub mod buffer;
@@ -12,11 +13,6 @@ pub trait PartialBuilder<'a>: Sized {
     type Config;
     type Target<A: Allocator>;
 
-    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>>;
+    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self>;
     fn requirements(&self) -> impl Iterator<Item = AllocReq>;
-    fn finalize<A: Allocator>(
-        self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Target<A>, Box<dyn Error>>;
 }

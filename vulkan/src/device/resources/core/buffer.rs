@@ -6,16 +6,19 @@ mod uniform;
 pub use persistent::*;
 pub use range::*;
 pub use staging::*;
-use type_kit::Destroy;
+use type_kit::{Create, Destroy};
 pub use uniform::*;
 
 use ash::vk;
 
-use std::{error::Error, marker::PhantomData, usize};
+use std::{marker::PhantomData, usize};
 
-use crate::device::{
-    memory::{AllocReq, AllocReqTyped, Allocator, MemoryProperties},
-    Device,
+use crate::{
+    device::{
+        memory::{AllocReq, AllocReqTyped, Allocator, MemoryProperties},
+        Device,
+    },
+    error::{VkError, VkResult},
 };
 
 use super::PartialBuilder;
@@ -70,7 +73,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     type Config = BufferBuilder<'a, M>;
     type Target<A: Allocator> = Buffer<M, A>;
 
-    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
         let BufferBuilder {
             info:
                 BufferInfo {
@@ -97,13 +100,18 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         [self.req.into()].into_iter()
     }
+}
 
-    fn finalize<A: Allocator>(
-        self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Target<A>, Box<dyn Error>> {
-        let BufferPartial { size, buffer, req } = self;
+impl<M: MemoryProperties, A: Allocator> Create for Buffer<M, A> {
+    type Config<'a> = BufferPartial<M>;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (device, allocator) = context;
+        let BufferPartial { size, buffer, req } = config;
         let memory = allocator.allocate(device, req)?;
         device.bind_memory(buffer, &memory)?;
         Ok(Buffer {

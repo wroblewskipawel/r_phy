@@ -1,15 +1,18 @@
 mod reader;
 mod texture;
 
-use crate::device::{
-    memory::{AllocReq, AllocReqTyped, Allocator, DeviceLocal, MemoryProperties},
-    Device,
+use crate::{
+    device::{
+        memory::{AllocReq, AllocReqTyped, Allocator, DeviceLocal, MemoryProperties},
+        Device,
+    },
+    error::{VkError, VkResult},
 };
 
 use super::PartialBuilder;
 use ash::vk;
-use std::{error::Error, marker::PhantomData};
-use type_kit::Destroy;
+use std::marker::PhantomData;
+use type_kit::{Create, Destroy};
 
 pub use reader::*;
 pub use texture::*;
@@ -36,7 +39,7 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
     type Config = Image2DBuilder<M>;
     type Target<A: Allocator> = Image2D<M, A>;
 
-    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
         let info = config.info;
         let image_info = vk::ImageCreateInfo::builder()
             .flags(info.flags)
@@ -61,38 +64,6 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         [self.req.into()].into_iter()
-    }
-
-    fn finalize<A: Allocator>(
-        self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Target<A>, Box<dyn Error>> {
-        let Image2DPartial { image, info, req } = self;
-        let memory = allocator.allocate(device, req)?;
-        device.bind_memory(image, &memory)?;
-        let view_info = vk::ImageViewCreateInfo::builder()
-            .components(vk::ComponentMapping::default())
-            .format(info.format)
-            .image(image)
-            .view_type(info.view_type)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: info.aspect_mask,
-                base_mip_level: 0,
-                level_count: info.mip_levels,
-                base_array_layer: 0,
-                layer_count: info.array_layers,
-            });
-        let image_view = unsafe { device.create_image_view(&view_info, None)? };
-        Ok(Image2D {
-            array_layers: info.array_layers,
-            mip_levels: info.mip_levels,
-            layout: vk::ImageLayout::UNDEFINED,
-            extent: info.extent,
-            image,
-            image_view,
-            memory,
-        })
     }
 }
 
@@ -125,9 +96,9 @@ impl Device {
     pub fn create_color_attachment_image<A: Allocator>(
         &self,
         allocator: &mut A,
-    ) -> Result<Image2D<DeviceLocal, A>, Box<dyn Error>> {
+    ) -> VkResult<Image2D<DeviceLocal, A>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let image = Image2DPartial::prepare(
+        let partial = Image2DPartial::prepare(
             Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self.physical_device.attachment_properties.formats.color,
@@ -142,17 +113,16 @@ impl Device {
                 mip_levels: 1,
             }),
             self,
-        )?
-        .finalize(self, allocator)?;
-        Ok(image)
+        )?;
+        Image2D::create(partial, (self, allocator))
     }
 
     pub fn create_depth_stencil_attachment_image<A: Allocator>(
         &self,
         allocator: &mut A,
-    ) -> Result<Image2D<DeviceLocal, A>, Box<dyn Error>> {
+    ) -> VkResult<Image2D<DeviceLocal, A>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let image = Image2DPartial::prepare(
+        let partial = Image2DPartial::prepare(
             Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self
@@ -170,9 +140,45 @@ impl Device {
                 mip_levels: 1,
             }),
             self,
-        )?
-        .finalize(self, allocator)?;
-        Ok(image)
+        )?;
+        Image2D::create(partial, (self, allocator))
+    }
+}
+
+impl<M: MemoryProperties, A: Allocator> Create for Image2D<M, A> {
+    type Config<'a> = Image2DPartial<M>;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (device, allocator) = context;
+        let Image2DPartial { image, info, req } = config;
+        let memory = allocator.allocate(device, req)?;
+        device.bind_memory(image, &memory)?;
+        let view_info = vk::ImageViewCreateInfo::builder()
+            .components(vk::ComponentMapping::default())
+            .format(info.format)
+            .image(image)
+            .view_type(info.view_type)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: info.aspect_mask,
+                base_mip_level: 0,
+                level_count: info.mip_levels,
+                base_array_layer: 0,
+                layer_count: info.array_layers,
+            });
+        let image_view = unsafe { device.create_image_view(&view_info, None)? };
+        Ok(Image2D {
+            array_layers: info.array_layers,
+            mip_levels: info.mip_levels,
+            layout: vk::ImageLayout::UNDEFINED,
+            extent: info.extent,
+            image,
+            image_view,
+            memory,
+        })
     }
 }
 

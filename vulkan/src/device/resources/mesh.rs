@@ -4,7 +4,6 @@ mod pack;
 use ash::vk;
 pub use list::*;
 pub use pack::*;
-use type_kit::Destroy;
 
 use std::ops::Index;
 
@@ -12,10 +11,7 @@ use strum::EnumCount;
 
 use to_resolve::model::{Mesh, Vertex};
 
-use crate::device::{
-    memory::{Allocator, DeviceLocal},
-    Device,
-};
+use crate::device::memory::{Allocator, DeviceLocal};
 
 use super::buffer::{Buffer, BufferPartial, ByteRange};
 
@@ -91,15 +87,6 @@ pub struct MeshPackData<A: Allocator> {
 impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLocal, A> {
     fn from(value: &'a mut MeshPackData<A>) -> Self {
         (&mut value.buffer).into()
-    }
-}
-
-impl<A: Allocator> Destroy for MeshPackData<A> {
-    type Context<'a> = (&'a Device, &'a mut A);
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        let (device, allocator) = context;
-        self.buffer.destroy((device, allocator));
     }
 }
 

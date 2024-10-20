@@ -1,10 +1,13 @@
 pub mod presets;
 
-use std::{error::Error, marker::PhantomData, usize};
+use std::{marker::PhantomData, usize};
 
 use ash::vk::{self, Extent2D};
 
-use crate::device::{AttachmentProperties, Device};
+use crate::{
+    device::{AttachmentProperties, Device},
+    error::VkResult,
+};
 use type_kit::{Cons, Nil};
 
 use super::{
@@ -624,7 +627,7 @@ impl Device {
         &self,
         builder: Builder<C::Attachments>,
         extent: Extent2D,
-    ) -> Result<Framebuffer<C::Attachments>, Box<dyn Error>> {
+    ) -> VkResult<Framebuffer<C::Attachments>> {
         let render_pass = self.get_render_pass::<C>()?;
         let attachments = builder.get_attachments();
         let create_info = vk::FramebufferCreateInfo::builder()

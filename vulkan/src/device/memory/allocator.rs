@@ -5,7 +5,7 @@ mod r#static;
 use std::{
     any::{type_name, TypeId},
     error::Error,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::Debug,
     marker::PhantomData,
 };
 
@@ -15,34 +15,9 @@ pub use default::*;
 pub use page::*;
 pub use r#static::*;
 
-use crate::device::Device;
+use crate::{device::Device, error::AllocResult};
 
 use super::{DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, Resource};
-
-#[derive(Debug, Clone, Copy)]
-pub enum DeviceAllocError {
-    OutOfMemory,
-    UnsupportedMemoryType,
-    VulkanError(vk::Result),
-}
-
-impl Display for DeviceAllocError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            DeviceAllocError::OutOfMemory => write!(f, "Out of memory"),
-            DeviceAllocError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
-            DeviceAllocError::VulkanError(err) => write!(f, "Vulkan error: {}", err),
-        }
-    }
-}
-
-impl From<vk::Result> for DeviceAllocError {
-    fn from(err: vk::Result) -> Self {
-        DeviceAllocError::VulkanError(err)
-    }
-}
-
-impl Error for DeviceAllocError {}
 
 pub trait AllocatorCreate: Sized + 'static {
     type Config;
@@ -58,7 +33,7 @@ pub trait Allocator: AllocatorCreate {
         &mut self,
         device: &Device,
         request: AllocReqTyped<M>,
-    ) -> Result<Self::Allocation<M>, DeviceAllocError>;
+    ) -> AllocResult<Self::Allocation<M>>;
 
     fn free<M: MemoryProperties>(&mut self, device: &Device, allocation: &mut Self::Allocation<M>);
 }

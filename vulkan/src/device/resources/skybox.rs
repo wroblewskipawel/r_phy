@@ -1,16 +1,20 @@
-use std::error::Error;
 use std::path::Path;
 
 use physics::shape;
 use to_resolve::{camera::CameraMatrices, model::CommonVertex};
 
-use crate::device::{
-    descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-    memory::Allocator,
-    pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PipelineLayoutBuilder},
-    Device,
+use crate::{
+    device::{
+        descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
+        memory::Allocator,
+        pipeline::{
+            GraphicsPipeline, GraphicsPipelineConfig, PipelineLayoutBuilder, ShaderDirectory,
+        },
+        Device,
+    },
+    error::VkError,
 };
-use type_kit::{Cons, Destroy, DropGuard, Nil};
+use type_kit::{Cons, Create, Destroy, DropGuard, Nil};
 
 use super::{
     image::{ImageReader, Texture2D},
@@ -27,21 +31,27 @@ pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<
     pub pipeline: DropGuard<GraphicsPipeline<L>>,
 }
 
-impl Device {
-    pub fn create_skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>>(
-        &self,
-        allocator: &mut A,
-        path: &Path,
-        modules: impl ModuleLoader,
-    ) -> Result<Skybox<A, L>, Box<dyn Error>> {
-        let cubemap = self.load_texture(allocator, ImageReader::cube(path)?)?;
-        let descriptor = self.create_descriptor_pool(
+const SKYBOX_SHADER: &'static str = "_resources/shaders/spv/skybox";
+
+impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Create for Skybox<A, L> {
+    type Config<'a> = &'a Path;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (device, allocator) = context;
+        let cubemap = device.load_texture(allocator, ImageReader::cube(config)?)?;
+        let descriptor = DescriptorPool::create(
             DescriptorSetWriter::<TextureDescriptorSet<A>>::new(1)
                 .write_images::<Texture2D<A>, _>(std::slice::from_ref(&cubemap)),
+            device,
         )?;
-        let layout = self.get_pipeline_layout::<L::Layout>()?;
-        let pipeline = self.create_graphics_pipeline(layout, &modules)?;
-        let mesh_pack = self.load_mesh_pack(allocator, &[shape::Cube::new(1.0).into()])?;
+        let layout = device.get_pipeline_layout::<L::Layout>()?;
+        let modules = ShaderDirectory::new(Path::new(SKYBOX_SHADER));
+        let pipeline = GraphicsPipeline::create((layout, &modules), device)?;
+        let mesh_pack = device.load_mesh_pack(allocator, &[shape::Cube::new(1.0).into()])?;
         Ok(Skybox {
             cubemap: DropGuard::new(cubemap),
             mesh_pack: DropGuard::new(mesh_pack),

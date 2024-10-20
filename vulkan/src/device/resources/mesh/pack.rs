@@ -1,16 +1,22 @@
-use std::{any::TypeId, error::Error, marker::PhantomData};
+use std::{any::TypeId, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{Destroy, DropGuard};
+use type_kit::{Create, CreateResult, Destroy};
 
-use crate::device::{
-    command::operation::{self, Operation},
-    memory::{AllocReq, Allocator},
-    resources::{
-        buffer::{BufferBuilder, BufferInfo, BufferPartial, Range, StagingBufferBuilder},
-        PartialBuilder,
+use crate::{
+    device::{
+        command::operation::{self, Operation},
+        memory::{AllocReq, Allocator},
+        resources::{
+            buffer::{
+                Buffer, BufferBuilder, BufferInfo, BufferPartial, Range, StagingBuffer,
+                StagingBufferBuilder,
+            },
+            PartialBuilder,
+        },
+        Device,
     },
-    Device,
+    error::{VkError, VkResult},
 };
 use to_resolve::model::{Mesh, Vertex};
 
@@ -22,7 +28,7 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
     type Config = &'a [Mesh<V>];
     type Target<A: Allocator> = MeshPack<V, A>;
 
-    fn prepare(config: Self::Config, device: &Device) -> Result<Self, Box<dyn Error>> {
+    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
         let num_vertices = config.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = config.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -52,12 +58,24 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
         self.partial.buffer.requirements()
     }
+}
 
-    fn finalize<A: Allocator>(
-        self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Target<A>, Box<dyn Error>> {
+pub struct MeshPackPartial<'a, V: Vertex> {
+    partial: MeshPackDataPartial<'a, V>,
+}
+
+#[derive(Debug)]
+pub struct MeshPack<V: Vertex, A: Allocator> {
+    pub data: MeshPackData<A>,
+    _phantom: PhantomData<V>,
+}
+
+impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
+    type Config<'a> = MeshPackPartial<'a, V>;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let (device, allocator) = context;
         let MeshPackPartial {
             partial:
                 MeshPackDataPartial {
@@ -65,15 +83,15 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
                     buffer_ranges,
                     meshes,
                 },
-        } = self;
-        let mut buffer = buffer.finalize(device, allocator)?;
+        } = config;
+        let mut buffer = Buffer::create(buffer, (device, allocator))?;
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let mut builder = StagingBufferBuilder::new();
         let vertex_range = builder.append::<V>(num_vertices);
         let index_range = builder.append::<u32>(num_indices);
         let (vertex_ranges, index_ranges) = {
-            let mut staging_buffer = device.create_stagging_buffer(builder)?;
+            let mut staging_buffer = StagingBuffer::create(builder, device)?;
             let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
             let vertex_ranges = meshes
                 .iter()
@@ -84,7 +102,8 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
                 .iter()
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
-            staging_buffer.transfer_buffer_data(&mut buffer, 0)?;
+            staging_buffer.transfer_buffer_data(device, &mut buffer, 0)?;
+            staging_buffer.destroy(device);
             (vertex_ranges, index_ranges)
         };
         let meshes = vertex_ranges
@@ -101,27 +120,17 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
             meshes,
         };
         Ok(MeshPack {
-            data: DropGuard::new(data),
+            data,
             _phantom: PhantomData,
         })
     }
-}
-
-pub struct MeshPackPartial<'a, V: Vertex> {
-    partial: MeshPackDataPartial<'a, V>,
-}
-
-#[derive(Debug)]
-pub struct MeshPack<V: Vertex, A: Allocator> {
-    pub data: DropGuard<MeshPackData<A>>,
-    _phantom: PhantomData<V>,
 }
 
 impl<V: Vertex, A: Allocator> Destroy for MeshPack<V, A> {
     type Context<'a> = (&'a Device, &'a mut A);
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.data.destroy(context);
+        self.data.buffer.destroy(context);
     }
 }
 
@@ -190,7 +199,7 @@ impl<'a, V: Vertex, A: Allocator> From<&'a mut MeshPack<V, A>> for &'a mut MeshP
 
 impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for MeshPackBinding {
     fn from(value: &'a MeshPack<V, A>) -> Self {
-        (&*value.data).into()
+        (&value.data).into()
     }
 }
 
@@ -228,8 +237,8 @@ impl Device {
         &self,
         allocator: &mut A,
         meshes: &[Mesh<V>],
-    ) -> Result<MeshPack<V, A>, Box<dyn Error>> {
-        let mesh_pack = MeshPackPartial::prepare(meshes, self)?.finalize(self, allocator)?;
-        Ok(mesh_pack)
+    ) -> VkResult<MeshPack<V, A>> {
+        let partial = MeshPackPartial::prepare(meshes, self)?;
+        MeshPack::create(partial, (self, allocator))
     }
 }

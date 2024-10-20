@@ -1,5 +1,5 @@
 use math::types::Matrix4;
-use type_kit::{Cons, Contains, Destroy, DropGuard, Marker, Nil};
+use type_kit::{Cons, Contains, Create, Destroy, DropGuard, Marker, Nil};
 use vulkan::device::memory::DefaultAllocator;
 use vulkan::device::renderer::deferred::DeferredRenderer;
 use vulkan::device::resources::{
@@ -164,16 +164,10 @@ pub struct VulkanRendererContext<
     resources: VulkanResourcePack<R, M, V, S>,
 }
 
-// TODO: Error handling should be improved - currently when shader source files are missing,
-// execution ends with panic! while dropping HostMappedMemory of UniforBuffer structure
-// while error message indicating true cause of the issue is never presented to the user
-// TODO: User should be able to load custom shareds,
-// while also some preset of preconfigured one should be available
-// API for user-defined shaders should be based on PipelineLayoutBuilder type-list
 impl VulkanRenderer {
     pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
         let context = Context::build(window)?;
-        let renderer = context.create_deferred_renderer(&mut DefaultAllocator {})?;
+        let renderer = DeferredRenderer::create((), (&context, &mut DefaultAllocator {}))?;
         Ok(Self {
             context: Rc::new(RefCell::new(context)),
             renderer: Rc::new(RefCell::new(DropGuard::new(renderer))),
@@ -192,7 +186,7 @@ impl<
     fn drop(&mut self) {
         let context = self.context.borrow();
         let _ = self.context.borrow().wait_idle();
-        self.resources.destroy(&context);
+        self.resources.destroy(&*context);
     }
 }
 

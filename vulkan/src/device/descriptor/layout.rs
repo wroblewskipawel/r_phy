@@ -1,14 +1,13 @@
 use std::{
     any::TypeId,
     collections::HashMap,
-    error::Error,
     marker::PhantomData,
     sync::{Once, RwLock},
 };
 
 use ash::vk;
 
-use crate::device::Device;
+use crate::{device::Device, error::VkResult};
 use type_kit::{Cons, Nil};
 
 // Check out once_cell and lazy_static crates to improve the implementation
@@ -207,7 +206,7 @@ pub struct DescriptorSetLayout<T: DescriptorLayout> {
 impl Device {
     pub fn get_descriptor_set_layout<T: DescriptorLayout>(
         &self,
-    ) -> Result<DescriptorSetLayout<T>, Box<dyn Error>> {
+    ) -> VkResult<DescriptorSetLayout<T>> {
         let layout_map = get_descriptor_set_layout_map();
         let layout = if let Some(layout) = {
             let layout_map_reader = layout_map.read()?;

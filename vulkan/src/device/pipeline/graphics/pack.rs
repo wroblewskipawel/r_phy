@@ -1,20 +1,22 @@
 use std::{
     any::{type_name, TypeId},
-    error::Error,
     marker::PhantomData,
 };
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Destroy, DropGuard};
+use type_kit::{Create, CreateResult, Destroy};
 
-use crate::device::{
-    pipeline::{
-        get_pipeline_states_info, Layout, ModuleLoader, PipelineBindData, PipelineLayout,
-        PushConstant, PushConstantDataRef,
+use crate::{
+    device::{
+        pipeline::{
+            get_pipeline_states_info, Layout, ModuleLoader, PipelineBindData, PipelineLayout,
+            PushConstant, PushConstantDataRef,
+        },
+        render_pass::RenderPassConfig,
+        Device,
     },
-    render_pass::RenderPassConfig,
-    Device,
+    error::{VkError, VkResult},
 };
 
 use super::GraphicsPipelineConfig;
@@ -27,7 +29,7 @@ pub struct PipelinePackData {
 
 #[derive(Debug)]
 pub struct PipelinePack<T: GraphicsPipelineConfig> {
-    data: DropGuard<PipelinePackData>,
+    data: PipelinePackData,
     _phantom: PhantomData<T>,
 }
 
@@ -36,6 +38,64 @@ pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
     handle: vk::Pipeline,
     layout: vk::PipelineLayout,
     _phantom: PhantomData<T>,
+}
+
+impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
+    type Config<'a> = (PipelineLayout<T::Layout>, &'a dyn ModuleLoader);
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (layout, modules) = config;
+        let extent = context
+            .physical_device
+            .surface_properties
+            .get_current_extent();
+        let layout = layout.into();
+        let render_pass = context.get_render_pass::<T::RenderPass>()?;
+        let states = get_pipeline_states_info::<T::Attachments, T::Subpass, T::PipelineStates>(
+            &context.physical_device,
+            extent,
+        );
+        let modules = modules.load(context)?;
+        let stages = modules.get_stages_info();
+        let subpass = T::RenderPass::try_get_subpass_index::<T::Subpass>().unwrap_or_else(|| {
+            panic!(
+                "Subpass {} not present in RenderPass {}!",
+                type_name::<T::Subpass>(),
+                type_name::<T::RenderPass>(),
+            )
+        }) as u32;
+        let create_infos = [vk::GraphicsPipelineCreateInfo {
+            subpass,
+            layout,
+            render_pass: render_pass.handle,
+            p_vertex_input_state: &states.vertex_input.create_info,
+            p_input_assembly_state: &states.input_assembly,
+            p_viewport_state: &states.viewport.create_info,
+            p_rasterization_state: &states.rasterization,
+            p_depth_stencil_state: &states.depth_stencil,
+            p_color_blend_state: &states.color_blend.create_info,
+            p_multisample_state: &states.multisample,
+            stage_count: stages.stages.len() as u32,
+            p_stages: stages.stages.as_ptr(),
+            ..Default::default()
+        }];
+        let &handle = unsafe {
+            context
+                .create_graphics_pipelines(vk::PipelineCache::null(), &create_infos, None)
+                .map_err(|(_, err)| err)?
+                .first()
+                .unwrap()
+        };
+        Ok(GraphicsPipeline {
+            handle,
+            layout,
+            _phantom: PhantomData,
+        })
+    }
 }
 
 impl<T: GraphicsPipelineConfig> Destroy for GraphicsPipeline<T> {
@@ -207,89 +267,32 @@ impl<'a, T: GraphicsPipelineConfig> PipelinePackRefMut<'a, T> {
 }
 
 impl Device {
-    pub fn create_pipeline_pack<T: GraphicsPipelineConfig>(
+    pub fn load_pipelines<S: GraphicsPipelineConfig + ModuleLoader>(
         &self,
-    ) -> Result<PipelinePack<T>, Box<dyn Error>> {
-        let layout = self.get_pipeline_layout::<T::Layout>()?.into();
+        pack: &mut PipelinePack<S>,
+        pipelines: &[S],
+    ) -> VkResult<()> {
+        for pipeline in pipelines.iter() {
+            pack.insert(GraphicsPipeline::create((pack.layout(), pipeline), self)?);
+        }
+        Ok(())
+    }
+}
+
+impl<T: GraphicsPipelineConfig> Create for PipelinePack<T> {
+    type Config<'a> = ();
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(_: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let layout = context.get_pipeline_layout::<T::Layout>()?.into();
         let data = PipelinePackData {
             pipelines: Vec::new(),
             layout,
         };
         Ok(PipelinePack {
-            data: DropGuard::new(data),
+            data,
             _phantom: PhantomData,
         })
-    }
-
-    pub fn load_pipelines<S: GraphicsPipelineConfig + ModuleLoader>(
-        &self,
-        pack: &mut PipelinePack<S>,
-        pipelines: &[S],
-    ) -> Result<(), Box<dyn Error>> {
-        for pipeline in pipelines.iter() {
-            pack.insert(self.create_graphics_pipeline(pack.layout(), pipeline)?);
-        }
-        Ok(())
-    }
-
-    pub fn create_graphics_pipeline<T: GraphicsPipelineConfig>(
-        &self,
-        layout: PipelineLayout<T::Layout>,
-        modules: &impl ModuleLoader,
-    ) -> Result<GraphicsPipeline<T>, Box<dyn Error>> {
-        let extent = self.physical_device.surface_properties.get_current_extent();
-        let layout = layout.into();
-        let render_pass = self.get_render_pass::<T::RenderPass>()?;
-        let states = get_pipeline_states_info::<T::Attachments, T::Subpass, T::PipelineStates>(
-            &self.physical_device,
-            extent,
-        );
-        let modules = modules.load(self)?;
-        let stages = modules.get_stages_info();
-        let subpass = T::RenderPass::try_get_subpass_index::<T::Subpass>().unwrap_or_else(|| {
-            panic!(
-                "Subpass {} not present in RenderPass {}!",
-                type_name::<T::Subpass>(),
-                type_name::<T::RenderPass>(),
-            )
-        }) as u32;
-        let create_infos = [vk::GraphicsPipelineCreateInfo {
-            subpass,
-            layout,
-            render_pass: render_pass.handle,
-            p_vertex_input_state: &states.vertex_input.create_info,
-            p_input_assembly_state: &states.input_assembly,
-            p_viewport_state: &states.viewport.create_info,
-            p_rasterization_state: &states.rasterization,
-            p_depth_stencil_state: &states.depth_stencil,
-            p_color_blend_state: &states.color_blend.create_info,
-            p_multisample_state: &states.multisample,
-            stage_count: stages.stages.len() as u32,
-            p_stages: stages.stages.as_ptr(),
-            ..Default::default()
-        }];
-        let &handle = unsafe {
-            self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &create_infos, None)
-                .map_err(|(_, err)| err)?
-                .first()
-                .unwrap()
-        };
-        Ok(GraphicsPipeline {
-            handle,
-            layout,
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl Destroy for PipelinePackData {
-    type Context<'a> = &'a Device;
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.pipelines.iter().for_each(|&p| unsafe {
-            context.destroy_pipeline(p, None);
-        });
     }
 }
 
@@ -297,6 +300,8 @@ impl<T: GraphicsPipelineConfig> Destroy for PipelinePack<T> {
     type Context<'a> = &'a Device;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.data.destroy(context);
+        self.data.pipelines.iter().for_each(|&p| unsafe {
+            context.destroy_pipeline(p, None);
+        });
     }
 }

@@ -2,14 +2,17 @@ use std::{error::Error, marker::PhantomData};
 
 use ash::vk;
 
-use crate::device::{
-    memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
-    resources::buffer::ByteRange,
-    Device,
+use crate::{
+    device::{
+        memory::{MemoryChunk, MemoryChunkRaw, MemoryProperties},
+        resources::buffer::ByteRange,
+        Device,
+    },
+    error::AllocError,
 };
 use type_kit::Nil;
 
-use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReqTyped, Allocator, AllocatorCreate};
 
 pub struct DefaultAllocator {}
 
@@ -30,10 +33,10 @@ impl Allocator for DefaultAllocator {
         &mut self,
         device: &Device,
         request: AllocReqTyped<M>,
-    ) -> Result<Self::Allocation<M>, DeviceAllocError> {
+    ) -> Result<Self::Allocation<M>, AllocError> {
         let memory_type_index = request
             .get_memory_type_index(&device.physical_device.properties.memory)
-            .ok_or(DeviceAllocError::UnsupportedMemoryType)?;
+            .ok_or(AllocError::UnsupportedMemoryType)?;
         let memory = unsafe {
             device.allocate_memory(
                 &vk::MemoryAllocateInfo {

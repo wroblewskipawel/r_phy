@@ -5,14 +5,16 @@ pub use presets::*;
 use std::{
     any::TypeId,
     collections::HashMap,
-    error::Error,
     marker::PhantomData,
     sync::{Once, RwLock},
 };
 
 use ash::vk;
 
-use crate::device::{framebuffer::AttachmentList, AttachmentProperties, Device};
+use crate::{
+    device::{framebuffer::AttachmentList, AttachmentProperties, Device},
+    error::VkResult,
+};
 use type_kit::{Cons, TypedNil};
 
 use super::framebuffer::{
@@ -476,9 +478,7 @@ impl<C: RenderPassConfig> Clone for RenderPass<C> {
 impl<C: RenderPassConfig> Copy for RenderPass<C> {}
 
 impl Device {
-    fn create_render_pass_raw<C: RenderPassConfig>(
-        &self,
-    ) -> Result<vk::RenderPass, Box<dyn Error>> {
+    fn create_render_pass_raw<C: RenderPassConfig>(&self) -> VkResult<vk::RenderPass> {
         let attachments =
             C::get_attachment_descriptions(&self.physical_device.attachment_properties);
         let subpasses = C::get_subpass_descriptions();
@@ -496,7 +496,7 @@ impl Device {
         Ok(handle)
     }
 
-    pub fn get_render_pass<C: RenderPassConfig>(&self) -> Result<RenderPass<C>, Box<dyn Error>> {
+    pub fn get_render_pass<C: RenderPassConfig>(&self) -> VkResult<RenderPass<C>> {
         let render_pass_map = get_render_pass_map();
         let render_pass = if let Some(render_pass) = {
             let reader = render_pass_map.read()?;

@@ -1,4 +1,4 @@
-use std::{any::type_name, error::Error, marker::PhantomData, mem::size_of};
+use std::{any::type_name, marker::PhantomData, mem::size_of};
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
@@ -7,7 +7,7 @@ use crate::device::{
     command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer, Device,
 };
 
-use super::{Descriptor, DescriptorBinding, DescriptorLayout, DescriptorPool, DescriptorPoolData};
+use super::{Descriptor, DescriptorBinding, DescriptorLayout};
 
 #[derive(Debug)]
 enum SetWrite {
@@ -33,7 +33,6 @@ pub struct DescriptorSetWriter<T: DescriptorLayout> {
 }
 
 impl<T: DescriptorLayout> DescriptorSetWriter<T> {
-    // # TODO: num_sets could be determined at the time of descriptor pool creation
     pub fn new(num_sets: usize) -> DescriptorSetWriter<T> {
         DescriptorSetWriter {
             num_sets,
@@ -42,6 +41,10 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
             image_writes: vec![],
             _phantom: PhantomData,
         }
+    }
+
+    pub fn num_sets(&self) -> usize {
+        self.num_sets
     }
 
     pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation, A: Allocator>(
@@ -142,7 +145,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
 
 impl Device {
     // TODO: sets Vec of incorrect length could be passed here
-    fn write_descriptors<T: DescriptorLayout>(
+    pub fn write_descriptors<T: DescriptorLayout>(
         &self,
         writer: DescriptorSetWriter<T>,
         sets: Vec<vk::DescriptorSet>,
@@ -183,36 +186,5 @@ impl Device {
                 _phantom: PhantomData,
             })
             .collect()
-    }
-
-    pub fn create_descriptor_pool<T: DescriptorLayout>(
-        &self,
-        writer: DescriptorSetWriter<T>,
-    ) -> Result<DescriptorPool<T>, Box<dyn Error>> {
-        let pool_sizes = T::get_descriptor_pool_sizes(writer.num_sets as u32);
-        let pool_create_info = vk::DescriptorPoolCreateInfo::builder()
-            .pool_sizes(&pool_sizes)
-            .max_sets(writer.num_sets as u32);
-        let pool = unsafe {
-            self.device
-                .create_descriptor_pool(&pool_create_info, None)?
-        };
-        let layout = self.get_descriptor_set_layout::<T>()?;
-        let sets = unsafe {
-            self.device.allocate_descriptor_sets(
-                &vk::DescriptorSetAllocateInfo::builder()
-                    .descriptor_pool(pool)
-                    .set_layouts(&vec![layout.layout; writer.num_sets]),
-            )?
-        };
-        let sets = self
-            .write_descriptors(writer, sets)
-            .into_iter()
-            .map(Into::<vk::DescriptorSet>::into)
-            .collect();
-        Ok(DescriptorPool {
-            data: DescriptorPoolData { pool, sets },
-            _phantom: PhantomData,
-        })
     }
 }

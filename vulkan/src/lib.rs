@@ -1,12 +1,14 @@
 mod debug;
 pub mod device;
+pub mod error;
 mod surface;
 
 use ash::extensions::{ext, khr};
+use error::{VkError, VkResult};
 use std::error::Error;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
-use type_kit::{Destroy, DropGuard, Finalize};
+use type_kit::{Create, CreateResult, Destroy, DropGuard, Finalize, Initialize};
 
 use ash::vk;
 use winit::window::Window;
@@ -19,7 +21,7 @@ use surface::Surface;
 fn check_required_extension_support(
     entry: &ash::Entry,
     mut extension_names: impl Iterator<Item = &'static CStr>,
-) -> Result<Vec<*const c_char>, Box<dyn Error>> {
+) -> VkResult<Vec<*const c_char>> {
     let supported_extensions = entry.enumerate_instance_extension_properties(None)?;
     let supported = extension_names.try_fold(Vec::new(), |mut supported, req| {
         supported_extensions
@@ -29,15 +31,12 @@ fn check_required_extension_support(
                 supported.push(req.as_ptr());
                 supported
             })
-            .ok_or(format!(
-                "Required extension {} not supported!",
-                req.to_string_lossy()
-            ))
+            .ok_or(VkError::ExtensionNotSupported(req))
     })?;
     Ok(supported)
 }
 
-struct Instance {
+pub struct Instance {
     instance: ash::Instance,
     _entry: ash::Entry,
 }
@@ -68,7 +67,33 @@ impl InstanceExtension for khr::Win32Surface {
 }
 
 impl Instance {
-    fn create() -> Result<Self, Box<dyn Error>> {
+    #[inline]
+    pub(crate) fn load<E: InstanceExtension>(&self) -> E {
+        E::load(&self._entry, &self.instance)
+    }
+}
+
+impl Deref for Instance {
+    type Target = ash::Instance;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.instance
+    }
+}
+
+impl DerefMut for Instance {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.instance
+    }
+}
+
+impl Create for Instance {
+    type Config<'a> = ();
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
         let entry = unsafe { ash::Entry::load()? };
         let required_extensions = Surface::iterate_required_extensions();
 
@@ -111,27 +136,6 @@ impl Instance {
             _entry: entry,
         })
     }
-
-    #[inline]
-    pub(crate) fn load<E: InstanceExtension>(&self) -> E {
-        E::load(&self._entry, &self.instance)
-    }
-}
-
-impl Deref for Instance {
-    type Target = ash::Instance;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.instance
-    }
-}
-
-impl DerefMut for Instance {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.instance
-    }
 }
 
 impl Destroy for Instance {
@@ -166,11 +170,11 @@ impl DeviceExtension for khr::Swapchain {
 
 impl Context {
     pub fn build(window: &Window) -> Result<Self, Box<dyn Error>> {
-        let instance = Instance::create()?;
+        let instance = Instance::initialize(())?;
         #[cfg(debug_assertions)]
-        let debug_utils = DebugUtils::create(&instance)?;
-        let surface = Surface::create(&instance, window)?;
-        let device = Device::create(&instance, &surface)?;
+        let debug_utils = DebugUtils::create((), &instance)?;
+        let surface = Surface::create(window, &instance)?;
+        let device = Device::create(&surface, &instance)?;
 
         Ok(Self {
             device: DropGuard::new(device),
@@ -190,10 +194,10 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
-        self.device.finalize();
-        self.surface.finalize();
+        self.device.destroy(&self.instance);
+        self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
-        self.debug_utils.finalize();
+        self.debug_utils.destroy(&self.instance);
         self.instance.finalize();
     }
 }

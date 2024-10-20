@@ -1,9 +1,11 @@
-use std::{borrow::Borrow, error::Error, fs::File, io::Read, marker::PhantomData, path::Path};
+use std::{borrow::Borrow, fs::File, io::Read, marker::PhantomData, path::Path};
 
 use ash::vk;
 use png::{BitDepth, ColorType, Transformations};
 use strum::IntoEnumIterator;
 use to_resolve::model::Image;
+
+use crate::error::ImageError;
 
 use super::Image2DInfo;
 
@@ -13,7 +15,7 @@ struct PngImageReader<'a, R: Read> {
 }
 
 impl PngImageReader<'_, File> {
-    fn from_file(path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn from_file(path: &Path) -> Result<Self, ImageError> {
         let mut decoder = png::Decoder::new(File::open(path)?);
         decoder.set_transformations(
             Transformations::EXPAND | Transformations::ALPHA | Transformations::STRIP_16,
@@ -26,7 +28,7 @@ impl PngImageReader<'_, File> {
 }
 
 impl<'a> PngImageReader<'a, &'a [u8]> {
-    fn from_buffer(image_data: &'a [u8]) -> Result<Self, Box<dyn Error>> {
+    fn from_buffer(image_data: &'a [u8]) -> Result<Self, ImageError> {
         let mut decoder = png::Decoder::new(image_data);
         decoder.set_transformations(
             Transformations::EXPAND | Transformations::ALPHA | Transformations::STRIP_16,
@@ -43,12 +45,12 @@ fn get_max_mip_level(extent: vk::Extent2D) -> u32 {
 }
 
 impl<'a, R: Read> PngImageReader<'a, R> {
-    fn read(mut self, dst: &mut [u8]) -> Result<(), Box<dyn Error>> {
+    fn read(mut self, dst: &mut [u8]) -> Result<(), ImageError> {
         self.reader.next_frame(dst)?;
         Ok(())
     }
 
-    fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
+    fn info(&self) -> Result<Image2DInfo, ImageError> {
         let info = self.reader.info();
         let extent = vk::Extent2D {
             width: info.width,
@@ -57,10 +59,7 @@ impl<'a, R: Read> PngImageReader<'a, R> {
         let format = match self.reader.output_color_type() {
             (ColorType::Rgba, BitDepth::Eight) => vk::Format::R8G8B8A8_SRGB,
             (ColorType::GrayscaleAlpha, BitDepth::Eight) => vk::Format::R8G8_SRGB,
-            (color_type, bit_depth) => Err(format!(
-                "Unsupported png Image ColorType: {:?} and BitDepth: {:?}!",
-                color_type, bit_depth
-            ))?,
+            (color_type, bit_depth) => Err(ImageError::UnsupportedFormat(color_type, bit_depth))?,
         };
         let mip_levels = get_max_mip_level(extent);
         Ok(Image2DInfo {
@@ -84,7 +83,7 @@ impl<'a, R: Read> PngImageReader<'a, R> {
 }
 
 #[derive(strum::EnumIter, Debug, Clone, Copy, PartialEq)]
-enum ImageCubeFace {
+pub enum ImageCubeFace {
     Right = 0,
     Left = 1,
     Top = 2,
@@ -94,7 +93,7 @@ enum ImageCubeFace {
 }
 
 impl ImageCubeFace {
-    fn get(path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn get(path: &Path) -> Result<Self, ImageError> {
         let stem = path.file_stem().unwrap().to_string_lossy();
         let face = match stem.borrow() {
             "right" => Self::Right,
@@ -103,7 +102,7 @@ impl ImageCubeFace {
             "bottom" => Self::Bottom,
             "front" => Self::Front,
             "back" => Self::Back,
-            _ => Err(format!("`{}` is not valid ImageCube entry!", stem))?,
+            _ => Err(ImageError::InvalidCubeMap(stem.into_owned()))?,
         };
         Ok(face)
     }
@@ -114,7 +113,7 @@ struct ImageCubeReader {
 }
 
 impl ImageCubeReader {
-    fn prepare(path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn prepare(path: &Path) -> Result<Self, ImageError> {
         let faces = path
             .read_dir()?
             .filter_map(|entry| entry.map(|entry| entry.path()).ok())
@@ -125,17 +124,17 @@ impl ImageCubeReader {
                     PngImageReader::from_file(&path)?,
                 ))
             })
-            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+            .collect::<Result<Vec<_>, ImageError>>()?;
         if let Some(req) =
             ImageCubeFace::iter().find(|req| !faces.iter().any(|(face, _)| req == face))
         {
-            Err(format!("Missing {:?} CubeMap data!", req))?;
+            Err(ImageError::MissingCubeMapData(req))?;
         }
         Ok(Self { faces })
     }
 
-    fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
-        let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
+    fn info(&self) -> Result<Image2DInfo, ImageError> {
+        let (_, reader) = &self.faces.first().ok_or(ImageError::ExhaustedImageRead)?;
         let info = reader.info()?;
         Ok(Image2DInfo {
             array_layers: 6,
@@ -145,9 +144,9 @@ impl ImageCubeReader {
         })
     }
 
-    fn required_buffer_size(&self) -> usize {
-        let (_, reader) = &self.faces[ImageCubeFace::Right as usize];
-        reader.required_buffer_size()
+    fn required_buffer_size(&self) -> Result<usize, ImageError> {
+        let (_, reader) = &self.faces.first().ok_or(ImageError::ExhaustedImageRead)?;
+        Ok(reader.required_buffer_size())
     }
 }
 
@@ -162,12 +161,12 @@ enum ImageReaderInner<'a> {
 }
 
 impl<'a> ImageReader<'a> {
-    pub fn cube(path: &Path) -> Result<Self, Box<dyn Error>> {
+    pub fn cube(path: &Path) -> Result<Self, ImageError> {
         let reader = ImageReaderInner::Cube(ImageCubeReader::prepare(path)?);
         Ok(Self { reader })
     }
 
-    pub fn image(image: &'a Image) -> Result<Self, Box<dyn Error>> {
+    pub fn image(image: &'a Image) -> Result<Self, ImageError> {
         let reader = match image {
             Image::File(path) => ImageReaderInner::File(Some(PngImageReader::from_file(path)?)),
             Image::Buffer(data) => {
@@ -177,35 +176,41 @@ impl<'a> ImageReader<'a> {
         Ok(Self { reader })
     }
 
-    pub fn required_buffer_size(&self) -> usize {
+    pub fn required_buffer_size(&self) -> Result<usize, ImageError> {
         match &self.reader {
-            ImageReaderInner::File(reader) => reader
-                .as_ref()
-                .map_or(0, |reader| reader.required_buffer_size()),
-            ImageReaderInner::Buffer(reader) => reader
-                .as_ref()
-                .map_or(0, |reader| reader.required_buffer_size()),
+            ImageReaderInner::File(reader) => {
+                let required = reader
+                    .as_ref()
+                    .ok_or(ImageError::ExhaustedImageRead)?
+                    .required_buffer_size();
+                Ok(required)
+            }
+            ImageReaderInner::Buffer(reader) => {
+                let required = reader
+                    .as_ref()
+                    .ok_or(ImageError::ExhaustedImageRead)?
+                    .required_buffer_size();
+                Ok(required)
+            }
             ImageReaderInner::Cube(reader) => reader.required_buffer_size(),
         }
     }
 
-    pub(super) fn info(&self) -> Result<Image2DInfo, Box<dyn Error>> {
+    pub(super) fn info(&self) -> Result<Image2DInfo, ImageError> {
         match &self.reader {
             ImageReaderInner::File(reader) => reader
                 .as_ref()
-                .map_or(Err(format!("Exhausted ImageReader!").into()), |reader| {
-                    reader.info()
-                }),
+                .ok_or(ImageError::ExhaustedImageRead)?
+                .info(),
             ImageReaderInner::Buffer(reader) => reader
                 .as_ref()
-                .map_or(Err(format!("Exhausted ImageReader!").into()), |reader| {
-                    reader.info()
-                }),
+                .ok_or(ImageError::ExhaustedImageRead)?
+                .info(),
             ImageReaderInner::Cube(reader) => reader.info(),
         }
     }
 
-    pub fn read(&mut self, dst: &mut [u8]) -> Result<Option<u32>, Box<dyn Error>> {
+    pub fn read(&mut self, dst: &mut [u8]) -> Result<Option<u32>, ImageError> {
         let dst_layer = match &mut self.reader {
             ImageReaderInner::File(reader) => reader
                 .take()

@@ -9,6 +9,7 @@ pub mod renderer;
 pub mod resources;
 pub mod swapchain;
 
+use crate::error::{DeviceNotSuitable, VkError, VkResult};
 use crate::Instance;
 
 use self::command::TransientCommandPools;
@@ -16,13 +17,14 @@ use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
 use ash::{self, vk};
 use colored::Colorize;
 use std::ffi::c_char;
+use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
     ffi::CStr,
 };
-use type_kit::Destroy;
+use type_kit::{Create, Destroy};
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -35,7 +37,7 @@ impl QueueFamilies {
     pub fn get(
         properties: &PhysicalDeviceProperties,
         surface_properties: &PhysicalDeviceSurfaceProperties,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, DeviceNotSuitable> {
         let mut queue_usages = HashMap::new();
         let mut try_use_queue_family = |queue: &mut Option<u32>, queue_family_index: u32| {
             if match queue {
@@ -71,9 +73,9 @@ impl QueueFamilies {
             }
         }
         Ok(Self {
-            graphics: graphics.ok_or("Missing graphics queue family index!")?,
-            compute: compute.ok_or("Missing compute queue family index!")?,
-            transfer: transfer.ok_or("Missing transfer queue family index!")?,
+            graphics: graphics.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Graphics"))?,
+            compute: compute.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Compute"))?,
+            transfer: transfer.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Transfer"))?,
         })
     }
 }
@@ -123,6 +125,7 @@ impl DeviceQueueBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PhysicalDeviceProperties {
     enabled_features: vk::PhysicalDeviceFeatures,
     generic: vk::PhysicalDeviceProperties,
@@ -144,14 +147,14 @@ impl PhysicalDeviceProperties {
     pub fn get(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, DeviceNotSuitable> {
         let generic = unsafe { instance.get_physical_device_properties(physical_device) };
         let features = unsafe { instance.get_physical_device_features(physical_device) };
         let memory = unsafe { instance.get_physical_device_memory_properties(physical_device) };
         if generic.device_type != vk::PhysicalDeviceType::DISCRETE_GPU
             && generic.device_type != vk::PhysicalDeviceType::INTEGRATED_GPU
         {
-            Err("Physical Device is not one of Discrete or Integrated GPU type!")?;
+            Err(DeviceNotSuitable::InvalidDeviceType)?;
         }
         let enabled_features = Self::get_enabled_features(&features);
         let enabled_extension_names =
@@ -169,7 +172,7 @@ impl PhysicalDeviceProperties {
     fn check_required_device_extension_support(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<Vec<*const c_char>, Box<dyn Error>> {
+    ) -> Result<Vec<*const c_char>, DeviceNotSuitable> {
         let supported_extensions =
             unsafe { instance.enumerate_device_extension_properties(physical_device)? };
         let required_extensions = swapchain::required_extensions();
@@ -184,10 +187,7 @@ impl PhysicalDeviceProperties {
                         supported.push(req.as_ptr());
                         supported
                     })
-                    .ok_or(format!(
-                        "Required device extension {} not suported!",
-                        req.to_string_lossy()
-                    ))
+                    .ok_or(DeviceNotSuitable::ExtensionNotSupported(req))
                 })?;
         Ok(enabled_extension_names)
     }
@@ -220,11 +220,13 @@ impl PhysicalDeviceProperties {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct AttachmentFormats {
     color: vk::Format,
     depth_stencil: vk::Format,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct AttachmentProperties {
     formats: AttachmentFormats,
     msaa_samples: vk::SampleCountFlags,
@@ -242,7 +244,7 @@ impl AttachmentProperties {
         physical_device: vk::PhysicalDevice,
         properties: &PhysicalDeviceProperties,
         surface_properties: &PhysicalDeviceSurfaceProperties,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, DeviceNotSuitable> {
         let color = surface_properties.surface_format.format;
         let depth_stencil = *Self::PREFERRED_DEPTH_FORMATS
             .iter()
@@ -254,7 +256,7 @@ impl AttachmentProperties {
                     .optimal_tiling_features
                     .contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
             })
-            .ok_or("No preffered format supported for Depth Stencil Attachment!")?;
+            .ok_or(DeviceNotSuitable::MissingDepthAndStencilFormat)?;
         let msaa_samples = [
             vk::SampleCountFlags::TYPE_64,
             vk::SampleCountFlags::TYPE_32,
@@ -281,6 +283,7 @@ impl AttachmentProperties {
     }
 }
 
+#[derive(Debug)]
 struct PhysicalDevice {
     properties: PhysicalDeviceProperties,
     surface_properties: PhysicalDeviceSurfaceProperties,
@@ -289,6 +292,13 @@ struct PhysicalDevice {
     handle: vk::PhysicalDevice,
 }
 
+impl PhysicalDevice {
+    fn get_physical_device_name(&self) -> &CStr {
+        unsafe { CStr::from_ptr(&self.properties.generic.device_name as *const _) }
+    }
+}
+
+#[derive(Debug)]
 struct DeviceQueues {
     graphics: vk::Queue,
     compute: vk::Queue,
@@ -302,6 +312,23 @@ pub struct Device {
     device: ash::Device,
 }
 
+impl Debug for Device {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let device_name = self
+            .physical_device
+            .get_physical_device_name()
+            .to_string_lossy()
+            .bold()
+            .green();
+        f.debug_struct("Device")
+            .field("physical_device", &self.physical_device)
+            .field("command_pools", &self.command_pools)
+            .field("device_queues", &self.device_queues)
+            .field("device", &device_name)
+            .finish()
+    }
+}
+
 impl Deref for Device {
     type Target = ash::Device;
     fn deref(&self) -> &Self::Target {
@@ -313,7 +340,7 @@ fn check_physical_device_suitable(
     physical_device: vk::PhysicalDevice,
     instance: &ash::Instance,
     surface: &Surface,
-) -> Result<PhysicalDevice, Box<dyn Error>> {
+) -> Result<PhysicalDevice, DeviceNotSuitable> {
     let properties = PhysicalDeviceProperties::get(instance, physical_device)?;
     let surface_properties =
         PhysicalDeviceSurfaceProperties::get(surface, physical_device, &properties.queue_families)?;
@@ -329,52 +356,57 @@ fn check_physical_device_suitable(
     })
 }
 
-fn get_physical_device_name(
-    instance: &ash::Instance,
-    physical_device: vk::PhysicalDevice,
-) -> String {
-    unsafe {
-        CStr::from_ptr(
-            &instance
-                .get_physical_device_properties(physical_device)
-                .device_name as *const c_char,
-        )
-    }
-    .to_string_lossy()
-    .into_owned()
-}
-
-fn pick_physical_device(
-    instance: &ash::Instance,
-    surface: &Surface,
-) -> Result<PhysicalDevice, Box<dyn Error>> {
-    let (physical_device_name, physical_device) = unsafe { instance.enumerate_physical_devices()? }
+fn pick_physical_device(instance: &ash::Instance, surface: &Surface) -> VkResult<PhysicalDevice> {
+    let (suitable_devices, discarded_devices) = unsafe { instance.enumerate_physical_devices()? }
         .into_iter()
-        .find_map(|physical_device| {
-            let device_name = get_physical_device_name(instance, physical_device);
-            match check_physical_device_suitable(physical_device, instance, surface) {
-                Ok(physical_device) => Some((device_name, physical_device)),
-                Err(error) => {
-                    println!(
-                        "{} PhysicalDevice not suitable: {}",
-                        device_name.red(),
-                        error
-                    );
-                    None
-                }
-            }
-        })
-        .ok_or("Failed to pick suitable physical device!")?;
-    println!("Using {} Physical Device", physical_device_name.green());
+        .map(|physical_device| check_physical_device_suitable(physical_device, instance, surface))
+        .partition::<Vec<_>, _>(Result::is_ok);
+    let physical_device = suitable_devices
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            let discarded_devices = discarded_devices
+                .into_iter()
+                .map(|result| match result {
+                    Err(cause) => cause,
+                    Ok(..) => unreachable!(),
+                })
+                .collect();
+            VkError::NoSuitablePhysicalDevice(discarded_devices)
+        })?
+        .unwrap();
+    println!(
+        "Using {} Physical Device",
+        physical_device
+            .get_physical_device_name()
+            .to_string_lossy()
+            .bold()
+            .green()
+    );
     Ok(physical_device)
 }
 
 impl Device {
-    pub(crate) fn create(instance: &Instance, surface: &Surface) -> Result<Device, Box<dyn Error>> {
-        let physical_device = pick_physical_device(instance, surface)?;
+    pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
+        unsafe {
+            self.device.device_wait_idle()?;
+        }
+        Ok(())
+    }
+}
+
+impl Create for Device {
+    type Config<'a> = &'a Surface;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let physical_device = pick_physical_device(context, config)?;
         let queue_builder = DeviceQueueBuilder::new(physical_device.queue_families);
         let device = unsafe {
-            instance.create_device(
+            context.create_device(
                 physical_device.handle,
                 &vk::DeviceCreateInfo::builder()
                     .queue_create_infos(&queue_builder.get_device_queue_create_infos())
@@ -392,17 +424,10 @@ impl Device {
             device,
         })
     }
-
-    pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
-        unsafe {
-            self.device.device_wait_idle()?;
-        }
-        Ok(())
-    }
 }
 
 impl Destroy for Device {
-    type Context<'a> = ();
+    type Context<'a> = &'a Instance;
 
     fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
         self.destroy_render_passes();

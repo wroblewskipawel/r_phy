@@ -2,7 +2,9 @@ use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
 use math::types::Vector4;
 use to_resolve::camera::CameraMatrices;
-use type_kit::Destroy;
+use type_kit::{Create, CreateResult, Destroy};
+
+use crate::error::{VkError, VkResult};
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -28,11 +30,9 @@ pub struct Transient;
 pub struct Persistent;
 
 pub mod level {
-    use std::error::Error;
-
     use ash::vk;
 
-    use crate::device::Device;
+    use crate::{device::Device, error::VkResult};
 
     pub trait Level {
         const LEVEL: vk::CommandBufferLevel;
@@ -45,7 +45,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> Result<Self::PersistentAllocator, Box<dyn Error>>;
+        ) -> VkResult<Self::PersistentAllocator>;
 
         fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator);
 
@@ -88,7 +88,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
+        ) -> VkResult<Self::PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -162,7 +162,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> Result<Self::PersistentAllocator, Box<dyn Error>> {
+        ) -> VkResult<Self::PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -261,20 +261,20 @@ impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
     }
 }
 
-impl Device {
-    pub fn create_persistent_command_pool<L: Level, O: Operation>(
-        &self,
-        size: usize,
-    ) -> Result<PersistentCommandPool<L, O>, Box<dyn Error>> {
+impl<L: Level, O: Operation> Create for PersistentCommandPool<L, O> {
+    type Config<'a> = usize;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let command_pool = unsafe {
-            self.device.create_command_pool(
+            context.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(O::get_queue_family_index(self))
+                    .queue_family_index(O::get_queue_family_index(context))
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
                 None,
             )?
         };
-        let allocator = L::create_persistent_allocator(self, command_pool, size)?;
+        let allocator = L::create_persistent_allocator(context, command_pool, config)?;
         Ok(PersistentCommandPool {
             command_pool,
             allocator,
@@ -341,7 +341,7 @@ impl Device {
     pub fn begin_primary_command<T, O: Operation>(
         &self,
         command: NewCommand<T, Primary, O>,
-    ) -> Result<BeginCommand<T, Primary, O>, Box<dyn Error>> {
+    ) -> VkResult<BeginCommand<T, Primary, O>> {
         let NewCommand(command) = command;
         unsafe {
             self.device
@@ -374,7 +374,7 @@ impl Device {
     pub fn finish_command<T, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
-    ) -> Result<FinishedCommand<T, L, O>, Box<dyn Error>> {
+    ) -> VkResult<FinishedCommand<T, L, O>> {
         let BeginCommand(command) = command;
         unsafe {
             self.device.end_command_buffer(L::buffer(&command.data))?;
@@ -831,7 +831,7 @@ impl Device {
         command: FinishedCommand<T, Primary, O>,
         wait: SubmitSemaphoreState,
         signal: &[vk::Semaphore],
-    ) -> Result<SubmitedCommand<'a, T, Primary, O>, Box<dyn Error>> {
+    ) -> VkResult<SubmitedCommand<'a, T, Primary, O>> {
         let FinishedCommand(command) = command;
         unsafe {
             self.device.queue_submit(
@@ -863,7 +863,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
 }
 
 impl<'a, O: Operation> SubmitedCommand<'a, Transient, Primary, O> {
-    pub fn wait(self) -> Result<Self, Box<dyn Error>> {
+    pub fn wait(self) -> VkResult<Self> {
         let SubmitedCommand(command, device) = self;
         unsafe {
             device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
@@ -888,16 +888,14 @@ impl<'a, O: Operation> SubmitedCommand<'a, Persistent, Primary, O> {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct TransientCommandPools {
     transfer: vk::CommandPool,
     graphics: vk::CommandPool,
 }
 
 impl TransientCommandPools {
-    pub fn create(
-        device: &ash::Device,
-        queue_families: QueueFamilies,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn create(device: &ash::Device, queue_families: QueueFamilies) -> VkResult<Self> {
         let transfer = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -928,7 +926,7 @@ impl TransientCommandPools {
 impl Device {
     pub fn allocate_transient_command<O: Operation>(
         &self,
-    ) -> Result<NewCommand<Transient, Primary, O>, Box<dyn Error>> {
+    ) -> VkResult<NewCommand<Transient, Primary, O>> {
         let &buffer = unsafe {
             self.device
                 .allocate_command_buffers(

@@ -10,9 +10,9 @@ use to_resolve::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };
-use type_kit::{Destroy, DestroyCollection, DropGuard};
+use type_kit::{Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DropGuard};
 
-use crate::Context;
+use crate::{error::VkError, Context};
 use math::types::Matrix4;
 
 use super::{
@@ -38,13 +38,13 @@ use super::{
 pub trait Frame: 'static {
     type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;
     type Context<P: GraphicsPipelinePackList>: FrameContext
-        + for<'a> Destroy<Context<'a> = &'a Context>;
+        + for<'a> Create<Context<'a> = &'a Context>;
 
     fn load_context<P: GraphicsPipelinePackList>(
         &self,
         context: &Context,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
-    ) -> Result<Self::Context<P>, Box<dyn Error>>;
+    ) -> CreateResult<Self::Context<P>>;
 }
 
 pub trait FrameContext: Sized {
@@ -97,37 +97,25 @@ pub struct FramePool<F: FrameContext> {
     _phantom: PhantomData<F>,
 }
 
-impl Context {
-    fn create_camera_uniform(&self, num_images: usize) -> Result<CameraUniform, Box<dyn Error>> {
+impl Create for CameraUniform {
+    type Config<'a> = usize;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let buffer_partial =
+            UniformBufferPartial::prepare(UniformBufferBuilder::new(config), &context)?;
         let uniform_buffer =
-            UniformBufferPartial::prepare(UniformBufferBuilder::new(num_images), self)?
-                .finalize(self, &mut DefaultAllocator {})?;
-        let descriptors = self.create_descriptor_pool(
-            DescriptorSetWriter::<CameraDescriptorSet>::new(num_images)
-                .write_buffer(&uniform_buffer),
+            UniformBuffer::create(buffer_partial, (context, &mut DefaultAllocator {}))?;
+        let descriptors = DescriptorPool::create(
+            DescriptorSetWriter::<CameraDescriptorSet>::new(config).write_buffer(&uniform_buffer),
+            context,
         )?;
         Ok(CameraUniform {
             descriptors: DropGuard::new(descriptors),
             uniform_buffer: DropGuard::new(uniform_buffer),
-        })
-    }
-
-    pub fn create_frame_pool<F: FrameContext>(
-        &self,
-        swapchain: &Swapchain<F::Attachments>,
-    ) -> Result<FramePool<F>, Box<dyn Error>> {
-        let image_sync = self.create_swapchain_image_sync(swapchain)?;
-        let primary_commands = self.create_persistent_command_pool(swapchain.num_images)?;
-        let secondary_commands =
-            self.create_persistent_command_pool(swapchain.num_images * F::REQUIRED_COMMANDS)?;
-        let camera_uniform = self.create_camera_uniform(swapchain.num_images)?;
-
-        Ok(FramePool {
-            image_sync,
-            camera_uniform,
-            primary_commands,
-            secondary_commands,
-            _phantom: PhantomData,
         })
     }
 }
@@ -142,8 +130,32 @@ impl Destroy for CameraUniform {
     }
 }
 
+impl<F: FrameContext> Create for FramePool<F> {
+    type Config<'a> = &'a Swapchain<F::Attachments>;
+    type CreateError = VkError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let image_sync = (0..config.num_images)
+            .map(|_| ())
+            .create(context)
+            .collect::<Result<Vec<_>, _>>()?;
+        let primary_commands = PersistentCommandPool::create(config.num_images, context)?;
+        let secondary_commands =
+            PersistentCommandPool::create(config.num_images * F::REQUIRED_COMMANDS, context)?;
+        let camera_uniform = CameraUniform::create(config.num_images, context)?;
+
+        Ok(FramePool {
+            image_sync,
+            camera_uniform,
+            primary_commands,
+            secondary_commands,
+            _phantom: PhantomData,
+        })
+    }
+}
+
 impl<F: FrameContext> Destroy for FramePool<F> {
-    type Context<'a> = &'a Context;
+    type Context<'a> = &'a Device;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
         self.image_sync.iter_mut().destroy(context);

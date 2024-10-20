@@ -6,7 +6,7 @@ use crate::device::{
     Device,
 };
 use to_resolve::model::{Mesh, MeshTypeList, Vertex};
-use type_kit::{Cons, Destroy, Nil, TypeList, TypedNil};
+use type_kit::{Cons, Create, Destroy, Nil, TypeList, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
@@ -130,7 +130,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {
-            Some(partial.finalize(device, allocator)?)
+            Some(MeshPack::create(partial, (device, allocator))?)
         } else {
             None
         };

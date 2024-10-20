@@ -10,13 +10,16 @@ use std::{
 use ash::{self, vk};
 use to_resolve::vulkan::VulkanRendererConfig;
 
-use crate::device::{
-    memory::{Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
-    resources::buffer::ByteRange,
-    Device,
+use crate::{
+    device::{
+        memory::{Memory, MemoryChunk, MemoryChunkRaw, MemoryProperties},
+        resources::buffer::ByteRange,
+        Device,
+    },
+    error::{AllocError, AllocResult},
 };
 
-use super::{AllocReqTyped, Allocator, AllocatorCreate, DeviceAllocError};
+use super::{AllocReqTyped, Allocator, AllocatorCreate};
 
 pub struct PageChunk<M: MemoryProperties> {
     chunk: MemoryChunk<M>,
@@ -125,7 +128,7 @@ impl PageType {
         &mut self,
         device: &ash::Device,
         page_size: vk::DeviceSize,
-    ) -> Result<Rc<RefCell<Page>>, DeviceAllocError> {
+    ) -> Result<Rc<RefCell<Page>>, AllocError> {
         self.pages.push(Rc::new(RefCell::new(Page {
             memory: unsafe {
                 device.allocate_memory(
@@ -198,10 +201,10 @@ impl Allocator for PageAllocator {
         &mut self,
         device: &Device,
         request: AllocReqTyped<M>,
-    ) -> Result<Self::Allocation<M>, DeviceAllocError> {
+    ) -> AllocResult<Self::Allocation<M>> {
         let memory_type_index = request
             .get_memory_type_index(&device.physical_device.properties.memory)
-            .ok_or(DeviceAllocError::UnsupportedMemoryType)?;
+            .ok_or(AllocError::UnsupportedMemoryType)?;
         let vk::MemoryRequirements {
             size, alignment, ..
         } = request.requirements;
@@ -217,7 +220,7 @@ impl Allocator for PageAllocator {
                     .ok()
                     .and_then(|page| Page::try_allocate(&page, size, alignment))
             })
-            .ok_or(DeviceAllocError::OutOfMemory)
+            .ok_or(AllocError::OutOfMemory)
     }
 
     fn free<M: MemoryProperties>(
