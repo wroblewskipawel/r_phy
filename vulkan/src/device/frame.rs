@@ -10,7 +10,7 @@ use to_resolve::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };
-use type_kit::{Destroy, DropGuard};
+use type_kit::{Destroy, DestroyCollection, DropGuard};
 
 use crate::Context;
 use math::types::Matrix4;
@@ -146,7 +146,7 @@ impl<F: FrameContext> Destroy for FramePool<F> {
     type Context<'a> = &'a Context;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.image_sync.destroy(context);
+        self.image_sync.iter_mut().destroy(context);
         self.primary_commands.destroy(context);
         self.secondary_commands.destroy(context);
         self.camera_uniform.destroy(context);
