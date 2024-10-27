@@ -1,11 +1,12 @@
-use std::error::Error;
+use std::{cell::RefCell, error::Error};
 
 use crate::device::{
     memory::{AllocReq, Allocator},
+    resources::DummyPack,
     Device,
 };
 use to_resolve::model::{MaterialCollection, MaterialTypeList};
-use type_kit::{Cons, Nil, TypeList, TypedNil};
+use type_kit::{Cons, Destroy, Nil, TypedNil};
 
 use super::{Material, MaterialPack, MaterialPackPartial, MaterialPackRef};
 
@@ -19,7 +20,7 @@ pub trait MaterialPackListBuilder: MaterialTypeList {
 }
 
 impl MaterialPackListBuilder for Nil {
-    type Pack<A: Allocator> = TypedNil<A>;
+    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
 
     fn prepare<A: Allocator>(
         &self,
@@ -62,7 +63,7 @@ pub trait MaterialPackListPartial: Sized {
 }
 
 impl MaterialPackListPartial for Nil {
-    type Pack<A: Allocator> = TypedNil<A>;
+    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
 
     fn get_memory_requirements(&self) -> Vec<AllocReq> {
         vec![]
@@ -108,15 +109,14 @@ impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
     }
 }
 
-pub trait MaterialPackList<A: Allocator>: TypeList {
-    fn destroy(&mut self, device: &Device, allocator: &mut A);
-
+pub trait MaterialPackList<A: Allocator>:
+    for<'a> Destroy<Context<'a> = (&'a Device, &'a RefCell<&'a mut A>)>
+{
     fn try_get<M: Material>(&self) -> Option<MaterialPackRef<M>>;
 }
 
-impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
-    fn destroy(&mut self, _device: &Device, _allocator: &mut A) {}
-    fn try_get<M: Material>(&self) -> Option<MaterialPackRef<M>> {
+impl<A: Allocator> MaterialPackList<A> for TypedNil<DummyPack<A>> {
+    fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
         None
     }
 }
@@ -124,27 +124,10 @@ impl<A: Allocator> MaterialPackList<A> for TypedNil<A> {
 impl<A: Allocator, M: Material, N: MaterialPackList<A>> MaterialPackList<A>
     for Cons<Option<MaterialPack<M, A>>, N>
 {
-    fn destroy(&mut self, device: &Device, allocator: &mut A) {
-        if let Some(material_pack) = &mut self.head {
-            device.destroy_material_pack(material_pack, allocator);
-        }
-        self.tail.destroy(device, allocator);
-    }
-
     fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
         self.head
             .as_ref()
             .and_then(|pack| pack.try_into().ok())
             .or_else(|| self.tail.try_get::<T>())
-    }
-}
-
-impl Device {
-    pub fn destroy_materials<A: Allocator, M: MaterialPackList<A>>(
-        &self,
-        packs: &mut M,
-        allocator: &mut A,
-    ) {
-        packs.destroy(self, allocator)
     }
 }

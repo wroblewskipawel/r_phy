@@ -4,11 +4,22 @@ pub mod error;
 mod surface;
 
 use ash::extensions::{ext, khr};
-use error::{VkError, VkResult};
+use device::memory::MemoryProperties;
+use device::raw::allocator::{
+    AllocationEntry, AllocationRequest, AllocatorIndex, AllocatorStorage, Strategy,
+};
+use device::raw::resources::{
+    RawCollection, Resource, ResourceIndex, ResourceStorage, ResourceStorageList,
+};
+use error::{AllocatorResult, ResourceResult, VkError, VkResult};
+use std::cell::RefCell;
+use std::convert::Infallible;
 use std::error::Error;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
-use type_kit::{Create, CreateResult, Destroy, DropGuard, Finalize, Initialize};
+use type_kit::{
+    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, Initialize, Marker,
+};
 
 use ash::vk;
 use winit::window::Window;
@@ -140,16 +151,20 @@ impl Create for Instance {
 
 impl Destroy for Instance {
     type Context<'a> = ();
+    type DestroyError = Infallible;
 
     #[inline]
-    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             self.instance.destroy_instance(None);
         }
+        Ok(())
     }
 }
 
 pub struct Context {
+    allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
+    storage: Box<RefCell<DropGuard<ResourceStorage>>>,
     device: DropGuard<Device>,
     surface: DropGuard<Surface>,
     #[cfg(debug_assertions)]
@@ -175,8 +190,15 @@ impl Context {
         let debug_utils = DebugUtils::create((), &instance)?;
         let surface = Surface::create(window, &instance)?;
         let device = Device::create(&surface, &instance)?;
-
+        let storage = Box::new(RefCell::new(DropGuard::new(
+            <ResourceStorage as Create>::create((), &device)?,
+        )));
+        let allocators = Box::new(RefCell::new(DropGuard::new(
+            <AllocatorStorage as Create>::create((), (&device, &storage))?,
+        )));
         Ok(Self {
+            allocators,
+            storage,
             device: DropGuard::new(device),
             surface: DropGuard::new(surface),
             #[cfg(debug_assertions)]
@@ -194,11 +216,16 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
-        self.device.destroy(&self.instance);
-        self.surface.destroy(&self.instance);
+        let _ = self
+            .allocators
+            .borrow_mut()
+            .destroy((&self.device, &self.storage));
+        let _ = self.storage.borrow_mut().destroy(&self.device);
+        let _ = self.device.destroy(&self.instance);
+        let _ = self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
-        self.debug_utils.destroy(&self.instance);
-        self.instance.finalize();
+        let _ = self.debug_utils.destroy(&self.instance);
+        let _ = self.instance.finalize();
     }
 }
 
@@ -215,5 +242,68 @@ impl DerefMut for Context {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.device
+    }
+}
+
+impl Context {
+    #[inline]
+    pub fn create_resource<'a, R: Resource, M: Marker>(
+        &self,
+        config: R::Config<'a>,
+    ) -> ResourceResult<ResourceIndex<R>>
+    where
+        ResourceStorageList: Contains<RawCollection<R>, M>,
+    {
+        self.storage
+            .borrow_mut()
+            .create_resource(&self.device, config)
+    }
+
+    #[inline]
+    pub fn destroy_resource<'a, R: Resource, M: Marker>(
+        &self,
+        index: ResourceIndex<R>,
+    ) -> ResourceResult<()>
+    where
+        ResourceStorageList: Contains<RawCollection<R>, M>,
+    {
+        ResourceStorage::destroy_resource(&mut *self.storage.borrow_mut(), &self.device, index)
+    }
+
+    #[inline]
+    pub fn create_allocator<'a, S: Strategy>(
+        &self,
+        config: S::CreateConfig<'a>,
+    ) -> AllocatorResult<AllocatorIndex<S>> {
+        self.allocators
+            .borrow_mut()
+            .create_allocator::<S>(self, config)
+    }
+
+    #[inline]
+    pub fn destroy_allocator<'a, S: Strategy>(
+        &self,
+        index: AllocatorIndex<S>,
+    ) -> AllocatorResult<()> {
+        self.allocators
+            .borrow_mut()
+            .destroy_allocator::<S>(self, index)
+    }
+
+    #[inline]
+    pub fn allocate<P: MemoryProperties, S: Strategy>(
+        &self,
+        index: AllocatorIndex<S>,
+        req: AllocationRequest<P>,
+    ) -> AllocatorResult<AllocationEntry<S, P>> {
+        self.allocators.borrow_mut().allocate(self, index, req)
+    }
+
+    #[inline]
+    pub fn free<P: MemoryProperties, S: Strategy>(
+        &self,
+        index: AllocationEntry<S, P>,
+    ) -> AllocatorResult<()> {
+        self.allocators.borrow_mut().free(self, index)
     }
 }

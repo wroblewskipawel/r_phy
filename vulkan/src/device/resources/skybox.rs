@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{cell::RefCell, convert::Infallible, path::Path};
 
 use physics::shape;
 use to_resolve::{camera::CameraMatrices, model::CommonVertex};
@@ -14,7 +14,7 @@ use crate::{
     },
     error::VkError,
 };
-use type_kit::{Cons, Create, Destroy, DropGuard, Nil};
+use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 
 use super::{
     image::{ImageReader, Texture2D},
@@ -63,12 +63,14 @@ impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Create f
 
 impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Destroy for Skybox<A, L> {
     type Context<'a> = (&'a Device, &'a mut A);
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
-        self.descriptor.destroy(device);
-        self.mesh_pack.destroy((device, allocator));
-        self.cubemap.destroy((device, allocator));
-        self.pipeline.destroy(device);
+        self.descriptor.destroy(device)?;
+        self.mesh_pack.destroy((device, &RefCell::new(allocator)))?;
+        self.cubemap.destroy((device, allocator))?;
+        self.pipeline.destroy(device)?;
+        Ok(())
     }
 }

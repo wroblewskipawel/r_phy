@@ -1,7 +1,7 @@
 mod commands;
 mod draw_graph;
 
-use std::{cell::RefCell, error::Error, path::Path, rc::Rc};
+use std::{cell::RefCell, convert::Infallible, error::Error, path::Path, rc::Rc};
 
 use ash::vk;
 
@@ -13,7 +13,7 @@ use to_resolve::{
     model::{CommonVertex, Drawable, MeshBuilder},
     shader::{ShaderHandle, ShaderType},
 };
-use type_kit::{Create, CreateResult, Destroy, DropGuard};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError};
 
 use crate::{
     device::{
@@ -247,14 +247,16 @@ impl<A: Allocator> Create for GBuffer<A> {
 
 impl<A: Allocator> Destroy for GBuffer<A> {
     type Context<'a> = (&'a Device, &'a mut A);
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
-        self.combined.destroy((device, allocator));
-        self.albedo.destroy((device, allocator));
-        self.normal.destroy((device, allocator));
-        self.position.destroy((device, allocator));
-        self.depth.destroy((device, allocator));
+        self.combined.destroy((device, allocator))?;
+        self.albedo.destroy((device, allocator))?;
+        self.normal.destroy((device, allocator))?;
+        self.position.destroy((device, allocator))?;
+        self.depth.destroy((device, allocator))?;
+        Ok(())
     }
 }
 
@@ -292,12 +294,14 @@ impl<A: Allocator> Create for DeferredRendererFrameData<A> {
 
 impl<A: Allocator> Destroy for DeferredRendererFrameData<A> {
     type Context<'a> = (&'a Context, &'a mut A);
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
-        self.descriptors.destroy(device);
-        self.swapchain.destroy(device);
-        self.g_buffer.destroy((device, allocator));
+        self.descriptors.destroy(device)?;
+        self.swapchain.destroy(device)?;
+        self.g_buffer.destroy((device, allocator))?;
+        Ok(())
     }
 }
 
@@ -336,11 +340,13 @@ impl<A: Allocator> Create for DeferredRendererResources<A> {
 
 impl<A: Allocator> Destroy for DeferredRendererResources<A> {
     type Context<'a> = (&'a Device, &'a mut A);
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
-        self.mesh.destroy((device, allocator));
-        self.skybox.destroy((device, allocator));
+        self.mesh.destroy((device, &RefCell::new(allocator)))?;
+        self.skybox.destroy((device, allocator))?;
+        Ok(())
     }
 }
 
@@ -376,11 +382,13 @@ impl<P: GraphicsPipelinePackList> Create for DeferredRendererPipelines<P> {
 
 impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPipelines<P> {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.write_pass.destroy(context);
-        self.depth_prepass.destroy(context);
-        self.shading_pass.destroy(context);
+        let _ = self.depth_prepass.destroy(context);
+        let _ = self.shading_pass.destroy(context);
+        Ok(())
     }
 }
 
@@ -406,11 +414,13 @@ impl<A: Allocator> Create for DeferredRenderer<A> {
 
 impl<A: Allocator> Destroy for DeferredRenderer<A> {
     type Context<'a> = (&'a Context, &'a mut A);
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
-        self.frame_data.destroy((device, allocator));
-        self.resources.destroy((device, allocator));
+        self.frame_data.destroy((device, allocator))?;
+        self.resources.destroy((device, allocator))?;
+        Ok(())
     }
 }
 
@@ -438,9 +448,11 @@ impl<A: Allocator, P: GraphicsPipelinePackList> Create for DeferredRendererConte
 
 impl<A: Allocator, P: GraphicsPipelinePackList> Destroy for DeferredRendererContext<A, P> {
     type Context<'a> = &'a Context;
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.pipelines.destroy(context);
-        self.frames.destroy(context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.pipelines.destroy(context)?;
+        self.frames.destroy(context)?;
+        Ok(())
     }
 }

@@ -60,7 +60,7 @@ impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> Graphi
     for Cons<PipelinePack<T>, N>
 {
     fn destroy(&mut self, device: &Device) {
-        self.head.destroy(device);
+        let _ = self.head.destroy(device);
         self.tail.destroy(device);
     }
 

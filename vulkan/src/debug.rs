@@ -1,13 +1,14 @@
 #![allow(unused)]
 
 use std::{
+    convert::Infallible,
     error::Error,
     ffi::{c_char, c_void, CStr},
 };
 
 use ash::{extensions::ext, vk};
 use colored::{self, Colorize};
-use type_kit::{Create, Destroy};
+use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::{
     error::{VkError, VkResult},
@@ -106,11 +107,13 @@ impl Create for DebugUtils {
 
 impl Destroy for DebugUtils {
     type Context<'a> = &'a Instance;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, _: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             self.loader
                 .destroy_debug_utils_messenger(self.messenger, None);
         }
+        Ok(())
     }
 }

@@ -326,6 +326,29 @@ where
 {
 }
 
+impl<T: Create> Create for Option<T> {
+    type Config<'a> = T::Config<'a>;
+    type CreateError = T::CreateError;
+
+    #[inline]
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        T::create(config, context).map(Some)
+    }
+}
+
+impl<T: Destroy> Destroy for Option<T> {
+    type Context<'a> = T::Context<'a>;
+    type DestroyError = T::DestroyError;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        if let Some(mut inner) = self.take() {
+            inner.destroy(context)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DropGuard<T: Destroy> {
     #[cfg(debug_assertions)]
@@ -360,12 +383,12 @@ impl<T: Create + Destroy> Create for DropGuard<T> {
     }
 }
 
-pub enum DropGuardError<T: Destroy> {
-    DestroyError(T::DestroyError),
+pub enum DropGuardError<T: Error> {
+    DestroyError(T),
     DoubleDestroy,
 }
 
-impl<T: Destroy> Debug for DropGuardError<T> {
+impl<T: Error> Debug for DropGuardError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DestroyError(error) => {
@@ -380,7 +403,7 @@ impl<T: Destroy> Debug for DropGuardError<T> {
     }
 }
 
-impl<T: Destroy> Display for DropGuardError<T> {
+impl<T: Error> Display for DropGuardError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DestroyError(error) => {
@@ -391,11 +414,28 @@ impl<T: Destroy> Display for DropGuardError<T> {
     }
 }
 
-impl<T: Destroy> Error for DropGuardError<T> {}
+impl<T: Error> From<T> for DropGuardError<T> {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self::DestroyError(value)
+    }
+}
+
+impl<T: Error> From<DropGuardError<DropGuardError<T>>> for DropGuardError<T> {
+    #[inline]
+    fn from(value: DropGuardError<DropGuardError<T>>) -> Self {
+        match value {
+            DropGuardError::DestroyError(DropGuardError::DestroyError(error)) => error.into(),
+            _ => DropGuardError::DoubleDestroy,
+        }
+    }
+}
+
+impl<T: Error> Error for DropGuardError<T> {}
 
 impl<T: Destroy> Destroy for DropGuard<T> {
     type Context<'a> = T::Context<'a>;
-    type DestroyError = DropGuardError<T>;
+    type DestroyError = DropGuardError<T::DestroyError>;
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

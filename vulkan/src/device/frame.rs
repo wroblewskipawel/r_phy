@@ -3,14 +3,17 @@
 // which makes it not worth the effort to refactor this code
 #![allow(clippy::too_many_arguments)]
 
-use std::{error::Error, marker::PhantomData};
+use std::{cell::RefCell, convert::Infallible, error::Error, marker::PhantomData};
 
 use to_resolve::{
     camera::CameraMatrices,
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };
-use type_kit::{Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DropGuard};
+use type_kit::{
+    Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DestroyResult, DropGuard,
+    DropGuardError,
+};
 
 use crate::{error::VkError, Context};
 use math::types::Matrix4;
@@ -107,8 +110,10 @@ impl Create for CameraUniform {
     ) -> type_kit::CreateResult<Self> {
         let buffer_partial =
             UniformBufferPartial::prepare(UniformBufferBuilder::new(config), &context)?;
-        let uniform_buffer =
-            UniformBuffer::create(buffer_partial, (context, &mut DefaultAllocator {}))?;
+        let uniform_buffer = UniformBuffer::create(
+            buffer_partial,
+            (context, &RefCell::new(&mut DefaultAllocator {})),
+        )?;
         let descriptors = DescriptorPool::create(
             DescriptorSetWriter::<CameraDescriptorSet>::new(config).write_buffer(&uniform_buffer),
             context,
@@ -122,11 +127,13 @@ impl Create for CameraUniform {
 
 impl Destroy for CameraUniform {
     type Context<'a> = &'a Device;
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.descriptors.destroy(context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.descriptors.destroy(context)?;
         self.uniform_buffer
-            .destroy((context, &mut DefaultAllocator {}));
+            .destroy((context, &RefCell::new(&mut DefaultAllocator {})))?;
+        Ok(())
     }
 }
 
@@ -156,11 +163,13 @@ impl<F: FrameContext> Create for FramePool<F> {
 
 impl<F: FrameContext> Destroy for FramePool<F> {
     type Context<'a> = &'a Device;
+    type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.image_sync.iter_mut().destroy(context);
-        self.primary_commands.destroy(context);
-        self.secondary_commands.destroy(context);
-        self.camera_uniform.destroy(context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.image_sync.iter_mut().destroy(context)?;
+        self.primary_commands.destroy(context)?;
+        self.secondary_commands.destroy(context)?;
+        self.camera_uniform.destroy(context)?;
+        Ok(())
     }
 }

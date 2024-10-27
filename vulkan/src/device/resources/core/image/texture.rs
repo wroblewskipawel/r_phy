@@ -1,5 +1,7 @@
+use std::convert::Infallible;
+
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -86,7 +88,7 @@ impl<A: Allocator> Create for Texture2D<A> {
                 )?;
             }
             image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-            staging_buffer.destroy(device);
+            let _ = staging_buffer.destroy(device);
         }
         let create_info = vk::SamplerCreateInfo::builder()
             .mag_filter(vk::Filter::LINEAR)
@@ -104,12 +106,14 @@ impl<A: Allocator> Create for Texture2D<A> {
 
 impl<A: Allocator> Destroy for Texture2D<A> {
     type Context<'a> = (&'a Device, &'a mut A);
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
         unsafe {
             device.destroy_sampler(self.sampler, None);
         }
-        self.image.destroy((device, allocator));
+        let _ = self.image.destroy((device, allocator));
+        Ok(())
     }
 }

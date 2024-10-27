@@ -1,10 +1,11 @@
 use ash::{self, extensions::khr, vk};
 use std::{
     collections::HashSet,
+    convert::Infallible,
     ffi::{c_void, CStr},
     ptr::null,
 };
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use winit::{
     raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle},
     window::Window,
@@ -77,9 +78,11 @@ impl Create for Surface {
 
 impl Destroy for Surface {
     type Context<'a> = &'a Instance;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe { self.loader.destroy_surface(self.handle, None) };
+        Ok(())
     }
 }
 

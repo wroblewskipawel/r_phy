@@ -1,8 +1,11 @@
-use std::{borrow::BorrowMut, marker::PhantomData, ptr::copy_nonoverlapping};
+use std::{
+    borrow::BorrowMut, cell::RefCell, convert::Infallible, marker::PhantomData,
+    ptr::copy_nonoverlapping,
+};
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
-use type_kit::{Create, Destroy};
+use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -205,15 +208,20 @@ impl Create for StagingBuffer {
             queue_families: &[operation::Transfer::get_queue_family_index(context)],
         };
         let partial = PersistentBufferPartial::prepare(BufferBuilder::new(info), context)?;
-        let buffer = PersistentBuffer::create(partial, (context, &mut DefaultAllocator {}))?;
+        let buffer =
+            PersistentBuffer::create(partial, (context, &RefCell::new(&mut DefaultAllocator {})))?;
         Ok(StagingBuffer { range, buffer })
     }
 }
 
 impl Destroy for StagingBuffer {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.buffer.destroy((context, &mut DefaultAllocator {}));
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = self
+            .buffer
+            .destroy((context, &RefCell::new(&mut DefaultAllocator {})));
+        Ok(())
     }
 }

@@ -1,11 +1,12 @@
 use std::{
     any::{type_name, TypeId},
+    convert::Infallible,
     marker::PhantomData,
 };
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -100,11 +101,13 @@ impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
 
 impl<T: GraphicsPipelineConfig> Destroy for GraphicsPipeline<T> {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             context.destroy_pipeline(self.handle, None);
         }
+        Ok(())
     }
 }
 
@@ -298,10 +301,12 @@ impl<T: GraphicsPipelineConfig> Create for PipelinePack<T> {
 
 impl<T: GraphicsPipelineConfig> Destroy for PipelinePack<T> {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.data.pipelines.iter().for_each(|&p| unsafe {
             context.destroy_pipeline(p, None);
         });
+        Ok(())
     }
 }

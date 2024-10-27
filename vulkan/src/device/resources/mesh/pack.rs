@@ -1,7 +1,7 @@
-use std::{any::TypeId, marker::PhantomData};
+use std::{any::TypeId, cell::RefCell, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -103,7 +103,7 @@ impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
             staging_buffer.transfer_buffer_data(device, &mut buffer, 0)?;
-            staging_buffer.destroy(device);
+            let _ = staging_buffer.destroy(device);
             (vertex_ranges, index_ranges)
         };
         let meshes = vertex_ranges
@@ -127,10 +127,12 @@ impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
 }
 
 impl<V: Vertex, A: Allocator> Destroy for MeshPack<V, A> {
-    type Context<'a> = (&'a Device, &'a mut A);
+    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.data.buffer.destroy(context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.data.buffer.destroy(context)?;
+        Ok(())
     }
 }
 
@@ -239,6 +241,6 @@ impl Device {
         meshes: &[Mesh<V>],
     ) -> VkResult<MeshPack<V, A>> {
         let partial = MeshPackPartial::prepare(meshes, self)?;
-        MeshPack::create(partial, (self, allocator))
+        MeshPack::create(partial, (self, &RefCell::new(allocator)))
     }
 }

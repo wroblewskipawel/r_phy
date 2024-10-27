@@ -11,8 +11,8 @@ use crate::{
 
 use super::PartialBuilder;
 use ash::vk;
-use std::marker::PhantomData;
-use type_kit::{Create, Destroy};
+use std::{convert::Infallible, marker::PhantomData};
+use type_kit::{Create, Destroy, DestroyResult};
 
 pub use reader::*;
 pub use texture::*;
@@ -184,13 +184,15 @@ impl<M: MemoryProperties, A: Allocator> Create for Image2D<M, A> {
 
 impl<M: MemoryProperties, A: Allocator> Destroy for Image2D<M, A> {
     type Context<'a> = (&'a Device, &'a mut A);
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
         unsafe {
             device.destroy_image_view(self.image_view, None);
             device.destroy_image(self.image, None);
             allocator.free(device, &mut self.memory);
         }
+        Ok(())
     }
 }

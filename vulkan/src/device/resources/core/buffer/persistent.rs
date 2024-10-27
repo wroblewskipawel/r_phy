@@ -1,6 +1,6 @@
-use std::ffi::c_void;
+use std::{cell::RefCell, convert::Infallible, ffi::c_void};
 
-use type_kit::{Create, Destroy};
+use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -73,14 +73,16 @@ impl<A: Allocator> Create for PersistentBuffer<A> {
 }
 
 impl<A: Allocator> Destroy for PersistentBuffer<A> {
-    type Context<'a> = (&'a Device, &'a mut A);
+    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let (device, allocator) = context;
         if let Some(..) = self.ptr {
             self.buffer.memory.unmap(device);
             self.ptr = None;
         }
-        self.buffer.destroy((device, allocator));
+        self.buffer.destroy((device, allocator))?;
+        Ok(())
     }
 }

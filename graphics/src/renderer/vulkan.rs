@@ -1,14 +1,16 @@
 use math::types::Matrix4;
-use type_kit::{Cons, Contains, Create, Destroy, DropGuard, Marker, Nil};
+use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, DropGuard, Marker, Nil};
 use vulkan::device::memory::DefaultAllocator;
 use vulkan::device::renderer::deferred::DeferredRenderer;
 use vulkan::device::resources::{
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
     MeshPackListBuilder, MeshPackListPartial,
 };
+use vulkan::device::Device;
 use vulkan::Context;
 
 use super::{camera::Camera, ContextBuilder, Renderer, RendererBuilder, RendererContext};
+use std::convert::Infallible;
 use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
 use to_resolve::{
     model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
@@ -83,7 +85,7 @@ impl Drop for VulkanRenderer {
         let context = self.context.borrow();
         let _ = context.wait_idle();
         let mut renderer = self.renderer.borrow_mut();
-        renderer.destroy((&*context, &mut DefaultAllocator {}));
+        let _ = renderer.destroy((&*context, &mut DefaultAllocator {}));
     }
 }
 
@@ -145,12 +147,17 @@ impl<
     > Destroy for VulkanResourcePack<R, M, V, S>
 {
     type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        context.destroy_materials(&mut self.materials, &mut self.allocator);
-        context.destroy_meshes(&mut self.meshes, &mut self.allocator);
-        self.renderer_context.destroy(context);
-        self.allocator.destroy(context)
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let device: &Device = &*context;
+        let cell_allocator = RefCell::new(&mut self.allocator);
+        let destroy_context = (device, &cell_allocator);
+        let _ = self.materials.destroy(destroy_context);
+        let _ = self.meshes.destroy(destroy_context);
+        let _ = self.renderer_context.destroy(context);
+        self.allocator.destroy(context);
+        Ok(())
     }
 }
 
@@ -186,7 +193,7 @@ impl<
     fn drop(&mut self) {
         let context = self.context.borrow();
         let _ = self.context.borrow().wait_idle();
-        self.resources.destroy(&*context);
+        let _ = self.resources.destroy(&*context);
     }
 }
 

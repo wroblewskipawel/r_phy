@@ -1,11 +1,13 @@
 use std::{
+    cell::RefCell,
+    convert::Infallible,
     marker::PhantomData,
     ops::{Index, IndexMut},
 };
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::{
     device::{
@@ -133,9 +135,11 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Create for UniformBuffer<U, O
 }
 
 impl<U: AnyBitPattern, O: Operation, A: Allocator> Destroy for UniformBuffer<U, O, A> {
-    type Context<'a> = (&'a Device, &'a mut A);
+    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
-        self.buffer.destroy(context);
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.buffer.destroy(context)?;
+        Ok(())
     }
 }

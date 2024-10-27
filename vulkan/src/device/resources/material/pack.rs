@@ -1,6 +1,6 @@
-use std::{any::TypeId, error::Error, marker::PhantomData};
+use std::{any::TypeId, cell::RefCell, convert::Infallible, error::Error, marker::PhantomData};
 
-use type_kit::{Create, Destroy, DropGuard};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard};
 
 use crate::{
     device::{
@@ -163,7 +163,7 @@ impl Device {
     ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
     {
         let MaterialUniformPartial { uniform, data } = partial;
-        let mut uniform_buffer = UniformBuffer::create(uniform, (self, allocator))?;
+        let mut uniform_buffer = UniformBuffer::create(uniform, (self, &RefCell::new(allocator)))?;
         for (index, uniform) in data.into_iter().enumerate() {
             *uniform_buffer[index].as_inner_mut() = *uniform;
         }
@@ -236,21 +236,22 @@ impl Device {
     }
 }
 
-impl Device {
-    pub fn destroy_material_pack<'a, M: Material, A: Allocator>(
-        &self,
-        pack: impl Into<&'a mut MaterialPackData<M, A>>,
-        allocator: &mut A,
-    ) {
-        let data = pack.into();
-        if let Some(textures) = data.textures.as_mut() {
-            textures
+impl<M: Material, A: Allocator> Destroy for MaterialPack<M, A> {
+    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let (device, allocator) = context;
+        let allocator = &mut *allocator.borrow_mut();
+        if let Some(textures) = self.data.textures.as_mut() {
+            let _ = textures
                 .iter_mut()
-                .for_each(|texture| texture.destroy((self, allocator)));
+                .try_for_each(|texture| texture.destroy((device, allocator)));
         }
-        if let Some(uniforms) = data.uniforms.as_mut() {
-            uniforms.destroy((self, allocator));
+        if let Some(uniforms) = self.data.uniforms.as_mut() {
+            let _ = uniforms.destroy(context);
         }
-        data.descriptors.destroy(self);
+        let _ = self.data.descriptors.destroy(device);
+        Ok(())
     }
 }

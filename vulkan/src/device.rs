@@ -4,6 +4,7 @@ pub mod frame;
 pub mod framebuffer;
 pub mod memory;
 pub mod pipeline;
+pub mod raw;
 pub mod render_pass;
 pub mod renderer;
 pub mod resources;
@@ -16,6 +17,7 @@ use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
 use ash::{self, vk};
 use colored::Colorize;
+use std::convert::Infallible;
 use std::ffi::c_char;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
@@ -24,7 +26,7 @@ use std::{
     error::Error,
     ffi::CStr,
 };
-use type_kit::{Create, Destroy};
+use type_kit::{Create, Destroy, DestroyResult};
 
 #[derive(Debug, Clone, Copy)]
 struct QueueFamilies {
@@ -428,8 +430,9 @@ impl Create for Device {
 
 impl Destroy for Device {
     type Context<'a> = &'a Instance;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, _context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         self.destroy_render_passes();
         self.destroy_pipeline_layouts();
         self.destroy_descriptor_set_layouts();
@@ -437,5 +440,6 @@ impl Destroy for Device {
             self.command_pools.destroy(&self.device);
             self.device.destroy_device(None);
         }
+        Ok(())
     }
 }

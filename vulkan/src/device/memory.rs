@@ -161,3 +161,29 @@ impl<M: MemoryProperties> Memory for MemoryChunk<M> {
         }
     }
 }
+
+// // pub type DeviceAllocatorContext<'a, A> = (&'a Device, &'a RefCell<&'a mut A>);
+
+// #[derive(Debug)]
+// pub struct DeviceAllocatorContext<'a, A> {
+//     device: &'a Device,
+//     allocator: RefCell<&'a mut A>,
+// }
+
+// // impl<'a, A> DeviceAllocatorContext<'a, A> {
+// //     pub fn get_context(&self) -> (&Device, &RefCell<&mut A>) {
+// //         (self.device, &self.allocator)
+// //     }
+// // }
+
+// impl Device {
+//     pub fn device_allocatr_context<'a, A>(
+//         &'a self,
+//         allocator: &'a mut A,
+//     ) -> DeviceAllocatorContext<'a, A> {
+//         DeviceAllocatorContext {
+//             device: self,
+//             allocator: RefCell::new(allocator),
+//         }
+//     }
+// }

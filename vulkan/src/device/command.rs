@@ -2,7 +2,7 @@ use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
 use math::types::Vector4;
 use to_resolve::camera::CameraMatrices;
-use type_kit::{Create, CreateResult, Destroy};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::error::{VkError, VkResult};
 
@@ -24,7 +24,7 @@ use super::{
     swapchain::SwapchainFrame,
     Device, QueueFamilies,
 };
-use std::{any::type_name, error::Error, marker::PhantomData};
+use std::{any::type_name, convert::Infallible, error::Error, marker::PhantomData};
 
 pub struct Transient;
 pub struct Persistent;
@@ -285,12 +285,14 @@ impl<L: Level, O: Operation> Create for PersistentCommandPool<L, O> {
 
 impl<L: Level, O: Operation> Destroy for PersistentCommandPool<L, O> {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         L::destory_persistent_alocator(context, &mut self.allocator);
         unsafe {
             context.destroy_command_pool(self.command_pool, None);
         }
+        Ok(())
     }
 }
 

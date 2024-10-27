@@ -4,13 +4,14 @@ mod writer;
 
 use std::{
     any::{type_name, TypeId},
+    convert::Infallible,
     error::Error,
     marker::PhantomData,
 };
 
 pub use layout::*;
 pub use presets::*;
-use type_kit::{Create, Destroy};
+use type_kit::{Create, Destroy, DestroyResult};
 pub use writer::*;
 
 use ash::vk;
@@ -177,10 +178,12 @@ impl<L: DescriptorLayout> Create for DescriptorPool<L> {
 
 impl<L: DescriptorLayout> Destroy for DescriptorPool<L> {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             context.destroy_descriptor_pool(self.data.pool, None);
         };
+        Ok(())
     }
 }

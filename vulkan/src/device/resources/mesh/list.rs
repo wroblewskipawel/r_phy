@@ -1,24 +1,22 @@
-use std::error::Error;
+use std::{cell::RefCell, error::Error};
 
 use crate::device::{
     memory::{AllocReq, Allocator},
-    resources::PartialBuilder,
+    resources::{DummyPack, PartialBuilder},
     Device,
 };
 use to_resolve::model::{Mesh, MeshTypeList, Vertex};
-use type_kit::{Cons, Create, Destroy, Nil, TypeList, TypedNil};
+use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
-pub trait MeshPackList<A: Allocator>: TypeList {
-    fn destroy(&mut self, device: &Device, allocator: &mut A);
-
+pub trait MeshPackList<A: Allocator>:
+    for<'a> Destroy<Context<'a> = (&'a Device, &'a RefCell<&'a mut A>)>
+{
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>>;
 }
 
-impl<A: Allocator> MeshPackList<A> for TypedNil<A> {
-    fn destroy(&mut self, _device: &Device, _allocator: &mut A) {}
-
+impl<A: Allocator> MeshPackList<A> for TypedNil<DummyPack<A>> {
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>> {
         None
     }
@@ -27,13 +25,6 @@ impl<A: Allocator> MeshPackList<A> for TypedNil<A> {
 impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
     for Cons<Option<MeshPack<V, A>>, N>
 {
-    fn destroy(&mut self, device: &Device, allocator: &mut A) {
-        if let Some(mesh_pack) = &mut self.head {
-            mesh_pack.destroy((device, allocator));
-        }
-        self.tail.destroy(device, allocator);
-    }
-
     fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T, A>> {
         self.head
             .as_ref()
@@ -52,7 +43,7 @@ pub trait MeshPackListBuilder: MeshTypeList {
 }
 
 impl MeshPackListBuilder for Nil {
-    type Pack<A: Allocator> = TypedNil<A>;
+    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
 
     fn prepare<A: Allocator>(
         &self,
@@ -95,7 +86,7 @@ pub trait MeshPackListPartial: Sized {
 }
 
 impl MeshPackListPartial for Nil {
-    type Pack<A: Allocator> = TypedNil<A>;
+    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
 
     fn get_memory_requirements(&self) -> Vec<AllocReq> {
         vec![]
@@ -130,7 +121,10 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     ) -> Result<Self::Pack<A>, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {
-            Some(MeshPack::create(partial, (device, allocator))?)
+            Some(MeshPack::create(
+                partial,
+                (device, &RefCell::new(allocator)),
+            )?)
         } else {
             None
         };
@@ -138,15 +132,5 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
             head: pack,
             tail: tail.allocate(device, allocator)?,
         })
-    }
-}
-
-impl Device {
-    pub fn destroy_meshes<A: Allocator, M: MeshPackList<A>>(
-        &self,
-        packs: &mut M,
-        allocator: &mut A,
-    ) {
-        packs.destroy(self, allocator);
     }
 }

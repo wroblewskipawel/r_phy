@@ -1,6 +1,6 @@
 use ash::{extensions::khr, vk};
-use std::{error::Error, ffi::CStr};
-use type_kit::{Create, CreateResult, Destroy};
+use std::{convert::Infallible, error::Error, ffi::CStr};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::{
     error::{VkError, VkResult},
@@ -163,12 +163,14 @@ impl Create for SwapchainImageSync {
 
 impl Destroy for SwapchainImageSync {
     type Context<'a> = &'a Device;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             context.destroy_semaphore(self.draw_ready, None);
             context.destroy_semaphore(self.draw_finished, None);
         }
+        Ok(())
     }
 }
 
@@ -245,8 +247,9 @@ impl<A: AttachmentList> Create for Swapchain<A> {
 
 impl<A: AttachmentList> Destroy for Swapchain<A> {
     type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.framebuffers.iter_mut().for_each(|framebuffer| {
             context.destroy_framebuffer(framebuffer);
         });
@@ -256,5 +259,6 @@ impl<A: AttachmentList> Destroy for Swapchain<A> {
                 .for_each(|image| context.destroy_image_view(image.view, None));
             self.loader.destroy_swapchain(self.handle, None);
         }
+        Ok(())
     }
 }
