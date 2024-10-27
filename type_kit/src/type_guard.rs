@@ -39,7 +39,10 @@ pub(crate) mod test_types {
 
 #[cfg(test)]
 mod tests {
-    use std::any::{type_name, TypeId};
+    use std::{
+        any::{type_name, TypeId},
+        collections::HashMap,
+    };
 
     use crate::{
         type_guard::test_types::{A, B},
@@ -89,9 +92,10 @@ mod tests {
         let a = A(42);
         let a_guard = a.into_guard();
         match B::try_from_guard(a_guard) {
-            Err(TypeGuardConversionError { to, from }) => {
+            Err((guard, TypeGuardConversionError { to, from })) => {
                 assert_eq!(to, b_type_name);
                 assert_eq!(from, a_type_name);
+                assert_eq!(guard.inner(), &42);
             }
             _ => assert!(false),
         }
@@ -108,7 +112,7 @@ mod tests {
         let a_guard = a.into_guard();
         let error = B::try_from_guard(a_guard).unwrap_err();
         assert_eq!(
-            error.to_string(),
+            error.1.to_string(),
             format!(
                 "TypeGuard conversion error: cannot convert from {} to {}",
                 if cfg!(debug_assertions) {
@@ -120,18 +124,34 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn test_type_guard_as_hash_map_index() {
+        let a_1 = A(42).into_guard();
+        let a_2 = A(31).into_guard();
+        let mut map = HashMap::new();
+        map.insert(a_1, 42);
+        map.insert(a_2, 31);
+        assert_eq!(map.get(&a_1).unwrap(), &42);
+        assert_eq!(map.get(&a_2).unwrap(), &31);
+    }
 }
 
 use std::{
     any::{type_name, TypeId},
     error::Error,
     fmt::{Display, Formatter},
+    hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
+use crate::{Destroy, DestroyResult};
+
 pub type Valid<T> = TypeGuardUnlocked<<T as FromGuard>::Inner, T>;
+pub type ValidRef<'a, T> = TypeGuardUnlockedRef<'a, <T as FromGuard>::Inner, T>;
+pub type ValidMut<'a, T> = TypeGuardUnlockedMut<'a, <T as FromGuard>::Inner, T>;
 pub type Guard<T> = TypeGuard<<T as FromGuard>::Inner>;
-pub type GuardResult<T> = Result<T, TypeGuardConversionError>;
+pub type GuardResult<T> = Result<T, (Guard<T>, TypeGuardConversionError)>;
 
 pub trait FromGuard: 'static + From<Valid<Self>> {
     type Inner;
@@ -161,7 +181,7 @@ impl<T: FromGuard> Conv<T> {
 }
 
 impl<T: FromGuard> TryFrom<Guard<T>> for Conv<T> {
-    type Error = TypeGuardConversionError;
+    type Error = (Guard<T>, TypeGuardConversionError);
 
     fn try_from(value: Guard<T>) -> Result<Self, Self::Error> {
         let unlocked: Valid<T> = value.try_into()?;
@@ -177,6 +197,25 @@ pub struct GuardType {
 }
 
 #[cfg(debug_assertions)]
+impl PartialEq for GuardType {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id == other.type_id
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Eq for GuardType {}
+
+#[cfg(debug_assertions)]
+impl Hash for GuardType {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_id.hash(state);
+    }
+}
+
+#[cfg(debug_assertions)]
 impl GuardType {
     #[inline]
     pub fn new<T: 'static>() -> Self {
@@ -187,11 +226,52 @@ impl GuardType {
     }
 }
 
+#[cfg(debug_assertions)]
+impl GuardType {
+    #[inline]
+    fn check_type<U: 'static>(&self) -> Result<(), TypeGuardConversionError> {
+        if TypeId::of::<U>() != self.type_id {
+            return Err(TypeGuardConversionError {
+                to: type_name::<U>(),
+                from: self.type_name,
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TypeGuard<T> {
     inner: T,
     #[cfg(debug_assertions)]
     guard_type: GuardType,
+}
+
+#[cfg(debug_assertions)]
+impl<T: PartialEq> PartialEq for TypeGuard<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.guard_type == other.guard_type && self.inner == other.inner
+    }
+}
+
+#[cfg(not(debug_assertions))]
+impl<T: PartialEq> PartialEq for TypeGuard<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<T: Eq> Eq for TypeGuard<T> {}
+
+impl<T: Hash> Hash for TypeGuard<T> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        #[cfg(debug_assertions)]
+        self.guard_type.hash(state);
+        self.inner.hash(state);
+    }
 }
 
 impl<I> TypeGuard<I> {
@@ -251,21 +331,77 @@ impl<T, U: 'static> TypeGuardUnlocked<T, U> {
 }
 
 impl<T, U> TryFrom<TypeGuard<T>> for TypeGuardUnlocked<T, U> {
-    type Error = TypeGuardConversionError;
+    type Error = (TypeGuard<T>, TypeGuardConversionError);
 
+    #[inline]
     fn try_from(value: TypeGuard<T>) -> Result<Self, Self::Error> {
         #[cfg(debug_assertions)]
         {
-            let type_id = TypeId::of::<U>();
-            if type_id != value.type_id() {
-                return Err(TypeGuardConversionError {
-                    to: type_name::<U>(),
-                    from: value.type_name(),
-                });
+            if let Err(err) = value.guard_type.check_type::<U>() {
+                return Err((value, err));
             }
         }
         Ok(TypeGuardUnlocked {
             inner: value.inner,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TypeGuardUnlockedRef<'a, T, U: 'static> {
+    inner: &'a T,
+    _phantom: PhantomData<U>,
+}
+
+impl<'a, T, U: 'static> TypeGuardUnlockedRef<'a, T, U> {
+    #[inline]
+    pub fn inner_ref(self) -> &'a T {
+        self.inner
+    }
+}
+
+impl<'a, T, U> TryFrom<&'a TypeGuard<T>> for TypeGuardUnlockedRef<'a, T, U> {
+    type Error = TypeGuardConversionError;
+
+    #[inline]
+    fn try_from(value: &'a TypeGuard<T>) -> Result<Self, Self::Error> {
+        #[cfg(debug_assertions)]
+        value.guard_type.check_type::<U>()?;
+        Ok(TypeGuardUnlockedRef {
+            inner: &value.inner,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct TypeGuardUnlockedMut<'a, T, U: 'static> {
+    inner: &'a mut T,
+    _phantom: PhantomData<U>,
+}
+
+impl<'a, T, U: 'static> TypeGuardUnlockedMut<'a, T, U> {
+    #[inline]
+    pub fn inner_ref(self) -> &'a T {
+        self.inner
+    }
+
+    #[inline]
+    pub fn inner_mut(self) -> &'a mut T {
+        self.inner
+    }
+}
+
+impl<'a, T, U> TryFrom<&'a mut TypeGuard<T>> for TypeGuardUnlockedMut<'a, T, U> {
+    type Error = TypeGuardConversionError;
+
+    #[inline]
+    fn try_from(value: &'a mut TypeGuard<T>) -> Result<Self, Self::Error> {
+        #[cfg(debug_assertions)]
+        value.guard_type.check_type::<U>()?;
+        Ok(TypeGuardUnlockedMut {
+            inner: &mut value.inner,
             _phantom: PhantomData,
         })
     }
@@ -288,3 +424,13 @@ impl Display for TypeGuardConversionError {
 }
 
 impl Error for TypeGuardConversionError {}
+
+impl<T: Destroy> Destroy for TypeGuard<T> {
+    type Context<'a> = T::Context<'a>;
+    type DestroyError = T::DestroyError;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.inner.destroy(context)
+    }
+}

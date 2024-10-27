@@ -1,11 +1,12 @@
 #[cfg(test)]
 pub(crate) mod test_types {
     use std::{
+        convert::Infallible,
         error::Error,
         fmt::{Display, Formatter},
     };
 
-    use super::{Create, CreateResult, Destroy};
+    use super::{Create, CreateResult, Destroy, DestroyResult};
 
     #[derive(Debug)]
     pub struct E;
@@ -35,7 +36,10 @@ pub(crate) mod test_types {
 
     impl Destroy for A {
         type Context<'a> = &'a C;
-        fn destroy<'a>(&mut self, _context: Self::Context<'a>) {}
+        type DestroyError = Infallible;
+        fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
+            Ok(())
+        }
     }
 
     #[derive(Debug)]
@@ -52,7 +56,11 @@ pub(crate) mod test_types {
 
     impl Destroy for B {
         type Context<'a> = ();
-        fn destroy<'a>(&mut self, _context: Self::Context<'a>) {}
+        type DestroyError = Infallible;
+
+        fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
+            Ok(())
+        }
     }
 
     #[derive(Debug)]
@@ -69,7 +77,10 @@ pub(crate) mod test_types {
 
     impl Destroy for Failling {
         type Context<'a> = ();
-        fn destroy<'a>(&mut self, _: Self::Context<'a>) {}
+        type DestroyError = Infallible;
+        fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
+            Ok(())
+        }
     }
 }
 
@@ -83,7 +94,7 @@ mod tests {
         let mut c = C {};
         let mut a = DropGuard::new(A(42));
         assert_eq!(a.0, 42);
-        a.destroy(&mut c);
+        let _ = a.destroy(&mut c);
     }
 
     #[test]
@@ -103,7 +114,7 @@ mod tests {
     fn test_drop_into_blanket_impl() {
         let mut b: DropGuard<_> = B(42).into();
         assert_eq!(b.0, 42);
-        b.finalize();
+        let _ = b.finalize();
     }
 
     #[test]
@@ -111,14 +122,14 @@ mod tests {
         let c = C {};
         let mut a = DropGuard::<A>::create(42, &c).unwrap();
         assert_eq!(a.0, 42);
-        a.destroy(&C);
+        let _ = a.destroy(&C);
     }
 
     #[test]
     fn test_drop_initialize_and_finalize_blanket_impl() {
         let mut b = DropGuard::<B>::initialize(42).unwrap();
         assert_eq!(b.0, 42);
-        b.finalize();
+        let _ = b.finalize();
     }
 
     #[test]
@@ -128,7 +139,7 @@ mod tests {
         for (value, guard) in (0..4u32).zip(&b) {
             assert_eq!(guard.0, value);
         }
-        b.iter_mut().destroy(&c);
+        let _ = b.iter_mut().destroy(&c);
     }
 
     #[test]
@@ -137,7 +148,7 @@ mod tests {
         for (value, guard) in (0..4u32).zip(&b) {
             assert_eq!(guard.0, value);
         }
-        b.iter_mut().finalize();
+        let _ = b.iter_mut().finalize();
     }
 
     #[test]
@@ -156,7 +167,7 @@ mod tests {
 use std::{
     any::type_name,
     error::Error,
-    fmt::Debug,
+    fmt::{Debug, Display, Formatter},
     ops::{Deref, DerefMut},
 };
 
@@ -169,9 +180,12 @@ pub trait Create: Destroy {
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self>;
 }
 
+pub type DestroyResult<T> = Result<(), <T as Destroy>::DestroyError>;
+
 pub trait Destroy: Sized {
     type Context<'a>;
-    fn destroy<'a>(&mut self, context: Self::Context<'a>);
+    type DestroyError: Error;
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self>;
 }
 
 pub trait Initialize: Create
@@ -189,8 +203,8 @@ where
     Self::Context<'static>: Default,
 {
     #[inline]
-    fn finalize(&mut self) {
-        self.destroy(Self::Context::default());
+    fn finalize(&mut self) -> DestroyResult<Self> {
+        self.destroy(Self::Context::default())
     }
 }
 
@@ -215,8 +229,9 @@ where
     for<'a> Self::Item: DerefMut<Target = I>,
 {
     #[inline]
-    fn destroy<'a>(self, context: I::Context<'a>) {
-        self.into_iter().for_each(|mut item| item.destroy(context));
+    fn destroy<'a>(self, context: I::Context<'a>) -> DestroyResult<I> {
+        self.into_iter()
+            .try_for_each(|mut item| item.destroy(context))
     }
 }
 
@@ -252,9 +267,9 @@ where
     for<'a> Self::Item: DerefMut<Target = I>,
 {
     #[inline]
-    fn finalize<'a>(self) {
+    fn finalize<'a>(self) -> DestroyResult<I> {
         self.into_iter()
-            .for_each(|mut item| item.destroy(I::Context::default()));
+            .try_for_each(|mut item| item.destroy(I::Context::default()))
     }
 }
 
@@ -272,7 +287,7 @@ where
 {
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DropGuard<T: Destroy> {
     #[cfg(debug_assertions)]
     inner: Option<T>,
@@ -306,19 +321,63 @@ impl<T: Create + Destroy> Create for DropGuard<T> {
     }
 }
 
+pub enum DropGuardError<T: Destroy> {
+    DestroyError(T::DestroyError),
+    DoubleDestroy,
+}
+
+impl<T: Destroy> Debug for DropGuardError<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DestroyError(error) => {
+                write!(
+                    f,
+                    "DropGuard inner item destroy raised an error: {:?}",
+                    error
+                )
+            }
+            Self::DoubleDestroy => write!(f, "DropGuard inner resource was already destroyed"),
+        }
+    }
+}
+
+impl<T: Destroy> Display for DropGuardError<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DestroyError(error) => {
+                write!(f, "DropGuard inner item destroy raised an error: {}", error)
+            }
+            Self::DoubleDestroy => write!(f, "DropGuard inner resource was already destroyed"),
+        }
+    }
+}
+
+impl<T: Destroy> Error for DropGuardError<T> {}
+
 impl<T: Destroy> Destroy for DropGuard<T> {
     type Context<'a> = T::Context<'a>;
+    type DestroyError = DropGuardError<T>;
+
     #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) {
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         #[cfg(debug_assertions)]
         {
             if let Some(mut inner) = self.inner.take() {
-                inner.destroy(context);
+                inner
+                    .destroy(context)
+                    .map_err(|err| DropGuardError::DestroyError(err))?;
+                self.inner = None;
+                Ok(())
+            } else {
+                Err(DropGuardError::DoubleDestroy)
             }
         }
         #[cfg(not(debug_assertions))]
         {
-            self.inner.destroy(context);
+            self.inner
+                .destroy(context)
+                .map_err(|err| DropGuardError::DestroyError(err))?;
+            Ok(())
         }
     }
 }
