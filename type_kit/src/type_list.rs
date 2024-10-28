@@ -167,6 +167,55 @@ impl<T> TypedNil<T> {
 pub type Nil = TypedNil<()>;
 
 #[derive(Debug, Default, Clone, Copy)]
+pub struct Fin<H> {
+    pub head: H,
+}
+
+impl<H> Contains<H, Here> for Fin<H> {
+    #[inline]
+    fn get(&self) -> &H {
+        &self.head
+    }
+
+    #[inline]
+    fn get_mut(&mut self) -> &mut H {
+        &mut self.head
+    }
+}
+
+impl<H> Fin<H> {
+    #[inline]
+    pub fn new(head: H) -> Self {
+        Self { head }
+    }
+}
+
+impl<H> Deref for Fin<H> {
+    type Target = H;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.head
+    }
+}
+
+impl<H> DerefMut for Fin<H> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.head
+    }
+}
+
+impl<H: PartialEq> PartialEq for Fin<H> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.head == other.head
+    }
+}
+
+impl<H: Eq> Eq for Fin<H> {}
+
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Cons<H, T> {
     pub head: H,
     pub tail: T,
@@ -271,6 +320,12 @@ impl<N> TypeList for TypedNil<N> {
     type Next = Self;
 }
 
+impl<T> TypeList for Fin<T> {
+    const LEN: usize = 1;
+    type Item = T;
+    type Next = Nil;
+}
+
 impl<T, N: TypeList> TypeList for Cons<T, N> {
     const LEN: usize = N::LEN + 1;
     type Item = T;
@@ -279,7 +334,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
 
 #[cfg(test)]
 mod test_macro {
-    use crate::{list_type, list_value, unpack_list, Cons, Nil, TypedNil};
+    use crate::{list_type, list_value, unpack_list, Cons, Nil};
 
     trait AssertEqualTypes<A, B> {}
 
@@ -287,7 +342,7 @@ mod test_macro {
 
     #[test]
     fn test_type_list_macro_generates_correct_type() {
-        type GeneratedList = list_type![u8, u16, u32];
+        type GeneratedList = list_type![u8, u16, u32, Nil];
         type ExpectedList = Cons<u8, Cons<u16, Cons<u32, Nil>>>;
 
         // Compile-time assertion to check if the types are the same
@@ -296,7 +351,7 @@ mod test_macro {
 
     #[test]
     fn text_list_macro_generates_correct_value() {
-        let list = list_value![8u8, 16u16, 32u32];
+        let list = list_value![8u8, 16u16, 32u32, Nil::new()];
         let expected_list = Cons::new(8u8, Cons::new(16u16, Cons::new(32u32, Nil::new())));
 
         assert_eq!(list, expected_list);
@@ -315,8 +370,8 @@ mod test_macro {
 
 #[macro_export]
 macro_rules! list_type {
-    [] => {
-        Nil
+    [$head:ty, $tail:ty] => {
+        Cons<$head, $tail>
     };
     [$head:ty $(, $tail:ty)*] => {
         Cons<$head, list_type![$($tail),*]>
@@ -325,8 +380,8 @@ macro_rules! list_type {
 
 #[macro_export]
 macro_rules! list_value {
-    [] => {
-        Nil::new()
+    [$head:expr, $tail:expr] => {
+        Cons::new($head, $tail)
     };
     [$head:expr $(, $tail:expr)*] => {
         Cons::new($head, list_value![$($tail),*])
@@ -335,8 +390,8 @@ macro_rules! list_value {
 
 #[macro_export]
 macro_rules! unpack_list {
-    [] => {
-        TypedNil { .. }
+    [$tail:ident] => {
+        $tail
     };
     [$head:ident $(, $tail:ident)*] => {
         Cons {
@@ -362,8 +417,8 @@ impl<T> From<Valid<TypedNil<T>>> for TypedNil<T> {
     }
 }
 
-impl<T> Create for TypedNil<T> {
-    type Config<'a> = TypedNil<T>;
+impl<T: Create> Create for TypedNil<T> {
+    type Config<'a> = ();
     type CreateError = Infallible;
 
     #[inline]
@@ -372,8 +427,8 @@ impl<T> Create for TypedNil<T> {
     }
 }
 
-impl<T> Destroy for TypedNil<T> {
-    type Context<'a> = &'a ();
+impl<T: Destroy> Destroy for TypedNil<T> {
+    type Context<'a> = T::Context<'a>;
     type DestroyError = Infallible;
 
     #[inline]
@@ -382,20 +437,64 @@ impl<T> Destroy for TypedNil<T> {
     }
 }
 
-impl<H: Create, T> Create for Cons<H, T>
+impl<T: Create> Create for Fin<T> {
+    type Config<'a> = T::Config<'a>;
+    type CreateError = T::CreateError;
+
+    #[inline]
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        Ok(Fin::new(T::create(config, context)?))
+    }
+}
+
+impl<T: Destroy> Destroy for Fin<T> {
+    type Context<'a> = T::Context<'a>;
+    type DestroyError = T::DestroyError;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.head.destroy(context)
+    }
+}
+
+pub enum ConsCreateError<H: Create, T: Create> {
+    Head(H::CreateError),
+    Tail(T::CreateError),
+}
+
+impl<H: Create, T: Create> Debug for ConsCreateError<H, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Head(arg0) => f.debug_tuple("Head").field(arg0).finish(),
+            Self::Tail(arg0) => f.debug_tuple("Tail").field(arg0).finish(),
+        }
+    }
+}
+
+impl<H: Create, T: Create> Display for ConsCreateError<H, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Head(arg0) => write!(f, "Head({})", arg0),
+            Self::Tail(arg0) => write!(f, "Tail({})", arg0),
+        }
+    }
+}
+
+impl<H: Create, T: Create> Error for ConsCreateError<H, T> {}
+
+impl<H: Create, T: Create> Create for Cons<H, T>
 where
-    T: Create<CreateError = H::CreateError>,
-    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
     for<'a> H::Context<'a>: Clone + Copy,
+    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
 {
     type Config<'a> = Cons<H::Config<'a>, T::Config<'a>>;
-    type CreateError = H::CreateError;
+    type CreateError = ConsCreateError<H, T>;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let Cons { head, tail } = config;
-        let head = H::create(head, context)?;
-        let tail = T::create(tail, context)?;
+        let head = H::create(head, context).map_err(|err| ConsCreateError::Head(err))?;
+        let tail = T::create(tail, context).map_err(|err| ConsCreateError::Tail(err))?;
         Ok(Cons::new(head, tail))
     }
 }
@@ -427,8 +526,8 @@ impl<H: Destroy, T: Destroy> Error for ConsDestroyError<H, T> {}
 
 impl<H: Destroy, T: Destroy> Destroy for Cons<H, T>
 where
-    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
     for<'a> H::Context<'a>: Clone + Copy,
+    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
 {
     type Context<'a> = T::Context<'a>;
     type DestroyError = ConsDestroyError<H, T>;
@@ -442,5 +541,52 @@ where
             .destroy(context)
             .map_err(|err| ConsDestroyError::Tail(err))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test_type_list_create_destroy {
+    use super::*;
+    use crate::drop_guard::test_types::{FaillingCreate, FaillingDestroy, A, C};
+    use crate::drop_guard::{Create, Destroy};
+
+    type TestTypeList = list_type![A, A, A, A, A, TypedNil<A>];
+    type TestTypeListFailingCreate = list_type![A, A, FaillingCreate, A, A, TypedNil<A>];
+    type TestTypeListFailingDestroy = list_type![A, A, FaillingDestroy, A, A, TypedNil<A>];
+
+    #[test]
+    fn test_type_list_create_and_destroy() {
+        let c = C {};
+        let config_list = list_value![1u32, 2u32, 3u32, 4u32, 5u32, ()];
+        let result = TestTypeList::create(config_list, &mut &c);
+        assert!(result.is_ok());
+        let result = result.unwrap().destroy(&mut &c);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_list_create_failure() {
+        let c = C {};
+        let config_list = list_value![1u32, 2u32, (), 4u32, 5u32, ()];
+        let result = TestTypeListFailingCreate::create(config_list, &mut &c);
+        matches!(
+            result,
+            Err(ConsCreateError::Tail(ConsCreateError::Tail(
+                ConsCreateError::Head(_)
+            )))
+        );
+    }
+
+    #[test]
+    fn test_type_list_destroy_failure() {
+        let c = C {};
+        let config_list = list_value![1u32, 2u32, (), 4u32, 5u32, ()];
+        let mut failing = TestTypeListFailingDestroy::create(config_list, &mut &c).unwrap();
+        matches!(
+            failing.destroy(&mut &c),
+            Err(ConsDestroyError::Tail(ConsDestroyError::Tail(
+                ConsDestroyError::Head(_)
+            )))
+        );
     }
 }

@@ -1297,12 +1297,22 @@ mod test_list_index {
     use std::convert::Infallible;
 
     use super::*;
-    use crate::{list_type, list_value, unpack_list, Cons, GenIndex, IndexList, Nil, TypedNil};
+    use crate::{list_type, list_value, unpack_list, Cons, GenIndex, IndexList, Nil};
 
-    type TestCollection = list_type![GenCollection<u8>, GenCollection<u16>, GenCollection<u32>];
-    type TestCopyCollection =
-        list_type![CopyCollection<u8>, CopyCollection<u16>, CopyCollection<u32>];
-    type TestOptionCollection = list_type![OptionCollection<Vec<u8>>, OptionCollection<Vec<u16>>];
+    type TestCollection = list_type![
+        GenCollection<u8>,
+        GenCollection<u16>,
+        GenCollection<u32>,
+        Nil
+    ];
+    type TestCopyCollection = list_type![
+        CopyCollection<u8>,
+        CopyCollection<u16>,
+        CopyCollection<u32>,
+        Nil
+    ];
+    type TestOptionCollection =
+        list_type![OptionCollection<Vec<u8>>, OptionCollection<Vec<u16>>, Nil];
     type TestCollectionList = GenCollectionList<TestCopyCollection>;
 
     #[test]
@@ -1319,7 +1329,8 @@ mod test_list_index {
         let index_u32: GenIndex<u32> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_owned(&mut collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32, _rest] =
+            index_list.get_owned(&mut collection).unwrap();
 
         assert_eq!(b_u8, 8);
         assert_eq!(b_u16, 16);
@@ -1348,7 +1359,7 @@ mod test_list_index {
         let index_u32: GenIndex<u32> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_ref(&collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32, _rest] = index_list.get_ref(&collection).unwrap();
 
         assert_eq!(*b_u8, 8);
         assert_eq!(*b_u16, 16);
@@ -1377,7 +1388,8 @@ mod test_list_index {
         let index_u32: GenIndex<CopyEntry<u32>> = collection_u32.push(32.into()).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_borrowed(&mut collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32, _rest] =
+            index_list.get_borrowed(&mut collection).unwrap();
 
         assert_eq!(**b_u8, 8);
         assert_eq!(**b_u16, 16);
@@ -1409,7 +1421,7 @@ mod test_list_index {
             Err(GenCollectionError::ItemBorrowed)
         );
 
-        let borrowed = list_value![b_u8, b_u16, b_u32];
+        let borrowed = list_value![b_u8, b_u16, b_u32, Nil::new()];
         matches!(borrowed.put_back(&mut collection), Ok(..));
 
         let collection_u8: &mut CopyCollection<u8> = collection.get_mut();
@@ -1435,7 +1447,8 @@ mod test_list_index {
             collection_vec_u16.push(Some(vec![16])).unwrap();
 
         let index_list = mark![TestOptionCollection, index_vec_u8, index_vec_u16];
-        let unpack_list![b_vec_u8, b_vec_u16] = index_list.get_borrowed(&mut collection).unwrap();
+        let unpack_list![b_vec_u8, b_vec_u16, _rest] =
+            index_list.get_borrowed(&mut collection).unwrap();
 
         assert_eq!(**b_vec_u8, vec![8]);
         assert_eq!(**b_vec_u16, vec![16]);
@@ -1458,7 +1471,7 @@ mod test_list_index {
             Err(GenCollectionError::ItemBorrowed)
         );
 
-        let borrowed = list_value![b_vec_u8, b_vec_u16];
+        let borrowed = list_value![b_vec_u8, b_vec_u16, Nil::new()];
         matches!(borrowed.put_back(&mut collection), Ok(..));
 
         let collection_vec_u8: &mut OptionCollection<Vec<u8>> = collection.get_mut();
@@ -1492,7 +1505,7 @@ mod test_list_index {
                 b_u32.item = 31;
                 Ok(())
             });
-            assert!(context.destroy(&mut collection).is_ok());
+            assert!(context.destroy(&mut collection.deref_mut()).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
@@ -1503,7 +1516,7 @@ mod test_list_index {
                 assert_eq!(b_u32.item, 31);
                 Ok(())
             });
-            assert!(context.destroy(&mut collection).is_ok());
+            assert!(context.destroy(&mut collection.deref_mut()).is_ok());
         }
     }
 }

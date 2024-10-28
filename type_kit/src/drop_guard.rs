@@ -64,9 +64,9 @@ pub(crate) mod test_types {
     }
 
     #[derive(Debug)]
-    pub struct Failling;
+    pub struct FaillingCreate;
 
-    impl Create for Failling {
+    impl Create for FaillingCreate {
         type Config<'a> = ();
         type CreateError = E;
 
@@ -75,11 +75,31 @@ pub(crate) mod test_types {
         }
     }
 
-    impl Destroy for Failling {
-        type Context<'a> = ();
+    impl Destroy for FaillingCreate {
+        type Context<'a> = &'a C;
         type DestroyError = Infallible;
         fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct FaillingDestroy;
+
+    impl Create for FaillingDestroy {
+        type Config<'a> = ();
+        type CreateError = Infallible;
+
+        fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
+            Ok(Self)
+        }
+    }
+
+    impl Destroy for FaillingDestroy {
+        type Context<'a> = &'a C;
+        type DestroyError = E;
+        fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
+            Err(E)
         }
     }
 }
@@ -87,14 +107,14 @@ pub(crate) mod test_types {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_types::{Failling, A, B, C, E};
+    use test_types::{FaillingCreate, FaillingDestroy, A, B, C, E};
 
     #[test]
     fn test_drop_guard_destroyed_before_drop() {
-        let mut c = C {};
+        let c = C {};
         let mut a = DropGuard::new(A(42));
         assert_eq!(a.0, 42);
-        let _ = a.destroy(&mut c);
+        let _ = a.destroy(&c);
     }
 
     #[test]
@@ -122,7 +142,7 @@ mod tests {
         let c = C {};
         let mut a = DropGuard::<A>::create(42, &c).unwrap();
         assert_eq!(a.0, 42);
-        let _ = a.destroy(&C);
+        let _ = a.destroy(&c);
     }
 
     #[test]
@@ -153,14 +173,33 @@ mod tests {
 
     #[test]
     fn test_create_failure_returns_error() {
-        let result = Failling::initialize(());
+        let c = C {};
+        let result = FaillingCreate::create((), &c);
         assert!(matches!(result, Err(E {})));
     }
 
     #[test]
     fn test_guard_create_failure_returns_inner_type_error() {
-        let result = DropGuard::<Failling>::initialize(());
+        let c = C {};
+        let result = DropGuard::<FaillingCreate>::create((), &mut &c);
         assert!(matches!(result, Err(E {})));
+    }
+
+    #[test]
+    fn test_destroy_failure_returns_error() {
+        let c = C {};
+        let mut failing = FaillingDestroy::create((), &mut &c).unwrap();
+        assert!(matches!(failing.destroy(&c), Err(E {})));
+    }
+
+    #[test]
+    fn test_guard_destroy_failure_returns_inner_type_error() {
+        let c = C {};
+        let mut failing = DropGuard::<FaillingDestroy>::create((), &mut &c).unwrap();
+        assert!(matches!(
+            failing.destroy(&c),
+            Err(DropGuardError::DestroyError(E {}))
+        ));
     }
 }
 
