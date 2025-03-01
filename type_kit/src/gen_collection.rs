@@ -256,35 +256,41 @@ mod cell {
 
     #[derive(Debug, Clone, Copy)]
     struct Occupied {
-        generation: usize,
         item_index: usize,
     }
 
     #[derive(Debug, Clone, Copy)]
     struct Empty {
-        prev_generation: usize,
         next_free: Option<usize>,
     }
 
     #[derive(Debug)]
     pub(super) struct LockedCell {
         cell: GenCell,
+        generation: usize,
     }
 
     impl LockedCell {
         #[inline]
         pub(super) fn new(item_index: usize) -> Self {
             Self {
-                cell: GenCell::Occupied(Occupied {
-                    generation: 0,
-                    item_index,
-                }),
+                cell: GenCell::Occupied(Occupied { item_index }),
+                generation: 0,
+            }
+        }
+
+        #[inline]
+        pub(super) fn generation(&self) -> GenCollectionResult<usize> {
+            match self.cell {
+                GenCell::Occupied(_) => Ok(self.generation),
+                GenCell::Borrowed(_) => Ok(self.generation),
+                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
 
         #[inline]
         pub(super) fn unlock(&self, generation: usize) -> GenCollectionResult<&GenCell> {
-            let cell_generation = self.cell.generation()?;
+            let cell_generation = self.generation()?;
             if cell_generation == generation {
                 Ok(&self.cell)
             } else {
@@ -300,7 +306,7 @@ mod cell {
             &mut self,
             generation: usize,
         ) -> GenCollectionResult<&mut GenCell> {
-            let cell_generation = self.cell.generation()?;
+            let cell_generation = self.generation()?;
             if cell_generation == generation {
                 Ok(&mut self.cell)
             } else {
@@ -317,16 +323,10 @@ mod cell {
             item_index: usize,
         ) -> GenCollectionResult<(usize, Option<usize>)> {
             match self.cell {
-                GenCell::Empty(Empty {
-                    prev_generation,
-                    next_free,
-                }) => {
-                    let generation = prev_generation + 1;
-                    self.cell = GenCell::Occupied(Occupied {
-                        generation,
-                        item_index,
-                    });
-                    Ok((generation, next_free))
+                GenCell::Empty(Empty { next_free }) => {
+                    self.generation += 1;
+                    self.cell = GenCell::Occupied(Occupied { item_index });
+                    Ok((self.generation, next_free))
                 }
                 GenCell::Occupied(..) => Err(GenCollectionError::CellOccupied),
                 GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
@@ -359,10 +359,7 @@ mod cell {
         pub(super) fn pop(&mut self, next_free: Option<usize>) -> GenCollectionResult<usize> {
             match *self {
                 GenCell::Occupied(cell) => {
-                    *self = GenCell::Empty(Empty {
-                        next_free,
-                        prev_generation: cell.generation,
-                    });
+                    *self = GenCell::Empty(Empty { next_free });
                     Ok(cell.item_index)
                 }
                 GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
@@ -395,19 +392,10 @@ mod cell {
         }
 
         #[inline]
-        pub(super) fn generation(&self) -> GenCollectionResult<usize> {
-            match self {
-                GenCell::Occupied(cell) => Ok(cell.generation),
-                GenCell::Borrowed(cell) => Ok(cell.generation),
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
-            }
-        }
-
-        #[inline]
         pub(super) fn item_index(&self) -> GenCollectionResult<usize> {
             match self {
                 GenCell::Occupied(cell) => Ok(cell.item_index),
-                GenCell::Borrowed(cell) => Ok(cell.generation),
+                GenCell::Borrowed(cell) => Ok(cell.item_index),
                 GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
