@@ -2,10 +2,13 @@ use std::any::type_name;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, rc::Rc};
+
     use super::*;
     use crate::type_guard::test_types::{A, B};
 
@@ -62,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_pop_while_last_borrowed() {
-        let mut collection = GenCollection::<CopyEntry<u8>>::default();
+        let mut collection = GenCollection::<u8>::default();
         let first_index = collection.push(42u8.into()).unwrap();
         let second_index = collection.push(37u8.into()).unwrap();
 
@@ -70,7 +73,7 @@ mod tests {
         assert_eq!(*borrowed_item, 37u8);
 
         let removed_item = collection.pop(first_index).unwrap();
-        assert_eq!(*removed_item, 42u8);
+        assert_eq!(removed_item, 42u8);
 
         collection.put_back(borrowed_item).unwrap();
     }
@@ -80,7 +83,10 @@ mod tests {
         let collection: GenCollection<&str> = GenCollection::default();
         let invalid_index = GenIndex::wrap(0, 999); // Invalid index
 
-        assert!(collection.get(invalid_index).is_err());
+        assert!(matches!(
+            collection.get(invalid_index),
+            Err(GenCollectionError::InvalidIndex { .. })
+        ));
     }
 
     #[test]
@@ -92,8 +98,33 @@ mod tests {
         let invalid_index = GenIndex::wrap(index.generation + 1, index.index);
 
         // Attempting to get or pop with the invalid index should fail
-        assert!(collection.get(invalid_index).is_err());
-        assert!(collection.pop(invalid_index).is_err());
+        assert!(matches!(
+            collection.get(invalid_index),
+            Err(GenCollectionError::InvalidGeneration { .. })
+        ));
+        assert!(matches!(
+            collection.pop(invalid_index),
+            Err(GenCollectionError::InvalidGeneration { .. })
+        ));
+    }
+
+    #[test]
+    fn test_generation_item_borrowed() {
+        let mut collection = GenCollection::default();
+        let index = collection.push("Item 1").unwrap();
+
+        // Manually create an index with an incorrect generation
+        let _borrowed_item = collection.borrow(index);
+
+        // Attempting to get or pop with the invalid index should fail
+        assert!(matches!(
+            collection.get(index),
+            Err(GenCollectionError::CellBorrowed)
+        ));
+        assert!(matches!(
+            collection.pop(index),
+            Err(GenCollectionError::CellBorrowed)
+        ));
     }
 
     #[test]
@@ -128,6 +159,45 @@ mod tests {
 
         let items: Vec<_> = collection.into_iter().collect();
         assert_eq!(items, vec!["Item 1", "Item 2"]);
+    }
+
+    #[test]
+    fn test_drain() {
+        let mut collection = GenCollection::default();
+        collection.push("Item 1").unwrap();
+        collection.push("Item 2").unwrap();
+
+        let items: Vec<_> = collection.drain();
+        assert_eq!(items, vec!["Item 1", "Item 2"]);
+        assert_eq!(collection.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_drain() {
+        let mut collection = GenCollection::default();
+        let index_1 = collection.push(11).unwrap();
+        let index_2 = collection.push(42).unwrap();
+        let index_3 = collection.push(31).unwrap();
+
+        let items: Vec<_> = collection.filter_drain(|item| item % 2 == 0);
+        assert_eq!(items, vec![42]);
+        assert_eq!(collection.len(), 2);
+        assert_eq!(collection.get(index_1).unwrap(), &11);
+        assert_eq!(collection.get(index_3).unwrap(), &31);
+
+        assert!(matches!(
+            collection.get(index_2),
+            Err(GenCollectionError::CellEmpty)
+        ));
+
+        collection.push(42).unwrap();
+        assert!(matches!(
+            collection.get(index_2),
+            Err(GenCollectionError::InvalidGeneration {
+                actual: 1,
+                expected: 0
+            })
+        ));
     }
 
     #[test]
@@ -213,6 +283,69 @@ mod tests {
         assert_eq!(map.get(&index1), Some(&42));
         assert_eq!(map.get(&index2), Some(&32));
     }
+
+    struct DropCounter {
+        count: Rc<Cell<usize>>,
+    }
+
+    impl DropCounter {
+        fn new() -> Self {
+            Self {
+                count: Rc::new(Cell::new(1)),
+            }
+        }
+
+        fn count(&self) -> usize {
+            self.count.get()
+        }
+    }
+
+    impl Clone for DropCounter {
+        fn clone(&self) -> Self {
+            let count = self.count.clone();
+            count.set(count.get() + 1);
+            Self { count }
+        }
+    }
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.count.set(self.count.get() - 1);
+        }
+    }
+
+    #[test]
+    fn test_items_dropped_on_collection_drop() {
+        let drop_counter = DropCounter::new();
+        let mut collection = GenCollection::default();
+        collection.push(drop_counter.clone()).unwrap();
+        collection.push(drop_counter.clone()).unwrap();
+        collection.push(drop_counter.clone()).unwrap();
+        assert_eq!(drop_counter.count(), 4);
+        drop(collection);
+        assert_eq!(drop_counter.count(), 1);
+    }
+
+    #[test]
+    fn test_items_dropped_on_collection_drop_skip_borrowed() {
+        let drop_counter = DropCounter::new();
+        let mut collection = GenCollection::default();
+
+        let index_1 = collection.push(drop_counter.clone()).unwrap();
+        let index_2 = collection.push(drop_counter.clone()).unwrap();
+        collection.push(drop_counter.clone()).unwrap();
+        assert_eq!(drop_counter.count(), 4);
+
+        let borrowed_item = collection.borrow(index_2).unwrap();
+        let popped_item = collection.pop(index_1).unwrap();
+
+        drop(collection);
+        assert_eq!(drop_counter.count(), 3);
+
+        drop(popped_item);
+        drop(borrowed_item);
+        assert_eq!(drop_counter.count(), 1);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -223,8 +356,6 @@ pub enum GenCollectionError {
     CellEmpty,
     CellOccupied,
     CellBorrowed,
-    ItemBorrowed,
-    ItemOccupied,
 }
 
 impl Display for GenCollectionError {
@@ -251,12 +382,6 @@ impl Display for GenCollectionError {
             }
             GenCollectionError::CellBorrowed => {
                 write!(f, "Cell is borrowed")
-            }
-            GenCollectionError::ItemBorrowed => {
-                write!(f, "Item is borrowed")
-            }
-            GenCollectionError::ItemOccupied => {
-                write!(f, "Item is occupied")
             }
         }
     }
@@ -333,6 +458,11 @@ mod cell {
         }
 
         #[inline]
+        pub(super) fn unlock_unchecked(&mut self) -> &mut GenCell {
+            &mut self.cell
+        }
+
+        #[inline]
         pub(super) fn insert(
             &mut self,
             item_index: usize,
@@ -355,11 +485,19 @@ mod cell {
                     cell.item_index = item_index;
                     Ok(())
                 }
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
                 GenCell::Borrowed(cell) => {
                     cell.item_index = item_index;
                     Ok(())
                 }
+                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+            }
+        }
+
+        #[inline]
+        pub(super) fn is_occupied(&self) -> bool {
+            match &self.cell {
+                GenCell::Occupied(..) => true,
+                _ => false,
             }
         }
     }
@@ -413,7 +551,7 @@ mod cell {
         pub(super) fn item_index(&self) -> GenCollectionResult<usize> {
             match self {
                 GenCell::Occupied(cell) => Ok(cell.item_index),
-                GenCell::Borrowed(cell) => Ok(cell.item_index),
+                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
                 GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
@@ -522,7 +660,7 @@ impl<T> GenIndex<T> {
 
 #[derive(Debug)]
 pub struct GenCollection<T> {
-    items: Vec<T>,
+    items: Vec<MaybeUninit<T>>,
     indices: Vec<LockedCell>,
     mapping: Vec<usize>,
     next_free: Option<usize>,
@@ -540,6 +678,22 @@ impl<T> Default for GenCollection<T> {
     }
 }
 
+impl<T> Drop for GenCollection<T> {
+    #[inline]
+    fn drop(&mut self) {
+        self.items
+            .iter_mut()
+            .zip(self.mapping.iter())
+            .for_each(|(item, &cell_index)| {
+                if self.indices[cell_index].is_occupied() {
+                    unsafe {
+                        item.assume_init_drop();
+                    }
+                }
+            });
+    }
+}
+
 impl<T> GenCollection<T> {
     #[inline]
     pub fn new() -> Self {
@@ -554,7 +708,7 @@ impl<T> GenCollection<T> {
     #[inline]
     pub fn push(&mut self, item: T) -> GenCollectionResult<GenIndex<T>> {
         let item_index = self.items.len();
-        self.items.push(item);
+        self.items.push(MaybeUninit::new(item));
 
         let (generation, cell_index) = if let Some(index) = self.next_free {
             let cell = &mut self.indices[index];
@@ -573,33 +727,27 @@ impl<T> GenCollection<T> {
 
     #[inline]
     pub fn pop(&mut self, index: GenIndex<T>) -> GenCollectionResult<T> {
-        let GenIndex {
-            index: next_free, ..
-        } = index;
-        let next_free = self.next_free.replace(next_free);
+        let next_free = self.next_free;
         let item_index = self.get_cell_mut_unlocked(index)?.pop(next_free)?;
-        self.swap_remove(item_index)
+        self.next_free.replace(index.index);
+        unsafe { Ok(self.swap_remove(item_index)) }
     }
 
     #[inline]
     pub fn get(&self, index: GenIndex<T>) -> GenCollectionResult<&T> {
-        let item_index = self.get_cell_item_index(index)?;
-        Ok(&self.items[item_index])
+        let item_index = self.get_cell_unlocked(index)?.item_index()?;
+        Ok(unsafe { self.items[item_index].assume_init_ref() })
     }
 
     #[inline]
     pub fn get_mut(&mut self, index: GenIndex<T>) -> GenCollectionResult<&mut T> {
-        let item_index = self.get_cell_item_index(index)?;
-        Ok(&mut self.items[item_index])
+        let item_index = self.get_cell_unlocked(index)?.item_index()?;
+        Ok(unsafe { self.items[item_index].assume_init_mut() })
     }
 
     #[inline]
     pub fn drain(&mut self) -> Vec<T> {
-        let items = self.items.drain(..).collect();
-        self.indices.clear();
-        self.mapping.clear();
-        self.next_free = None;
-        items
+        self.filter_drain(|_| true)
     }
 
     #[inline]
@@ -610,8 +758,12 @@ impl<T> GenCollection<T> {
         let mut removed = Vec::new();
         let mut i = 0;
         while i < self.items.len() {
-            if predicate(&self.items[i]) {
-                removed.push(self.swap_remove(i).unwrap());
+            let cell_index = self.mapping[i];
+            let cell = &mut self.indices[cell_index];
+            if cell.is_occupied() && predicate(unsafe { self.items[i].assume_init_ref() }) {
+                let next_free = self.next_free.replace(cell_index);
+                let _ = cell.unlock_unchecked().pop(next_free);
+                removed.push(unsafe { self.swap_remove(i) });
             } else {
                 i += 1;
             }
@@ -643,112 +795,29 @@ impl<T> GenCollection<T> {
             .and_then(|cell| cell.unlock_mut(generation))
     }
 
+    // Safety: The caller must ensure that the item at the given index is occupied
     #[inline]
-    fn validate_item_index(&self, index: usize) -> GenCollectionResult<usize> {
-        let len = self.items.len();
-        if index < self.items.len() {
-            Ok(index)
-        } else {
-            Err(GenCollectionError::InvalidItemIndex { index, len })
-        }
-    }
-
-    #[inline]
-    fn get_cell_item_index(&self, index: GenIndex<T>) -> GenCollectionResult<usize> {
-        self.get_cell_unlocked(index)?
-            .item_index()
-            .and_then(|item_index| self.validate_item_index(item_index))
-    }
-
-    #[inline]
-    fn pop_last(&mut self) -> T {
-        self.mapping
-            .pop()
-            .expect("Pop called on empty GenCollection mapping member!");
-        self.items
-            .pop()
-            .expect("Pop called on empty GenCollection items member!")
-    }
-
-    #[inline]
-    fn swap_remove(&mut self, item_index: usize) -> GenCollectionResult<T> {
-        let item_index = self.validate_item_index(item_index)?;
+    unsafe fn swap_remove(&mut self, item_index: usize) -> T {
         let last_index = self.items.len() - 1;
         if item_index < last_index {
             let cell_index = self.mapping[last_index];
-            self.indices[cell_index].update_item_index(item_index)?;
+            self.indices[cell_index]
+                .update_item_index(item_index)
+                .unwrap();
             self.mapping.swap(item_index, last_index);
             self.items.swap(item_index, last_index);
         }
-        Ok(self.pop_last())
+        self.mapping.pop().unwrap();
+        unsafe { self.items.pop().unwrap().assume_init() }
     }
 }
 
-pub struct Borrowed<T: BorrowItem> {
-    item: T::Item,
+pub struct Borrowed<T> {
+    item: T,
     index: GenIndex<T>,
 }
 
-impl<T: BorrowItem> Deref for Borrowed<T> {
-    type Target = T::Item;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.item
-    }
-}
-
-impl<T: BorrowItem> DerefMut for Borrowed<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.item
-    }
-}
-
-pub trait BorrowItem: Sized {
-    type Item;
-
-    fn borrow(&mut self) -> GenCollectionResult<Self::Item>;
-    fn put_back(&mut self, item: Self::Item) -> GenCollectionResult<()>;
-}
-
-impl<T> BorrowItem for Option<T> {
-    type Item = T;
-
-    #[inline]
-    fn borrow(&mut self) -> GenCollectionResult<Self::Item> {
-        match self.take() {
-            Some(item) => Ok(item),
-            None => Err(GenCollectionError::ItemBorrowed),
-        }
-    }
-
-    #[inline]
-    fn put_back(&mut self, item: Self::Item) -> GenCollectionResult<()> {
-        if self.is_none() {
-            *self = Some(item);
-            Ok(())
-        } else {
-            Err(GenCollectionError::ItemOccupied)
-        }
-    }
-}
-
-pub type OptionCollection<T> = GenCollection<Option<T>>;
-
-#[derive(Debug, Clone, Copy)]
-pub struct CopyEntry<T: Clone + Copy> {
-    item: T,
-}
-
-impl<T: Clone + Copy> CopyEntry<T> {
-    #[inline]
-    pub fn new(item: T) -> Self {
-        Self { item }
-    }
-}
-
-impl<T: Clone + Copy> Deref for CopyEntry<T> {
+impl<T> Deref for Borrowed<T> {
     type Target = T;
 
     #[inline]
@@ -757,42 +826,18 @@ impl<T: Clone + Copy> Deref for CopyEntry<T> {
     }
 }
 
-impl<T: Clone + Copy> DerefMut for CopyEntry<T> {
+impl<T> DerefMut for Borrowed<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.item
     }
 }
 
-impl<T: Clone + Copy> BorrowItem for CopyEntry<T> {
-    type Item = T;
-
-    #[inline]
-    fn borrow(&mut self) -> GenCollectionResult<Self::Item> {
-        Ok(self.item)
-    }
-
-    #[inline]
-    fn put_back(&mut self, item: Self::Item) -> GenCollectionResult<()> {
-        self.item = item;
-        Ok(())
-    }
-}
-
-impl<T: Clone + Copy> From<T> for CopyEntry<T> {
-    #[inline]
-    fn from(item: T) -> Self {
-        Self { item }
-    }
-}
-
-pub type CopyCollection<T> = GenCollection<CopyEntry<T>>;
-
-impl<T: BorrowItem> GenCollection<T> {
+impl<T> GenCollection<T> {
     #[inline]
     fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>> {
         let item_index = self.get_cell_mut_unlocked(index.clone())?.borrow()?;
-        let item = self.items[item_index].borrow()?;
+        let item = unsafe { self.items[item_index].assume_init_read() };
         Ok(Borrowed { item, index })
     }
 
@@ -800,7 +845,7 @@ impl<T: BorrowItem> GenCollection<T> {
     fn put_back(&mut self, borrow: Borrowed<T>) -> GenCollectionResult<()> {
         let Borrowed { item, index } = borrow;
         let item_index = self.get_cell_mut_unlocked(index)?.put_back()?;
-        self.items[item_index].put_back(item)?;
+        self.items[item_index] = MaybeUninit::new(item);
         Ok(())
     }
 }
@@ -821,33 +866,120 @@ impl<T> IndexMut<GenIndex<T>> for GenCollection<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GenCollectionRefIter<'a, T> {
+    collection: &'a GenCollection<T>,
+    next: usize,
+}
+
+impl<'a, T> Iterator for GenCollectionRefIter<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let indices = &self.collection.indices;
+        let mapping = &self.collection.mapping;
+        let items = &self.collection.items;
+
+        while self.next < items.len() {
+            let item_index = self.next;
+            self.next += 1;
+            if indices[mapping[item_index]].is_occupied() {
+                return Some(unsafe { items[item_index].assume_init_ref() });
+            }
+        }
+        None
+    }
+}
+
 impl<'a, T> IntoIterator for &'a GenCollection<T> {
     type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
+    type IntoIter = GenCollectionRefIter<'a, T>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter()
+        GenCollectionRefIter {
+            collection: self,
+            next: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GenCollectionMutIter<'a, T> {
+    collection: &'a mut GenCollection<T>,
+    next: usize,
+}
+
+impl<'a, T> Iterator for GenCollectionMutIter<'a, T> {
+    type Item = &'a mut T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let indices = &self.collection.indices;
+        let mapping = &self.collection.mapping;
+        let items = &mut self.collection.items;
+
+        while self.next < items.len() {
+            let item_index = self.next;
+            self.next += 1;
+            if indices[mapping[item_index]].is_occupied() {
+                return Some(unsafe { &mut *items[item_index].as_mut_ptr() });
+            }
+        }
+        None
     }
 }
 
 impl<'a, T> IntoIterator for &'a mut GenCollection<T> {
     type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
+    type IntoIter = GenCollectionMutIter<'a, T>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter_mut()
+        GenCollectionMutIter {
+            collection: self,
+            next: 0,
+        }
     }
 }
 
-impl<T> IntoIterator for GenCollection<T> {
+#[derive(Debug)]
+pub struct GenCollectionIntoIter<T> {
+    items: Vec<MaybeUninit<T>>,
+    indices: Vec<LockedCell>,
+    mapping: Vec<usize>,
+    next: usize,
+}
+
+impl<T> Iterator for GenCollectionIntoIter<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
 
     #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter()
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.next < self.items.len() {
+            let item_indx = self.next;
+            self.next += 1;
+            if self.indices[self.mapping[item_indx]].is_occupied() {
+                return Some(unsafe { self.items[item_indx].assume_init_read() });
+            }
+        }
+        None
+    }
+}
+
+impl<T: 'static> IntoIterator for GenCollection<T> {
+    type Item = T;
+    type IntoIter = GenCollectionIntoIter<T>;
+
+    #[inline]
+    fn into_iter(mut self) -> Self::IntoIter {
+        GenCollectionIntoIter {
+            items: std::mem::replace(&mut self.items, vec![]),
+            indices: std::mem::replace(&mut self.indices, vec![]),
+            mapping: std::mem::replace(&mut self.mapping, vec![]),
+            next: 0,
+        }
     }
 }
 
@@ -995,7 +1127,7 @@ impl<I: Clone + Copy> TypeGuardCollection<I> {
     pub fn entry<'a, T: FromGuard<Inner = I>>(
         &'a self,
         index: GuardIndex<T>,
-    ) -> ScopedEntryResult<T> {
+    ) -> ScopedEntryResult<'a, T> {
         let guard = self.get(index)?;
         Ok(ScopedEntry {
             resource: T::try_from_guard(*guard).map_err(|(_, err)| err)?,
@@ -1024,7 +1156,7 @@ impl<I> TypeGuardCollection<I> {
     pub fn inner_ref<'a, T: FromGuard<Inner = I>>(
         &'a self,
         index: GuardIndex<T>,
-    ) -> ScopedInnerResult<T> {
+    ) -> ScopedInnerResult<'a, T> {
         let inner: ValidRef<T> = self.get(index)?.try_into()?;
         Ok(inner.into())
     }
@@ -1057,14 +1189,17 @@ pub type GuardCollection<T> = DropGuard<TypeGuardCollection<T>>;
 
 pub trait IndexList<C: 'static> {
     type Owned;
+    type Borrowed: BorrowList<C>;
     type Ref<'a>;
 
     fn get_ref(self, collection: &C) -> GenCollectionResult<Self::Ref<'_>>;
     fn get_owned(self, collection: &mut C) -> GenCollectionResult<Self::Owned>;
+    fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed>;
 }
 
 impl<C: 'static> IndexList<C> for Nil {
     type Owned = Nil;
+    type Borrowed = Nil;
     type Ref<'a> = Nil;
 
     #[inline]
@@ -1076,6 +1211,10 @@ impl<C: 'static> IndexList<C> for Nil {
     fn get_owned(self, _: &mut C) -> GenCollectionResult<Self::Owned> {
         Ok(Nil::new())
     }
+
+    fn get_borrowed(self, _: &mut C) -> GenCollectionResult<Self::Borrowed> {
+        Ok(Nil::new())
+    }
 }
 
 impl<C: 'static, H: 'static, M: Marker, T: IndexList<C>> IndexList<C>
@@ -1084,6 +1223,7 @@ where
     C: Contains<GenCollection<H>, M>,
 {
     type Owned = Cons<H, T::Owned>;
+    type Borrowed = Cons<Marked<Borrowed<H>, M>, T::Borrowed>;
     type Ref<'a> = Cons<&'a H, T::Ref<'a>>;
 
     #[inline]
@@ -1107,6 +1247,17 @@ where
         let tail = tail.get_owned(collection)?;
         Ok(Cons::new(head, tail))
     }
+
+    #[inline]
+    fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed> {
+        let Cons {
+            head: Marked { value: index, .. },
+            tail,
+        } = self;
+        let head = <C as Contains<_, _>>::get_mut(collection).borrow(index)?;
+        let tail = tail.get_borrowed(collection)?;
+        Ok(Cons::new(Marked::new(head), tail))
+    }
 }
 
 pub trait BorrowList<C: 'static> {
@@ -1120,7 +1271,7 @@ impl<C: 'static> BorrowList<C> for Nil {
     }
 }
 
-impl<C: 'static, H: BorrowItem, M: Marker, T: BorrowList<C>> BorrowList<C>
+impl<C: 'static, H: 'static, M: Marker, T: BorrowList<C>> BorrowList<C>
     for Cons<Marked<Borrowed<H>, M>, T>
 where
     C: Contains<GenCollection<H>, M>,
@@ -1133,39 +1284,6 @@ where
         } = self;
         collection.get_mut().put_back(borrow)?;
         tail.put_back(collection)
-    }
-}
-
-pub trait IndexListBorrow<C: 'static> {
-    type Borrowed: BorrowList<C>;
-
-    fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed>;
-}
-
-impl<C: 'static> IndexListBorrow<C> for Nil {
-    type Borrowed = Nil;
-
-    #[inline]
-    fn get_borrowed(self, _: &mut C) -> GenCollectionResult<Self::Borrowed> {
-        Ok(Nil::new())
-    }
-}
-
-impl<C: 'static, H: BorrowItem, M: Marker, T: IndexListBorrow<C>> IndexListBorrow<C>
-    for Cons<Marked<GenIndex<H>, M>, T>
-where
-    C: Contains<GenCollection<H>, M>,
-{
-    type Borrowed = Cons<Marked<Borrowed<H>, M>, T::Borrowed>;
-    #[inline]
-    fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed> {
-        let Cons {
-            head: Marked { value: index, .. },
-            tail,
-        } = self;
-        let head = <C as Contains<_, _>>::get_mut(collection).borrow(index)?;
-        let tail = tail.get_borrowed(collection)?;
-        Ok(Cons::new(Marked::new(head), tail))
     }
 }
 
@@ -1285,7 +1403,7 @@ impl<T: TypeList> GenCollectionList<T> {
     }
 
     #[inline]
-    pub fn get_borrow<I: IndexListBorrow<T>>(
+    pub fn get_borrow<I: IndexList<T>>(
         &mut self,
         index: I,
     ) -> GenCollectionResult<DropGuard<BorrowedContext<T, I::Borrowed>>> {
@@ -1305,25 +1423,20 @@ mod test_list_index {
     use super::*;
     use crate::{list_type, list_value, unpack_list, Cons, GenIndex, IndexList, Nil};
 
-    type TestCollection = list_type![
+    type TestCopyCollection = list_type![
         GenCollection<u8>,
         GenCollection<u16>,
         GenCollection<u32>,
         Nil
     ];
-    type TestCopyCollection = list_type![
-        CopyCollection<u8>,
-        CopyCollection<u16>,
-        CopyCollection<u32>,
-        Nil
-    ];
-    type TestOptionCollection =
-        list_type![OptionCollection<Vec<u8>>, OptionCollection<Vec<u16>>, Nil];
+
+    type TestNonCopyCollection = list_type![GenCollection<Vec<u8>>, GenCollection<Vec<u16>>, Nil];
+
     type TestCollectionList = GenCollectionList<TestCopyCollection>;
 
     #[test]
     fn test_collection_list_index_get_owned() {
-        let mut collection = TestCollection::default();
+        let mut collection = TestCopyCollection::default();
 
         let collection_u8: &mut GenCollection<u8> = collection.get_mut();
         let index_u8: GenIndex<u8> = collection_u8.push(8).unwrap();
@@ -1334,7 +1447,7 @@ mod test_list_index {
         let collection_u32: &mut GenCollection<u32> = collection.get_mut();
         let index_u32: GenIndex<u32> = collection_u32.push(32).unwrap();
 
-        let index_list = mark![TestCollection, index_u8, index_u16, index_u32];
+        let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
         let unpack_list![b_u8, b_u16, b_u32, _rest] =
             index_list.get_owned(&mut collection).unwrap();
 
@@ -1353,7 +1466,7 @@ mod test_list_index {
 
     #[test]
     fn test_collection_list_index_get_ref() {
-        let mut collection = TestCollection::default();
+        let mut collection = TestCopyCollection::default();
 
         let collection_u8: &mut GenCollection<u8> = collection.get_mut();
         let index_u8: GenIndex<u8> = collection_u8.push(8).unwrap();
@@ -1364,7 +1477,7 @@ mod test_list_index {
         let collection_u32: &mut GenCollection<u32> = collection.get_mut();
         let index_u32: GenIndex<u32> = collection_u32.push(32).unwrap();
 
-        let index_list = mark![TestCollection, index_u8, index_u16, index_u32];
+        let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
         let unpack_list![b_u8, b_u16, b_u32, _rest] = index_list.get_ref(&collection).unwrap();
 
         assert_eq!(*b_u8, 8);
@@ -1384,14 +1497,14 @@ mod test_list_index {
     fn test_collection_list_index_get_borrow_copy_type() {
         let mut collection = TestCopyCollection::default();
 
-        let collection_u8: &mut CopyCollection<u8> = collection.get_mut();
-        let index_u8: GenIndex<CopyEntry<u8>> = collection_u8.push(8.into()).unwrap();
+        let collection_u8: &mut GenCollection<u8> = collection.get_mut();
+        let index_u8: GenIndex<u8> = collection_u8.push(8).unwrap();
 
-        let collection_u16: &mut CopyCollection<u16> = collection.get_mut();
-        let index_u16: GenIndex<CopyEntry<u16>> = collection_u16.push(16.into()).unwrap();
+        let collection_u16: &mut GenCollection<u16> = collection.get_mut();
+        let index_u16: GenIndex<u16> = collection_u16.push(16).unwrap();
 
-        let collection_u32: &mut CopyCollection<u32> = collection.get_mut();
-        let index_u32: GenIndex<CopyEntry<u32>> = collection_u32.push(32.into()).unwrap();
+        let collection_u32: &mut GenCollection<u32> = collection.get_mut();
+        let index_u32: GenIndex<u32> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
         let unpack_list![b_u8, b_u16, b_u32, _rest] =
@@ -1401,98 +1514,96 @@ mod test_list_index {
         assert_eq!(**b_u16, 16);
         assert_eq!(**b_u32, 32);
 
-        let collection_u8: &CopyCollection<u8> = collection.get();
-        let collection_u16: &CopyCollection<u16> = collection.get();
-        let collection_u32: &CopyCollection<u32> = collection.get();
+        let collection_u8: &GenCollection<u8> = collection.get();
+        let collection_u16: &GenCollection<u16> = collection.get();
+        let collection_u32: &GenCollection<u32> = collection.get();
 
         assert_eq!(collection_u8.len(), 1);
         assert_eq!(collection_u16.len(), 1);
         assert_eq!(collection_u32.len(), 1);
 
-        let collection_u8: &mut CopyCollection<u8> = collection.get_mut();
-        matches!(
+        let collection_u8: &mut GenCollection<u8> = collection.get_mut();
+        assert!(matches!(
             collection_u8.pop(index_u8),
-            Err(GenCollectionError::ItemBorrowed)
-        );
+            Err(GenCollectionError::CellBorrowed)
+        ));
 
-        let collection_u16: &mut CopyCollection<u16> = collection.get_mut();
-        matches!(
+        let collection_u16: &mut GenCollection<u16> = collection.get_mut();
+        assert!(matches!(
             collection_u16.pop(index_u16),
-            Err(GenCollectionError::ItemBorrowed)
-        );
+            Err(GenCollectionError::CellBorrowed)
+        ));
 
-        let collection_u32: &mut CopyCollection<u32> = collection.get_mut();
-        matches!(
+        let collection_u32: &mut GenCollection<u32> = collection.get_mut();
+        assert!(matches!(
             collection_u32.pop(index_u32),
-            Err(GenCollectionError::ItemBorrowed)
-        );
+            Err(GenCollectionError::CellBorrowed)
+        ));
 
         let borrowed = list_value![b_u8, b_u16, b_u32, Nil::new()];
-        matches!(borrowed.put_back(&mut collection), Ok(..));
+        assert!(matches!(borrowed.put_back(&mut collection), Ok(..)));
 
-        let collection_u8: &mut CopyCollection<u8> = collection.get_mut();
-        matches!(collection_u8.pop(index_u8), Ok(CopyEntry { item: 8 }));
+        let collection_u8: &mut GenCollection<u8> = collection.get_mut();
+        assert!(matches!(collection_u8.pop(index_u8), Ok(8)));
 
-        let collection_u16: &mut CopyCollection<u16> = collection.get_mut();
-        matches!(collection_u16.pop(index_u16), Ok(CopyEntry { item: 16 }));
+        let collection_u16: &mut GenCollection<u16> = collection.get_mut();
+        assert!(matches!(collection_u16.pop(index_u16), Ok(16)));
 
-        let collection_u32: &mut CopyCollection<u32> = collection.get_mut();
-        matches!(collection_u32.pop(index_u32), Ok(CopyEntry { item: 32 }));
+        let collection_u32: &mut GenCollection<u32> = collection.get_mut();
+        assert!(matches!(collection_u32.pop(index_u32), Ok(32)));
     }
 
     #[test]
     fn test_collection_list_index_get_borrow_non_copy_type() {
-        let mut collection = TestOptionCollection::default();
+        let mut collection = TestNonCopyCollection::default();
 
-        let collection_vec_u8: &mut OptionCollection<Vec<u8>> = collection.get_mut();
-        let index_vec_u8: GenIndex<Option<Vec<u8>>> =
-            collection_vec_u8.push(Some(vec![8])).unwrap();
+        let collection_vec_u8: &mut GenCollection<Vec<u8>> = collection.get_mut();
+        let index_vec_u8: GenIndex<Vec<u8>> = collection_vec_u8.push(vec![8]).unwrap();
 
-        let collection_vec_u16: &mut OptionCollection<Vec<u16>> = collection.get_mut();
-        let index_vec_u16: GenIndex<Option<Vec<u16>>> =
-            collection_vec_u16.push(Some(vec![16])).unwrap();
+        let collection_vec_u16: &mut GenCollection<Vec<u16>> = collection.get_mut();
+        let index_vec_u16: GenIndex<Vec<u16>> = collection_vec_u16.push(vec![16]).unwrap();
 
-        let index_list = mark![TestOptionCollection, index_vec_u8, index_vec_u16];
+        let index_list = mark![TestNonCopyCollection, index_vec_u8, index_vec_u16];
         let unpack_list![b_vec_u8, b_vec_u16, _rest] =
             index_list.get_borrowed(&mut collection).unwrap();
 
         assert_eq!(**b_vec_u8, vec![8]);
         assert_eq!(**b_vec_u16, vec![16]);
 
-        let collection_vec_u8: &OptionCollection<Vec<u8>> = collection.get();
-        let collection_vec_u16: &OptionCollection<Vec<u16>> = collection.get();
+        let collection_vec_u8: &GenCollection<Vec<u8>> = collection.get();
+        let collection_vec_u16: &GenCollection<Vec<u16>> = collection.get();
 
         assert_eq!(collection_vec_u8.len(), 1);
         assert_eq!(collection_vec_u16.len(), 1);
 
-        let collection_vec_u8: &mut OptionCollection<Vec<u8>> = collection.get_mut();
-        matches!(
+        let collection_vec_u8: &mut GenCollection<Vec<u8>> = collection.get_mut();
+        assert!(matches!(
             collection_vec_u8.pop(index_vec_u8),
-            Err(GenCollectionError::ItemBorrowed)
-        );
+            Err(GenCollectionError::CellBorrowed)
+        ));
 
-        let collection_vec_u16: &mut OptionCollection<Vec<u16>> = collection.get_mut();
-        matches!(
+        let collection_vec_u16: &mut GenCollection<Vec<u16>> = collection.get_mut();
+        assert!(matches!(
             collection_vec_u16.pop(index_vec_u16),
-            Err(GenCollectionError::ItemBorrowed)
-        );
+            Err(GenCollectionError::CellBorrowed)
+        ));
 
         let borrowed = list_value![b_vec_u8, b_vec_u16, Nil::new()];
-        matches!(borrowed.put_back(&mut collection), Ok(..));
+        assert!(matches!(borrowed.put_back(&mut collection), Ok(..)));
 
-        let collection_vec_u8: &mut OptionCollection<Vec<u8>> = collection.get_mut();
-        matches!(collection_vec_u8.pop(index_vec_u8), Ok(..));
+        let collection_vec_u8: &mut GenCollection<Vec<u8>> = collection.get_mut();
+        assert!(matches!(collection_vec_u8.pop(index_vec_u8), Ok(..)));
 
-        let collection_vec_u16: &mut OptionCollection<Vec<u16>> = collection.get_mut();
-        matches!(collection_vec_u16.pop(index_vec_u16), Ok(..));
+        let collection_vec_u16: &mut GenCollection<Vec<u16>> = collection.get_mut();
+        assert!(matches!(collection_vec_u16.pop(index_vec_u16), Ok(..)));
     }
 
     #[test]
     fn test_gen_collection_list() {
         let mut collection = TestCollectionList::new();
-        let index_u8: GenIndex<CopyEntry<u8>> = collection.push(8u8.into()).unwrap();
-        let index_u16: GenIndex<CopyEntry<u16>> = collection.push(16u16.into()).unwrap();
-        let index_u32: GenIndex<CopyEntry<u32>> = collection.push(32u32.into()).unwrap();
+        let index_u8: GenIndex<u8> = collection.push(8u8.into()).unwrap();
+        let index_u16: GenIndex<u16> = collection.push(16u16.into()).unwrap();
+        let index_u32: GenIndex<u32> = collection.push(32u32.into()).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
         {

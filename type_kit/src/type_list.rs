@@ -569,12 +569,12 @@ mod test_type_list_create_destroy {
         let c = C {};
         let config_list = list_value![1u32, 2u32, (), 4u32, 5u32, ()];
         let result = TestTypeListFailingCreate::create(config_list, &mut &c);
-        matches!(
+        assert!(matches!(
             result,
             Err(ConsCreateError::Tail(ConsCreateError::Tail(
                 ConsCreateError::Head(_)
             )))
-        );
+        ));
     }
 
     #[test]
@@ -582,11 +582,11 @@ mod test_type_list_create_destroy {
         let c = C {};
         let config_list = list_value![1u32, 2u32, (), 4u32, 5u32, ()];
         let mut failing = TestTypeListFailingDestroy::create(config_list, &mut &c).unwrap();
-        matches!(
+        assert!(matches!(
             failing.destroy(&mut &c),
             Err(ConsDestroyError::Tail(ConsDestroyError::Tail(
                 ConsDestroyError::Head(_)
             )))
-        );
+        ));
     }
 }
