@@ -61,6 +61,21 @@ mod tests {
     }
 
     #[test]
+    fn test_pop_while_last_borrowed() {
+        let mut collection = GenCollection::<CopyEntry<u8>>::default();
+        let first_index = collection.push(42u8.into()).unwrap();
+        let second_index = collection.push(37u8.into()).unwrap();
+
+        let borrowed_item = collection.borrow(second_index).unwrap();
+        assert_eq!(*borrowed_item, 37u8);
+
+        let removed_item = collection.pop(first_index).unwrap();
+        assert_eq!(*removed_item, 42u8);
+
+        collection.put_back(borrowed_item).unwrap();
+    }
+
+    #[test]
     fn test_invalid_index() {
         let collection: GenCollection<&str> = GenCollection::default();
         let invalid_index = GenIndex::wrap(0, 999); // Invalid index
@@ -341,7 +356,10 @@ mod cell {
                     Ok(())
                 }
                 GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
-                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
+                GenCell::Borrowed(cell) => {
+                    cell.item_index = item_index;
+                    Ok(())
+                }
             }
         }
     }
