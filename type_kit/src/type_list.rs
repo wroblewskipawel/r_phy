@@ -7,7 +7,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Create, CreateResult, Destroy, DestroyResult, FromGuard, Valid};
+use crate::{Create, CreateResult, Destroy, DestroyResult};
 
 #[cfg(test)]
 mod tests {
@@ -399,22 +399,6 @@ macro_rules! unpack_list {
             tail: unpack_list![$($tail),*]
         }
     };
-}
-
-impl<T: 'static> FromGuard for TypedNil<T> {
-    type Inner = Self;
-
-    #[inline]
-    fn into_inner(self) -> Self::Inner {
-        self
-    }
-}
-
-impl<T> From<Valid<TypedNil<T>>> for TypedNil<T> {
-    #[inline]
-    fn from(_: Valid<TypedNil<T>>) -> Self {
-        TypedNil::new()
-    }
 }
 
 impl<T: Create> Create for TypedNil<T> {

@@ -45,8 +45,9 @@ mod tests {
     };
 
     use crate::{
+        list_value,
         type_guard::test_types::{A, B},
-        FromGuard, TypeGuardConversionError,
+        unpack_list, Cons, FromGuard, Nil, TypeGuardConversionError,
     };
 
     #[test]
@@ -135,17 +136,32 @@ mod tests {
         assert_eq!(map.get(&a_1).unwrap(), &42);
         assert_eq!(map.get(&a_2).unwrap(), &31);
     }
+
+    #[test]
+    fn test_type_guard_type_list_conversion() {
+        let a_1 = A(42);
+        let a_2 = A(43);
+        let b_1 = B(31);
+        let b_2 = B(32);
+        let list_guard = list_value!(a_1, b_1, a_2, b_2, Nil::new()).into_guard();
+        let list = Cons::<A, Cons<B, Cons<A, Cons<B, Nil>>>>::try_from_guard(list_guard).unwrap();
+        let unpack_list![a_1, b_1, a_2, b_2, _nil] = list;
+        assert_eq!(a_1.0, 42);
+        assert_eq!(b_1.0, 31);
+        assert_eq!(a_2.0, 43);
+        assert_eq!(b_2.0, 32);
+    }
 }
 
 use std::{
     any::{type_name, TypeId},
     error::Error,
-    fmt::{Display, Formatter},
+    fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
-use crate::{Destroy, DestroyResult};
+use crate::{Cons, Destroy, DestroyResult, TypedNil};
 
 pub type Valid<T> = TypeGuardUnlocked<<T as FromGuard>::Inner, T>;
 pub type ValidRef<'a, T> = TypeGuardUnlockedRef<'a, <T as FromGuard>::Inner, T>;
@@ -165,8 +181,24 @@ pub trait FromGuard: 'static + From<Valid<Self>> {
     }
 
     #[inline]
+    fn check_type(value: &Guard<Self>) -> Result<(), TypeGuardConversionError> {
+        value.check_type::<Self>()
+    }
+
+    #[inline]
     fn into_guard(self) -> Guard<Self> {
         unsafe { TypeGuard::from_inner::<Self>(self.into_inner()) }
+    }
+}
+
+pub trait IntoOuter<T>: Sized {
+    fn try_into_outer(self) -> Result<T, (Self, TypeGuardConversionError)>;
+}
+
+impl<T: FromGuard> IntoOuter<T> for Guard<T> {
+    #[inline]
+    fn try_into_outer(self) -> Result<T, (Self, TypeGuardConversionError)> {
+        T::try_from_guard(self)
     }
 }
 
@@ -240,11 +272,21 @@ impl GuardType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct TypeGuard<T> {
     inner: T,
     #[cfg(debug_assertions)]
     guard_type: GuardType,
+}
+
+impl<T> Debug for TypeGuard<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = f.debug_struct(&format!("TypeGuard<{}>", type_name::<T>()));
+        #[cfg(debug_assertions)]
+        let debug_struct = debug_struct.field("guard_type", &self.guard_type);
+        debug_struct.finish()
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -314,6 +356,13 @@ impl<I> TypeGuard<I> {
     #[inline]
     pub fn inner_mut(&mut self) -> &mut I {
         &mut self.inner
+    }
+
+    #[inline]
+    pub fn check_type<F: FromGuard<Inner = I>>(&self) -> Result<(), TypeGuardConversionError> {
+        #[cfg(debug_assertions)]
+        self.guard_type.check_type::<F>()?;
+        Ok(())
     }
 }
 
@@ -432,5 +481,135 @@ impl<T: Destroy> Destroy for TypeGuard<T> {
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.inner.destroy(context)
+    }
+}
+
+impl<T> From<Valid<TypedNil<T>>> for TypedNil<T> {
+    #[inline]
+    fn from(_: Valid<TypedNil<T>>) -> Self {
+        TypedNil::new()
+    }
+}
+
+impl<T: 'static> FromGuard for TypedNil<T> {
+    type Inner = Self;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        self
+    }
+}
+
+impl<T: FromGuard, N: FromGuard> From<Valid<Cons<T, N>>> for Cons<T, N> {
+    #[inline]
+    fn from(value: Valid<Cons<T, N>>) -> Self {
+        let Cons { head, tail } = value.into_inner();
+        let head: Valid<T> = unsafe {
+            TypeGuard::from_inner::<T>(head)
+                .try_into()
+                .unwrap_unchecked()
+        };
+        let tail: Valid<N> = unsafe {
+            TypeGuard::from_inner::<N>(tail)
+                .try_into()
+                .unwrap_unchecked()
+        };
+        Cons {
+            head: head.into(),
+            tail: tail.into(),
+        }
+    }
+}
+
+impl<T: FromGuard, N: FromGuard> FromGuard for Cons<T, N> {
+    type Inner = Cons<T::Inner, N::Inner>;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Cons {
+            head: self.head.into_inner(),
+            tail: self.tail.into_inner(),
+        }
+    }
+}
+
+pub type GuardListResult<T, L> = Result<T, (L, TypeGuardConversionError)>;
+
+pub trait GuardList: Sized {
+    type Guard;
+
+    fn try_from_guard(guard: Self::Guard) -> GuardListResult<Self, Self::Guard>;
+
+    fn into_guard(self) -> Self::Guard;
+}
+
+impl<T> GuardList for TypedNil<T> {
+    type Guard = TypedNil<T>;
+
+    #[inline]
+    fn try_from_guard(_: Self::Guard) -> GuardListResult<Self, Self::Guard> {
+        Ok(TypedNil::new())
+    }
+
+    #[inline]
+    fn into_guard(self) -> Self::Guard {
+        self
+    }
+}
+
+impl<T: FromGuard, N: GuardList> GuardList for Cons<T, N> {
+    type Guard = Cons<Guard<T>, N::Guard>;
+
+    #[inline]
+    fn try_from_guard(guard: Self::Guard) -> GuardListResult<Self, Self::Guard> {
+        let Cons { head, tail } = guard;
+        match T::check_type(&head) {
+            Err(err) => Err((Cons { head, tail }, err)),
+            Ok(()) => match N::try_from_guard(tail) {
+                Err((tail, err)) => Err((Cons { head, tail }, err)),
+                Ok(tail) => Ok(Cons {
+                    head: T::try_from_guard(head).unwrap(),
+                    tail,
+                }),
+            },
+        }
+    }
+
+    #[inline]
+    fn into_guard(self) -> Self::Guard {
+        Cons {
+            head: self.head.into_guard(),
+            tail: self.tail.into_guard(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_type_gurad_list {
+    use super::{
+        test_types::{A, B},
+        GuardList,
+    };
+    use crate::{
+        list_value,
+        type_list::{Cons, Nil},
+        unpack_list,
+    };
+
+    // type GuardList = guard_list![A, B, A, B];
+
+    #[test]
+    fn test_type_guard_list_success() {
+        let a_1 = A(42);
+        let a_2 = A(43);
+        let b_1 = B(31);
+        let b_2 = B(32);
+        let list_guard = list_value!(a_1, b_1, a_2, b_2, Nil::new()).into_guard();
+        let list = Cons::<A, Cons<B, Cons<A, Cons<B, Nil>>>>::try_from_guard(list_guard).unwrap();
+        let unpack_list![a_1, b_1, a_2, b_2, _nil] = list;
+        assert_eq!(a_1.0, 42);
+        assert_eq!(b_1.0, 31);
+        assert_eq!(a_2.0, 43);
+        assert_eq!(b_2.0, 32);
     }
 }

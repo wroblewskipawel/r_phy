@@ -8,7 +8,7 @@ use memory::MemoryRaw;
 use type_kit::{
     list_type, Cons, Contains, Conv, Create, CreateResult, Destroy, DestroyResult, DropGuard,
     DropGuardError, FromGuard, GenIndexRaw, GuardCollection, GuardIndex, Marker, Nil,
-    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, Valid,
+    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypedIndex, Valid,
 };
 
 use crate::{
@@ -107,7 +107,7 @@ impl ResourceStorage {
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
         let ResourceIndex { index } = index;
-        self.storage.get().entry(index)
+        self.storage.get().entry(TypedIndex::<R>::new(index))
     }
 
     #[inline]
@@ -119,7 +119,9 @@ impl ResourceStorage {
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
         let ResourceIndex { index } = index;
-        self.storage.get_mut().entry_mut(index)
+        self.storage
+            .get_mut()
+            .entry_mut(TypedIndex::<R>::new(index))
     }
 
     #[inline]
