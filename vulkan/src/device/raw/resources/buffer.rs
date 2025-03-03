@@ -3,10 +3,7 @@ use std::{convert::Infallible, marker::PhantomData};
 use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, Valid};
 
-use crate::{
-    device::{memory::MemoryProperties, Device},
-    error::ResourceError,
-};
+use crate::{device::memory::MemoryProperties, error::ResourceError, Context};
 
 use super::Resource;
 
@@ -66,7 +63,7 @@ impl<M: MemoryProperties> Create for Buffer<M> {
 }
 
 impl Destroy for BufferRaw {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     #[inline]
@@ -79,7 +76,7 @@ impl Destroy for BufferRaw {
 }
 
 impl<M: MemoryProperties> Destroy for Buffer<M> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     #[inline]

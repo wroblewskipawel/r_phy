@@ -2,9 +2,12 @@ use std::convert::Infallible;
 
 use type_kit::{Create, Destroy, DestroyResult};
 
-use crate::error::AllocatorError;
+use crate::{
+    error::{AllocatorError, ResourceResult},
+    Context,
+};
 
-use super::{AllocatorContext, AllocatorState, State, Strategy};
+use super::{AllocationIndex, AllocatorState, State, Strategy};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PageConfig {
@@ -70,7 +73,7 @@ impl Create for Page {
 }
 
 impl Destroy for Page {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
@@ -87,7 +90,7 @@ impl Strategy for Page {
         allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
         context: &crate::Context,
         req: super::AllocationRequest<M>,
-    ) -> crate::error::AllocatorResult<super::AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndex<M>> {
         todo!()
     }
 
@@ -96,7 +99,7 @@ impl Strategy for Page {
         allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
         context: &crate::Context,
         allocation: super::AllocationIndex<M>,
-    ) -> crate::error::AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         todo!()
     }
 }

@@ -11,13 +11,11 @@ use crate::{
         },
         resources::buffer::ByteRange,
     },
-    error::{AllocatorError, AllocatorResult},
+    error::{AllocatorError, ResourceResult},
     Context,
 };
 
-use super::{
-    Allocation, AllocationIndex, AllocationRequest, Allocator, AllocatorContext, Strategy,
-};
+use super::{Allocation, AllocationIndex, AllocationRequest, Allocator, Strategy};
 
 pub struct Unpooled {}
 
@@ -31,7 +29,7 @@ impl Create for Unpooled {
 }
 
 impl Destroy for Unpooled {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
@@ -47,7 +45,7 @@ impl Strategy for Unpooled {
         mut allocator: ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
         req: AllocationRequest<M>,
-    ) -> AllocatorResult<AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndex<M>> {
         let alloc_info = MemoryAllocateInfo::new()
             .with_allocation_size(req.requirements.size)
             .with_memory_type_index(context.get_memory_type_index(&req)?);
@@ -63,7 +61,7 @@ impl Strategy for Unpooled {
         mut allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
         allocation: super::AllocationIndex<M>,
-    ) -> AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         let allocation = Allocation::<M>::try_from_guard(allocator.allocations.pop(allocation)?)
             .map_err(|(_, err)| err)?;
         let memory = allocator.memory_map.pop(allocation)?;

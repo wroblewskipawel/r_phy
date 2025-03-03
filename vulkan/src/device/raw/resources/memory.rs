@@ -9,10 +9,7 @@ use std::{
 use ash::vk;
 use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardUnlocked};
 
-use crate::{
-    device::{memory::MemoryProperties, Device},
-    error::ResourceError,
-};
+use crate::{device::memory::MemoryProperties, error::ResourceError, Context};
 
 use super::Resource;
 
@@ -111,7 +108,7 @@ impl<M: MemoryProperties> Create for Memory<M> {
 }
 
 impl Destroy for MemoryRaw {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
@@ -123,7 +120,7 @@ impl Destroy for MemoryRaw {
 }
 
 impl<M: MemoryProperties> Destroy for Memory<M> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

@@ -1,24 +1,27 @@
 pub mod buffer;
+pub mod image;
 pub mod memory;
 
 use std::convert::Infallible;
 
 use buffer::BufferRaw;
+use image::{ImageRaw, ImageViewRaw};
 use memory::MemoryRaw;
 use type_kit::{
-    list_type, Cons, Contains, Conv, Create, CreateResult, Destroy, DestroyResult, DropGuard,
-    DropGuardError, FromGuard, GenIndexRaw, GuardCollection, GuardIndex, Marker, Nil,
-    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypedIndex, Valid,
+    list_type, BorrowList, Cons, Contains, Conv, Create, Destroy, DestroyResult, DropGuard,
+    DropGuardError, FromGuard, GenCollectionResult, GenIndexRaw, GuardCollection, GuardIndex,
+    IndexList, Marked, Marker, Nil, ScopedEntryMutResult, ScopedEntryResult, TypeGuard,
+    TypeGuardCollection, TypedIndex, Valid,
 };
 
 use crate::{
-    device::Device,
     error::{ResourceError, ResourceResult},
+    Context,
 };
 
 pub trait Resource:
     FromGuard<Inner = Self::RawType>
-    + for<'a> Create<Context<'a> = &'a Device, CreateError = ResourceError>
+    + for<'a> Create<Context<'a> = &'a Context, CreateError = ResourceError>
 {
     type RawType: Clone + Copy + for<'a> Destroy<Context<'a> = Self::Context<'a>>;
 }
@@ -49,9 +52,14 @@ impl<R: Resource> From<Valid<ResourceIndex<R>>> for ResourceIndex<R> {
     }
 }
 
-pub type RawCollection<R> = GuardCollection<<R as Resource>::RawType>;
-pub type ResourceStorageList =
-    list_type![GuardCollection<MemoryRaw>, GuardCollection<BufferRaw>, Nil];
+pub type RawCollection<R> = TypeGuardCollection<<R as Resource>::RawType>;
+pub type ResourceStorageList = list_type![
+    TypeGuardCollection<MemoryRaw>,
+    TypeGuardCollection<BufferRaw>,
+    TypeGuardCollection<ImageRaw>,
+    TypeGuardCollection<ImageViewRaw>,
+    Nil
+];
 
 #[derive(Debug)]
 pub struct ResourceStorage {
@@ -69,13 +77,13 @@ impl ResourceStorage {
     #[inline]
     pub fn create_resource<'a, R: Resource, M: Marker>(
         &mut self,
-        device: &Device,
+        context: &Context,
         config: R::Config<'a>,
     ) -> ResourceResult<ResourceIndex<R>>
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        let resource = R::create(config, device)?;
+        let resource = R::create(config, context)?;
         let index = self.storage.get_mut().push(resource.into_guard())?;
         Ok(ResourceIndex { index })
     }
@@ -83,7 +91,7 @@ impl ResourceStorage {
     #[inline]
     pub fn destroy_resource<R: Resource, M: Marker>(
         &mut self,
-        device: &Device,
+        context: &Context,
         index: ResourceIndex<R>,
     ) -> ResourceResult<()>
     where
@@ -94,7 +102,7 @@ impl ResourceStorage {
             .get_mut()
             .pop(index.index)?
             .inner_mut()
-            .destroy(device);
+            .destroy(context);
         Ok(())
     }
 
@@ -127,31 +135,101 @@ impl ResourceStorage {
     #[inline]
     fn destroy_resource_storage<R: 'static, M: Marker>(
         &mut self,
-        device: &Device,
-    ) -> DestroyResult<DropGuard<R>>
+        context: &Context,
+    ) -> DestroyResult<R>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Device>,
-        ResourceStorageList: Contains<GuardCollection<R>, M>,
+        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
-        self.storage.get_mut().destroy(device)
+        self.storage.get_mut().destroy(context)
     }
-}
 
-impl Create for ResourceStorage {
-    type Config<'a> = ();
-    type CreateError = ResourceError;
+    #[inline]
+    fn opperate_ref<
+        I: ResourceIndexList,
+        R,
+        E,
+        F: FnOnce(&<I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
+    >(
+        &mut self,
+        index: I,
+        f: F,
+    ) -> GenCollectionResult<Result<R, E>> {
+        let index_list = index.into_index_list();
+        let borrowed = index_list.get_borrowed(&mut self.storage)?;
+        let result = f(&borrowed);
+        borrowed.put_back(&mut self.storage)?;
+        Ok(result)
+    }
 
-    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
-        Ok(ResourceStorage::new())
+    #[inline]
+    fn opperate_mut<
+        I: ResourceIndexList,
+        R,
+        E,
+        F: FnOnce(&mut <I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
+    >(
+        &mut self,
+        index: I,
+        f: F,
+    ) -> GenCollectionResult<Result<R, E>> {
+        let index_list = index.into_index_list();
+        let mut borrowed = index_list.get_borrowed(&mut self.storage)?;
+        let result = f(&mut borrowed);
+        borrowed.put_back(&mut self.storage)?;
+        Ok(result)
     }
 }
 
 impl Destroy for ResourceStorage {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 
-    fn destroy<'a>(&mut self, device: Self::Context<'a>) -> DestroyResult<Self> {
-        self.destroy_resource_storage::<BufferRaw, _>(device)?;
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.destroy_resource_storage::<ImageViewRaw, _>(context)?;
+        self.destroy_resource_storage::<ImageRaw, _>(context)?;
+        self.destroy_resource_storage::<BufferRaw, _>(context)?;
+        self.destroy_resource_storage::<MemoryRaw, _>(context)?;
         Ok(())
+    }
+}
+
+pub trait ResourceIndexList {
+    type List: IndexList<ResourceStorageList>;
+
+    fn into_index_list(self) -> Self::List;
+}
+
+impl ResourceIndexList for Nil {
+    type List = Nil;
+
+    #[inline]
+    fn into_index_list(self) -> Self::List {
+        self
+    }
+}
+
+impl<R: Resource, M: Marker, N: ResourceIndexList> ResourceIndexList
+    for Cons<Marked<ResourceIndex<R>, M>, N>
+where
+    ResourceStorageList: Contains<TypeGuardCollection<R::RawType>, M>,
+{
+    type List = Cons<Marked<TypedIndex<R>, M>, N::List>;
+
+    #[inline]
+    fn into_index_list(self) -> Self::List {
+        let Cons {
+            head:
+                Marked {
+                    value: ResourceIndex { index },
+                    ..
+                },
+            tail,
+        } = self;
+
+        Cons {
+            head: Marked::new(TypedIndex::new(index)),
+            tail: tail.into_index_list(),
+        }
     }
 }

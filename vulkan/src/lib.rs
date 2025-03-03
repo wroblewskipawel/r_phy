@@ -11,7 +11,7 @@ use device::raw::allocator::{
 use device::raw::resources::{
     RawCollection, Resource, ResourceIndex, ResourceStorage, ResourceStorageList,
 };
-use error::{AllocatorResult, ResourceResult, VkError, VkResult};
+use error::{ResourceResult, VkError, VkResult};
 use std::cell::RefCell;
 use std::convert::Infallible;
 use std::error::Error;
@@ -190,12 +190,8 @@ impl Context {
         let debug_utils = DebugUtils::create((), &instance)?;
         let surface = Surface::create(window, &instance)?;
         let device = Device::create(&surface, &instance)?;
-        let storage = Box::new(RefCell::new(DropGuard::new(
-            <ResourceStorage as Create>::create((), &device)?,
-        )));
-        let allocators = Box::new(RefCell::new(DropGuard::new(
-            <AllocatorStorage as Create>::create((), (&device, &storage))?,
-        )));
+        let allocators = Box::new(RefCell::new(DropGuard::new(AllocatorStorage::new())));
+        let storage = Box::new(RefCell::new(DropGuard::new(ResourceStorage::new())));
         Ok(Self {
             allocators,
             storage,
@@ -216,11 +212,8 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
-        let _ = self
-            .allocators
-            .borrow_mut()
-            .destroy((&self.device, &self.storage));
-        let _ = self.storage.borrow_mut().destroy(&self.device);
+        let _ = self.storage.borrow_mut().destroy(&self);
+        let _ = self.allocators.borrow_mut().destroy(&self);
         let _ = self.device.destroy(&self.instance);
         let _ = self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
@@ -254,9 +247,7 @@ impl Context {
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        self.storage
-            .borrow_mut()
-            .create_resource(&self.device, config)
+        self.storage.borrow_mut().create_resource(&self, config)
     }
 
     #[inline]
@@ -267,14 +258,14 @@ impl Context {
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        ResourceStorage::destroy_resource(&mut *self.storage.borrow_mut(), &self.device, index)
+        ResourceStorage::destroy_resource(&mut *self.storage.borrow_mut(), &self, index)
     }
 
     #[inline]
     pub fn create_allocator<'a, S: Strategy>(
         &self,
         config: S::CreateConfig<'a>,
-    ) -> AllocatorResult<AllocatorIndex<S>> {
+    ) -> ResourceResult<AllocatorIndex<S>> {
         self.allocators
             .borrow_mut()
             .create_allocator::<S>(self, config)
@@ -284,7 +275,7 @@ impl Context {
     pub fn destroy_allocator<'a, S: Strategy>(
         &self,
         index: AllocatorIndex<S>,
-    ) -> AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         self.allocators
             .borrow_mut()
             .destroy_allocator::<S>(self, index)
@@ -295,7 +286,7 @@ impl Context {
         &self,
         index: AllocatorIndex<S>,
         req: AllocationRequest<P>,
-    ) -> AllocatorResult<AllocationEntry<S, P>> {
+    ) -> ResourceResult<AllocationEntry<S, P>> {
         self.allocators.borrow_mut().allocate(self, index, req)
     }
 
@@ -303,7 +294,7 @@ impl Context {
     pub fn free<P: MemoryProperties, S: Strategy>(
         &self,
         index: AllocationEntry<S, P>,
-    ) -> AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
     }
 }

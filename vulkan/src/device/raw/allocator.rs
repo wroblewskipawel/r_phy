@@ -7,28 +7,29 @@ pub use page::*;
 pub use unpooled::*;
 
 use std::{
-    any::type_name, cell::RefCell, collections::HashMap, convert::Infallible, fmt::Debug,
-    marker::PhantomData,
+    any::type_name, collections::HashMap, convert::Infallible, fmt::Debug, marker::PhantomData,
 };
 
 use ash::vk;
 use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError, FromGuard,
-    GenIndexRaw, GuardCollection, GuardIndex, ScopedInnerMut, TypeGuard, TypeGuardCollection,
-    Valid,
+    Create, CreateResult, Destroy, DestroyResult, DropGuardError, FromGuard, GenIndexRaw,
+    GuardCollection, GuardIndex, ScopedEntry, ScopedEntryResult, ScopedInnerMut, ScopedInnerRef,
+    TypeGuard, TypeGuardCollection, TypedIndex, Valid,
 };
 
 use crate::{
     device::{
         memory::{DeviceLocal, HostCoherent, HostVisible, MemoryProperties},
         resources::buffer::ByteRange,
-        Device,
     },
-    error::{AllocatorError, AllocatorResult},
+    error::{AllocatorError, AllocatorResult, ResourceResult},
     Context,
 };
 
-use super::resources::{memory::Memory, ResourceIndex, ResourceStorage};
+use super::resources::{
+    memory::{Memory, MemoryRaw},
+    ResourceIndex,
+};
 
 pub struct Allocation<M: MemoryProperties> {
     range: ByteRange,
@@ -89,21 +90,23 @@ impl<M: MemoryProperties> FromGuard for Allocation<M> {
 
 #[derive(Debug, Default)]
 struct MemoryMap {
-    memory: HashMap<TypeGuard<GenIndexRaw>, usize>,
+    usage: HashMap<TypeGuard<GenIndexRaw>, usize>,
+    memory: GuardCollection<MemoryRaw>,
 }
 
 impl MemoryMap {
     #[inline]
     fn new() -> Self {
         Self {
-            memory: HashMap::default(),
+            usage: HashMap::default(),
+            memory: GuardCollection::default(),
         }
     }
 
     #[inline]
     fn register<M: MemoryProperties>(&mut self, allocation: &Allocation<M>) {
         let memory = allocation.memory.clone().into_guard();
-        *self.memory.entry(memory).or_default() += 1;
+        *self.usage.entry(memory).or_default() += 1;
     }
 
     #[inline]
@@ -113,12 +116,12 @@ impl MemoryMap {
     ) -> AllocatorResult<Option<ResourceIndex<Memory<M>>>> {
         let memory = allocation.memory.clone().into_guard();
         let count = self
-            .memory
+            .usage
             .get_mut(&memory)
             .ok_or(AllocatorError::InvalidAllocationIndex)?;
         *count = count.saturating_sub(1);
         if *count == 0 {
-            self.memory.remove(&memory);
+            self.usage.remove(&memory);
             Ok(Some(allocation.memory))
         } else {
             Ok(None)
@@ -127,25 +130,21 @@ impl MemoryMap {
 
     fn drain<M: MemoryProperties>(&mut self) -> Vec<ResourceIndex<Memory<M>>> {
         let (valid, rest): (Vec<_>, Vec<_>) = self
-            .memory
+            .usage
             .drain()
             .map(|(memory, count)| {
                 ResourceIndex::<Memory<M>>::try_from_guard(memory)
                     .map_err(|(memory, _)| (memory, count))
             })
             .partition(Result::is_ok);
-        self.memory = rest.into_iter().map(Result::unwrap_err).collect();
+        self.usage = rest.into_iter().map(Result::unwrap_err).collect();
         valid.into_iter().map(Result::unwrap).collect()
     }
 
     #[inline]
-    fn free_memory_type<M: MemoryProperties>(
-        &mut self,
-        device: &Device,
-        storage: &mut ResourceStorage,
-    ) {
+    fn free_memory_type<M: MemoryProperties>(&mut self, context: &Context) {
         for memory in self.drain::<M>().into_iter() {
-            storage.destroy_resource(device, memory).unwrap();
+            context.destroy_resource(memory).unwrap();
         }
     }
 }
@@ -153,7 +152,7 @@ impl MemoryMap {
 impl Drop for MemoryMap {
     #[inline]
     fn drop(&mut self) {
-        assert!(self.memory.is_empty());
+        assert!(self.usage.is_empty());
     }
 }
 
@@ -207,18 +206,13 @@ impl AllocatorInner {
 }
 
 impl Destroy for AllocatorInner {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, storage) = context;
-        let storage = &mut *storage.borrow_mut();
-        self.memory_map
-            .free_memory_type::<DeviceLocal>(device, storage);
-        self.memory_map
-            .free_memory_type::<HostVisible>(device, storage);
-        self.memory_map
-            .free_memory_type::<HostCoherent>(device, storage);
+        self.memory_map.free_memory_type::<DeviceLocal>(context);
+        self.memory_map.free_memory_type::<HostVisible>(context);
+        self.memory_map.free_memory_type::<HostCoherent>(context);
         Ok(())
     }
 }
@@ -245,7 +239,15 @@ pub struct AllocationRequest<M: MemoryProperties> {
     _phantom: PhantomData<M>,
 }
 
-pub type AllocatorContext<'a> = (&'a Device, &'a RefCell<DropGuard<ResourceStorage>>);
+impl<M: MemoryProperties> AllocationRequest<M> {
+    #[inline]
+    pub fn new(requirements: vk::MemoryRequirements) -> Self {
+        Self {
+            requirements,
+            _phantom: PhantomData,
+        }
+    }
+}
 
 pub trait Strategy: 'static + Sized {
     type State: State;
@@ -255,13 +257,13 @@ pub trait Strategy: 'static + Sized {
         allocator: ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
         req: AllocationRequest<M>,
-    ) -> AllocatorResult<AllocationIndex<M>>;
+    ) -> ResourceResult<AllocationIndex<M>>;
 
     fn free<'a, M: MemoryProperties>(
         allocator: ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
         allocation: AllocationIndex<M>,
-    ) -> AllocatorResult<()>;
+    ) -> ResourceResult<()>;
 }
 
 impl<S: Strategy> Allocator<S> {
@@ -271,6 +273,16 @@ impl<S: Strategy> Allocator<S> {
             inner: AllocatorInner::new::<S>(config),
             _phantom: PhantomData,
         }
+    }
+
+    #[inline]
+    pub fn access<'a, M: MemoryProperties>(
+        &'a self,
+        index: AllocationIndex<M>,
+    ) -> ScopedEntryResult<'a, Allocation<M>> {
+        self.inner
+            .allocations
+            .entry(TypedIndex::<Allocation<M>>::new(index))
     }
 }
 
@@ -284,7 +296,7 @@ impl<S: Strategy> Create for Allocator<S> {
 }
 
 impl<S: Strategy> Destroy for Allocator<S> {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     #[inline]
@@ -294,12 +306,27 @@ impl<S: Strategy> Destroy for Allocator<S> {
     }
 }
 
-impl Context {
-    #[inline]
-    pub fn get_allocator_context(&self) -> AllocatorContext {
-        (&self.device, &self.storage)
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum BindResource {
+    Image(vk::Image),
+    Buffer(vk::Buffer),
+}
 
+impl From<vk::Image> for BindResource {
+    #[inline]
+    fn from(value: vk::Image) -> Self {
+        Self::Image(value)
+    }
+}
+
+impl From<vk::Buffer> for BindResource {
+    #[inline]
+    fn from(value: vk::Buffer) -> Self {
+        Self::Buffer(value)
+    }
+}
+
+impl Context {
     pub fn get_memory_type_index<M: MemoryProperties>(
         &self,
         req: &AllocationRequest<M>,
@@ -324,14 +351,81 @@ impl Context {
             })
             .ok_or(AllocatorError::UnsupportedMemoryType)
     }
+
+    // pub fn bind_resource_memory<R: Into<BindResource>, S: Strategy, M: MemoryProperties>(
+    //     &self,
+    //     resource: R,
+    //     allocation: AllocationEntry<S, M>,
+    // ) -> ResourceResult<()> {
+    //     let AllocationEntry { allocation, allocator } = allocation;
+    //     let allocator = self.
+    //     let resource = resource.into();
+    //     let memory = self
+    //         .resources
+    //         .memory
+    //         .inner(allocation.allocation.memory)
+    //         .unwrap();
+    //     match resource {
+    //         BindResource::Image(image) => unsafe {
+    //             self.device
+    //                 .bind_image_memory(image, memory.memory, memory.range.start)?;
+    //         },
+    //         BindResource::Buffer(buffer) => unsafe {
+    //             self.device
+    //                 .bind_buffer_memory(buffer, memory.memory, memory.range.start)?;
+    //         },
+    //     }
+    //     Ok(())
+    // }
 }
 
 pub type AllocatorIndex<T> = GuardIndex<Allocator<T>>;
 pub type AllocationIndex<T> = GuardIndex<Allocation<T>>;
 
+#[derive(Debug)]
 pub struct AllocationEntry<S: Strategy, M: MemoryProperties> {
     allocator: AllocatorIndex<S>,
     allocation: AllocationIndex<M>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AllocationEntryRaw {
+    allocator: TypeGuard<GenIndexRaw>,
+    allocation: TypeGuard<GenIndexRaw>,
+}
+
+impl<S: Strategy, M: MemoryProperties> From<Valid<AllocationEntry<S, M>>>
+    for AllocationEntry<S, M>
+{
+    #[inline]
+    fn from(value: Valid<AllocationEntry<S, M>>) -> Self {
+        let AllocationEntryRaw {
+            allocator,
+            allocation,
+        } = value.into_inner();
+        Self {
+            allocator: {
+                let allocator: Valid<AllocatorIndex<S>> = allocator.try_into().unwrap();
+                allocator.into()
+            },
+            allocation: {
+                let allocation: Valid<AllocationIndex<M>> = allocation.try_into().unwrap();
+                allocation.into()
+            },
+        }
+    }
+}
+
+impl<S: Strategy, M: MemoryProperties> FromGuard for AllocationEntry<S, M> {
+    type Inner = AllocationEntryRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        AllocationEntryRaw {
+            allocator: self.allocator.into_guard(),
+            allocation: self.allocation.into_guard(),
+        }
+    }
 }
 
 pub struct AllocatorStorage {
@@ -351,8 +445,7 @@ impl AllocatorStorage {
         &mut self,
         context: &'a Context,
         config: S::CreateConfig<'b>,
-    ) -> AllocatorResult<AllocatorIndex<S>> {
-        let context = context.get_allocator_context();
+    ) -> ResourceResult<AllocatorIndex<S>> {
         let allocator = Allocator::<S>::create(config, context)?;
         let index = self.allocators.push(allocator.into_guard())?;
         Ok(index)
@@ -363,8 +456,7 @@ impl AllocatorStorage {
         &mut self,
         context: &Context,
         index: AllocatorIndex<S>,
-    ) -> AllocatorResult<()> {
-        let context = context.get_allocator_context();
+    ) -> ResourceResult<()> {
         let _ = self.allocators.pop(index)?.destroy(context);
         Ok(())
     }
@@ -375,7 +467,7 @@ impl AllocatorStorage {
         context: &Context,
         index: AllocatorIndex<S>,
         req: AllocationRequest<M>,
-    ) -> AllocatorResult<AllocationEntry<S, M>> {
+    ) -> ResourceResult<AllocationEntry<S, M>> {
         let allocator = self.allocators.inner_mut(index.clone())?;
         let allocation = S::allocate(allocator, context, req)?;
         let entry = AllocationEntry {
@@ -390,23 +482,24 @@ impl AllocatorStorage {
         &mut self,
         context: &Context,
         index: AllocationEntry<S, M>,
-    ) -> AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         let allocator = self.allocators.inner_mut(index.allocator)?;
-        S::free::<M>(allocator, context, index.allocation)
+        S::free::<M>(allocator, context, index.allocation)?;
+        Ok(())
     }
-}
 
-impl Create for AllocatorStorage {
-    type Config<'a> = ();
-    type CreateError = AllocatorError;
-
-    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
-        Ok(Self::new())
-    }
+    // #[inline]
+    // pub fn access<'a, S: Strategy, M: MemoryProperties>(
+    //     &'a self,
+    //     index: AllocationEntry<S, M>,
+    // ) -> ScopedEntryResult<'a, Allocation<M>> {
+    //     let allocator: ScopedInnerRef<Allocator<S>> = self.allocators.inner_ref(index.allocator)?;
+    //     allocator.allocations.entry(index.allocation)
+    // }
 }
 
 impl Destroy for AllocatorStorage {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

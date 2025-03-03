@@ -10,10 +10,11 @@ use crate::{
         raw::resources::{memory::Memory, ResourceIndex},
         resources::buffer::ByteRange,
     },
-    error::AllocatorError,
+    error::{AllocatorError, ResourceResult},
+    Context,
 };
 
-use super::{AllocatorContext, AllocatorState, State, Strategy};
+use super::{AllocationIndex, AllocatorState, State, Strategy};
 
 pub struct LinearBuffer<M: MemoryProperties> {
     memory: ResourceIndex<Memory<M>>,
@@ -103,7 +104,7 @@ impl Create for Linear {
 }
 
 impl Destroy for Linear {
-    type Context<'a> = AllocatorContext<'a>;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     #[inline]
@@ -120,7 +121,7 @@ impl Strategy for Linear {
         allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
         context: &crate::Context,
         req: super::AllocationRequest<M>,
-    ) -> crate::error::AllocatorResult<super::AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndex<M>> {
         todo!()
     }
 
@@ -128,7 +129,7 @@ impl Strategy for Linear {
         allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
         context: &crate::Context,
         allocation: super::AllocationIndex<M>,
-    ) -> crate::error::AllocatorResult<()> {
+    ) -> ResourceResult<()> {
         todo!()
     }
 }

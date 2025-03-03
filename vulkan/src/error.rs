@@ -17,19 +17,13 @@ pub enum AllocatorError {
     InvalidConfiguration,
     UnsupportedMemoryType,
     InvalidAllocationIndex,
-    CollectionError(GuardCollectionError),
-    TypeConversion(TypeGuardConversionError),
-    ResourceError(ResourceError),
-    AllocError(AllocError),
+    LegacyAllocError(AllocError),
 }
 
 impl Display for AllocatorError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            AllocatorError::AllocError(error) => write!(f, "{}", error),
-            AllocatorError::ResourceError(error) => write!(f, "{}", error),
-            AllocatorError::CollectionError(error) => write!(f, "{}", error),
-            AllocatorError::TypeConversion(error) => write!(f, "{}", error),
+            AllocatorError::LegacyAllocError(error) => write!(f, "{}", error),
             AllocatorError::InvalidConfiguration => write!(f, "Invalid configuration"),
             AllocatorError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
             AllocatorError::InvalidAllocationIndex => write!(f, "Invalid allocation index"),
@@ -37,33 +31,9 @@ impl Display for AllocatorError {
     }
 }
 
-impl From<GenCollectionError> for AllocatorError {
-    fn from(error: GenCollectionError) -> Self {
-        AllocatorError::CollectionError(error.into())
-    }
-}
-
-impl From<GuardCollectionError> for AllocatorError {
-    fn from(error: GuardCollectionError) -> Self {
-        AllocatorError::CollectionError(error)
-    }
-}
-
-impl From<TypeGuardConversionError> for AllocatorError {
-    fn from(error: TypeGuardConversionError) -> Self {
-        AllocatorError::TypeConversion(error)
-    }
-}
-
-impl From<ResourceError> for AllocatorError {
-    fn from(error: ResourceError) -> Self {
-        AllocatorError::ResourceError(error)
-    }
-}
-
 impl From<AllocError> for AllocatorError {
     fn from(error: AllocError) -> Self {
-        AllocatorError::AllocError(error)
+        AllocatorError::LegacyAllocError(error)
     }
 }
 
@@ -72,15 +42,32 @@ impl Error for AllocatorError {}
 pub type AllocatorResult<T> = Result<T, AllocatorError>;
 
 #[derive(Debug, Clone, Copy)]
+enum CollectionError {
+    GenCollection(GenCollectionError),
+    GuardCollection(GuardCollectionError),
+}
+
+impl Display for CollectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CollectionError::GenCollection(error) => write!(f, "{}", error),
+            CollectionError::GuardCollection(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum ResourceError {
+    AllocatorError(AllocatorError),
     TypeConversion(TypeGuardConversionError),
-    CollectionError(GenCollectionError),
+    CollectionError(CollectionError),
     VkError(vk::Result),
 }
 
 impl Display for ResourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ResourceError::AllocatorError(error) => write!(f, "{}", error),
             ResourceError::TypeConversion(error) => write!(f, "{}", error),
             ResourceError::CollectionError(error) => write!(f, "{}", error),
             ResourceError::VkError(error) => write!(f, "Vulkan error: {:?}", error),
@@ -90,6 +77,12 @@ impl Display for ResourceError {
 
 impl Error for ResourceError {}
 
+impl From<AllocatorError> for ResourceError {
+    fn from(error: AllocatorError) -> Self {
+        ResourceError::AllocatorError(error)
+    }
+}
+
 impl From<TypeGuardConversionError> for ResourceError {
     fn from(error: TypeGuardConversionError) -> Self {
         ResourceError::TypeConversion(error)
@@ -98,7 +91,13 @@ impl From<TypeGuardConversionError> for ResourceError {
 
 impl From<GenCollectionError> for ResourceError {
     fn from(error: GenCollectionError) -> Self {
-        ResourceError::CollectionError(error)
+        ResourceError::CollectionError(CollectionError::GenCollection(error))
+    }
+}
+
+impl From<GuardCollectionError> for ResourceError {
+    fn from(error: GuardCollectionError) -> Self {
+        ResourceError::CollectionError(CollectionError::GuardCollection(error))
     }
 }
 
