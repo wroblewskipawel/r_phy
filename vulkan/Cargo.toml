@@ -12,5 +12,5 @@ math = { path = "../math" }
 type_kit= { path = "../type_kit" }
 strum = { version = "0.26.1", features = ["derive"] }
 png = "0.17.13"
-to_resolve = {path = "../to_resolve" }
 physics = { path = "../physics" } 
+graphics = {path = "../graphics" }

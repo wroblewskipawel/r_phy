@@ -1,22 +1,21 @@
-use std::{error::Error, result::Result};
-use to_resolve::{
+use graphics::{
     model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
     shader::Shader,
-    vulkan::VulkanRendererConfig,
 };
-use vulkan::device::{
-    memory::DefaultAllocator,
-    renderer::deferred::{DeferredRenderer, DeferredShader},
+use std::{error::Error, result::Result};
+use vulkan::{
+    context::device::{
+        memory::DefaultAllocator,
+        renderer::deferred::{DeferredRenderer, DeferredShader},
+    },
+    VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig,
 };
 use winit::{
     dpi::PhysicalSize,
     window::{WindowBuilder, WindowButtons},
 };
 
-use graphics::renderer::{
-    camera::first_person::FirstPersonCameraBuilder,
-    vulkan::{VulkanContextBuilder, VulkanRendererBuilder},
-};
+use graphics::renderer::camera::first_person::FirstPersonCameraBuilder;
 use math::{
     transform::Transform,
     types::{Matrix4, Vector3},

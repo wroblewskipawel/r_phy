@@ -10,7 +10,7 @@ use winit::{
 use math::{transform::Transform, types::Matrix4};
 use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
 
-use to_resolve::{
+use graphics::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };

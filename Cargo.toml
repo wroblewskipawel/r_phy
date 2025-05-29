@@ -9,7 +9,6 @@ members = [
     "sandbox",
     "physics",
     "vulkan",
-    "to_resolve", 
 ]
 
 [workspace.dependencies]

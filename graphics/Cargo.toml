@@ -17,8 +17,6 @@ input = { path = "../input" }
 type_kit= { path = "../type_kit" }
 physics = { path = "../physics" }
 colored = { workspace = true }
-to_resolve = { path = "../to_resolve" }
-vulkan = { path = "../vulkan" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["windef"] }

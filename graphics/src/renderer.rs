@@ -1,12 +1,11 @@
 pub mod camera;
-pub mod vulkan;
 
 use math::types::Matrix4;
 use std::error::Error;
 use type_kit::Nil;
 use winit::window::Window;
 
-use to_resolve::{
+use crate::{
     model::Drawable,
     shader::{ShaderHandle, ShaderType},
 };

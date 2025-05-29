@@ -1,300 +1,420 @@
-mod debug;
-pub mod device;
-pub mod error;
-mod surface;
-
-use ash::extensions::{ext, khr};
-use device::memory::MemoryProperties;
-use device::raw::allocator::{
-    AllocationEntry, AllocationRequest, AllocatorIndex, AllocatorStorage, Strategy,
-};
-use device::raw::resources::{
-    RawCollection, Resource, ResourceIndex, ResourceStorage, ResourceStorageList,
-};
-use error::{ResourceResult, VkError, VkResult};
-use std::cell::RefCell;
-use std::convert::Infallible;
-use std::error::Error;
-use std::ffi::{c_char, CStr};
-use std::ops::{Deref, DerefMut};
-use type_kit::{
-    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, Initialize, Marker,
-};
+pub mod context;
 
 use ash::vk;
+use context::device::memory::DefaultAllocator;
+use context::device::renderer::deferred::DeferredRenderer;
+use context::device::resources::{
+    MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
+    MeshPackListBuilder, MeshPackListPartial,
+};
+use context::device::Device;
+use context::Context;
+use math::types::Matrix4;
+use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, DropGuard, Marker, Nil};
+
+use context::device::{
+    frame::{Frame, FrameContext},
+    memory::{AllocatorCreate, StaticAllocator, StaticAllocatorConfig},
+    pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
+};
+use graphics::renderer::{
+    camera::Camera, ContextBuilder, Renderer, RendererBuilder, RendererContext,
+};
+use graphics::{
+    model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
+    shader::{ShaderHandle, ShaderType},
+};
+use std::convert::Infallible;
+use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
 use winit::window::Window;
 
-#[cfg(debug_assertions)]
-use debug::DebugUtils;
-use device::Device;
-use surface::Surface;
-
-fn check_required_extension_support(
-    entry: &ash::Entry,
-    mut extension_names: impl Iterator<Item = &'static CStr>,
-) -> VkResult<Vec<*const c_char>> {
-    let supported_extensions = entry.enumerate_instance_extension_properties(None)?;
-    let supported = extension_names.try_fold(Vec::new(), |mut supported, req| {
-        supported_extensions
-            .iter()
-            .any(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == req)
-            .then(|| {
-                supported.push(req.as_ptr());
-                supported
-            })
-            .ok_or(VkError::ExtensionNotSupported(req))
-    })?;
-    Ok(supported)
+#[derive(Debug, Clone, Copy)]
+pub struct VulkanRendererConfig {
+    pub page_size: vk::DeviceSize,
 }
 
-pub struct Instance {
-    instance: ash::Instance,
-    _entry: ash::Entry,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VulkanRendererConfigBuilder {
+    page_size: Option<vk::DeviceSize>,
 }
 
-trait InstanceExtension: Sized {
-    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self;
-}
-
-impl InstanceExtension for ext::DebugUtils {
-    #[inline]
-    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self {
-        Self::new(entry, instance)
+impl VulkanRendererConfig {
+    pub fn builder() -> VulkanRendererConfigBuilder {
+        VulkanRendererConfigBuilder::default()
     }
 }
 
-impl InstanceExtension for khr::Surface {
-    #[inline]
-    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self {
-        Self::new(entry, instance)
-    }
-}
-
-impl InstanceExtension for khr::Win32Surface {
-    #[inline]
-    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self {
-        Self::new(entry, instance)
-    }
-}
-
-impl Instance {
-    #[inline]
-    pub(crate) fn load<E: InstanceExtension>(&self) -> E {
-        E::load(&self._entry, &self.instance)
-    }
-}
-
-impl Deref for Instance {
-    type Target = ash::Instance;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.instance
-    }
-}
-
-impl DerefMut for Instance {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.instance
-    }
-}
-
-impl Create for Instance {
-    type Config<'a> = ();
-    type CreateError = VkError;
-
-    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
-        let entry = unsafe { ash::Entry::load()? };
-        let required_extensions = Surface::iterate_required_extensions();
-
-        #[cfg(debug_assertions)]
-        let required_extensions =
-            required_extensions.chain(DebugUtils::iterate_required_extensions());
-
-        let enabled_extension_names =
-            check_required_extension_support(&entry, required_extensions)?;
-        #[cfg(debug_assertions)]
-        let enabled_layer_names = DebugUtils::check_required_layer_support(&entry)?;
-
-        let application_info = vk::ApplicationInfo {
-            api_version: vk::API_VERSION_1_1,
-            ..Default::default()
+impl VulkanRendererConfigBuilder {
+    pub fn build(self) -> Result<VulkanRendererConfig, Box<dyn Error>> {
+        let config = VulkanRendererConfig {
+            page_size: self.page_size.ok_or("Page size not provided")?,
         };
+        Ok(config)
+    }
 
-        #[cfg(debug_assertions)]
-        let mut debug_messenger_info = DebugUtils::create_info();
+    pub fn with_page_size(mut self, size: usize) -> Self {
+        self.page_size = Some(size as vk::DeviceSize);
+        self
+    }
+}
 
-        let create_info = {
-            #[cfg(debug_assertions)]
-            {
-                vk::InstanceCreateInfo::builder()
-                    .push_next(&mut debug_messenger_info)
-                    .enabled_layer_names(&enabled_layer_names)
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                vk::InstanceCreateInfo::builder()
-            }
-        };
+#[derive(Debug)]
+pub struct VulkanRendererBuilder<R: Destroy>
+where
+    Rc<RefCell<DropGuard<R>>>: Frame,
+{
+    config: Option<VulkanRendererConfig>,
+    _phantom: PhantomData<R>,
+}
 
-        let create_info = create_info
-            .application_info(&application_info)
-            .enabled_extension_names(&enabled_extension_names);
-        let instance = unsafe { entry.create_instance(&create_info, None)? };
+impl<R: Destroy> VulkanRendererBuilder<R>
+where
+    Rc<RefCell<DropGuard<R>>>: Frame,
+{
+    pub fn new() -> Self {
+        Self {
+            config: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_config(mut self, config: VulkanRendererConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub fn with_renderer_type<N: Destroy>(self) -> VulkanRendererBuilder<N>
+    where
+        Rc<RefCell<DropGuard<N>>>: Frame,
+    {
+        VulkanRendererBuilder {
+            config: self.config,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<R: Destroy> RendererBuilder for VulkanRendererBuilder<R>
+where
+    Rc<RefCell<DropGuard<R>>>: Frame,
+{
+    type Renderer = VulkanRenderer;
+
+    fn build(self, window: &Window) -> Result<Self::Renderer, Box<dyn Error>> {
+        let renderer =
+            VulkanRenderer::new(window, self.config.ok_or("Configuration not provided")?)?;
+        Ok(renderer)
+    }
+}
+
+pub struct VulkanRenderer {
+    context: Rc<RefCell<Context>>,
+    renderer: Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
+    _config: VulkanRendererConfig,
+}
+
+impl Drop for VulkanRenderer {
+    fn drop(&mut self) {
+        let context = self.context.borrow();
+        let _ = context.wait_idle();
+        let mut renderer = self.renderer.borrow_mut();
+        let _ = renderer.destroy((&*context, &mut DefaultAllocator {}));
+    }
+}
+
+pub struct VulkanResourcePack<
+    R: Frame,
+    M: MaterialPackList<StaticAllocator>,
+    V: MeshPackList<StaticAllocator>,
+    S: GraphicsPipelinePackList,
+> {
+    materials: M,
+    meshes: V,
+    renderer_context: R::Context<S>,
+    allocator: StaticAllocator,
+}
+
+impl<
+        R: Frame,
+        M: MaterialPackList<StaticAllocator>,
+        V: MeshPackList<StaticAllocator>,
+        S: GraphicsPipelinePackList,
+    > VulkanResourcePack<R, M, V, S>
+{
+    fn load(
+        context: &mut Context,
+        renderer: &R,
+        materials: &impl MaterialPackListBuilder<Pack<StaticAllocator> = M>,
+        meshes: &impl MeshPackListBuilder<Pack<StaticAllocator> = V>,
+        pipelines: &impl GraphicsPipelineListBuilder<Pack = S>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut config = StaticAllocatorConfig::create(&context);
+        let meshes = meshes.prepare(&context)?;
+        meshes
+            .get_memory_requirements()
+            .into_iter()
+            .for_each(|req| config.add_allocation(req));
+        let materials = materials.prepare(&context)?;
+        materials
+            .get_memory_requirements()
+            .into_iter()
+            .for_each(|req| config.add_allocation(req));
+        let mut allocator = StaticAllocator::create(&context, &config)?;
+        let materials = materials.allocate(&context, &mut allocator)?;
+        let meshes = meshes.allocate(&context, &mut allocator)?;
+        let renderer_context = renderer.load_context(&context, pipelines)?;
         Ok(Self {
-            instance,
-            _entry: entry,
+            materials,
+            meshes,
+            renderer_context,
+            allocator,
         })
     }
 }
 
-impl Destroy for Instance {
-    type Context<'a> = ();
+impl<
+        R: Frame,
+        M: MaterialPackList<StaticAllocator>,
+        V: MeshPackList<StaticAllocator>,
+        S: GraphicsPipelinePackList,
+    > Destroy for VulkanResourcePack<R, M, V, S>
+{
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
-    #[inline]
-    fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
-        unsafe {
-            self.instance.destroy_instance(None);
-        }
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let device: &Device = &*context;
+        let cell_allocator = RefCell::new(&mut self.allocator);
+        let destroy_context = (device, &cell_allocator);
+        let _ = self.materials.destroy(destroy_context);
+        let _ = self.meshes.destroy(destroy_context);
+        let _ = self.renderer_context.destroy(context);
+        self.allocator.destroy(context);
         Ok(())
     }
 }
 
-pub struct Context {
-    allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
-    storage: Box<RefCell<DropGuard<ResourceStorage>>>,
-    device: DropGuard<Device>,
-    surface: DropGuard<Surface>,
-    #[cfg(debug_assertions)]
-    debug_utils: DropGuard<DebugUtils>,
-    instance: DropGuard<Instance>,
+pub struct VulkanRendererContext<
+    R: Frame,
+    M: MaterialPackList<StaticAllocator>,
+    V: MeshPackList<StaticAllocator>,
+    S: GraphicsPipelinePackList,
+> {
+    context: Rc<RefCell<Context>>,
+    resources: VulkanResourcePack<R, M, V, S>,
 }
 
-trait DeviceExtension: Sized {
-    fn load(instance: &ash::Instance, device: &ash::Device) -> Self;
-}
-
-impl DeviceExtension for khr::Swapchain {
-    #[inline]
-    fn load(instance: &ash::Instance, device: &ash::Device) -> Self {
-        Self::new(instance, device)
-    }
-}
-
-impl Context {
-    pub fn build(window: &Window) -> Result<Self, Box<dyn Error>> {
-        let instance = Instance::initialize(())?;
-        #[cfg(debug_assertions)]
-        let debug_utils = DebugUtils::create((), &instance)?;
-        let surface = Surface::create(window, &instance)?;
-        let device = Device::create(&surface, &instance)?;
-        let allocators = Box::new(RefCell::new(DropGuard::new(AllocatorStorage::new())));
-        let storage = Box::new(RefCell::new(DropGuard::new(ResourceStorage::new())));
+impl VulkanRenderer {
+    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
+        let context = Context::build(window)?;
+        let renderer = DeferredRenderer::create((), (&context, &mut DefaultAllocator {}))?;
         Ok(Self {
-            allocators,
-            storage,
-            device: DropGuard::new(device),
-            surface: DropGuard::new(surface),
-            #[cfg(debug_assertions)]
-            debug_utils: DropGuard::new(debug_utils),
-            instance: DropGuard::new(instance),
+            context: Rc::new(RefCell::new(context)),
+            renderer: Rc::new(RefCell::new(DropGuard::new(renderer))),
+            _config: config,
         })
     }
-
-    #[inline]
-    pub(crate) fn load<E: DeviceExtension>(&self) -> E {
-        E::load(&self.instance, &self.device)
-    }
 }
 
-impl Drop for Context {
+impl<
+        R: Frame,
+        M: MaterialPackList<StaticAllocator>,
+        V: MeshPackList<StaticAllocator>,
+        S: GraphicsPipelinePackList,
+    > Drop for VulkanRendererContext<R, M, V, S>
+{
     fn drop(&mut self) {
-        let _ = self.device.wait_idle();
-        let _ = self.storage.borrow_mut().destroy(&self);
-        let _ = self.allocators.borrow_mut().destroy(&self);
-        let _ = self.device.destroy(&self.instance);
-        let _ = self.surface.destroy(&self.instance);
-        #[cfg(debug_assertions)]
-        let _ = self.debug_utils.destroy(&self.instance);
-        let _ = self.instance.finalize();
+        let context = self.context.borrow();
+        let _ = self.context.borrow().wait_idle();
+        let _ = self.resources.destroy(&*context);
     }
 }
 
-impl Deref for Context {
-    type Target = Device;
+impl Renderer for VulkanRenderer {}
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.device
+#[derive(Debug)]
+pub struct VulkanContextBuilder<
+    R: Frame,
+    S: GraphicsPipelineListBuilder,
+    M: MaterialPackListBuilder,
+    V: MeshPackListBuilder,
+> {
+    shaders: S,
+    materials: M,
+    meshes: V,
+    _phantom: PhantomData<R>,
+}
+
+impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackListBuilder>
+    ContextBuilder
+    for VulkanContextBuilder<Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>, S, M, V>
+{
+    type Renderer = VulkanRenderer;
+    type Context = VulkanRendererContext<
+        Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
+        M::Pack<StaticAllocator>,
+        V::Pack<StaticAllocator>,
+        S::Pack,
+    >;
+
+    fn build(self, renderer: &Self::Renderer) -> Result<Self::Context, Box<dyn Error>> {
+        let mut context = renderer.context.borrow_mut();
+        let resources = VulkanResourcePack::load(
+            &mut context,
+            &renderer.renderer,
+            &self.materials,
+            &self.meshes,
+            &self.shaders,
+        )?;
+        Ok(VulkanRendererContext {
+            context: renderer.context.clone(),
+            resources,
+        })
     }
 }
 
-impl DerefMut for Context {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.device
+impl Default
+    for VulkanContextBuilder<
+        Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>,
+        Nil,
+        Nil,
+        Nil,
+    >
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl Context {
-    #[inline]
-    pub fn create_resource<'a, R: Resource, M: Marker>(
-        &self,
-        config: R::Config<'a>,
-    ) -> ResourceResult<ResourceIndex<R>>
+impl
+    VulkanContextBuilder<Rc<RefCell<DropGuard<DeferredRenderer<DefaultAllocator>>>>, Nil, Nil, Nil>
+{
+    pub fn new() -> Self {
+        VulkanContextBuilder {
+            shaders: Nil::new(),
+            materials: Nil::new(),
+            meshes: Nil::new(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+fn push_and_get_index<V>(vec: &mut Vec<V>, value: V) -> u32 {
+    let index = vec.len();
+    vec.push(value);
+    index.try_into().unwrap()
+}
+
+impl<
+        R: Frame,
+        S: GraphicsPipelineListBuilder,
+        M: MaterialPackListBuilder,
+        V: MeshPackListBuilder,
+    > VulkanContextBuilder<R, S, M, V>
+{
+    pub fn with_material_type<N: Material>(self) -> VulkanContextBuilder<R, S, Cons<Vec<N>, M>, V> {
+        VulkanContextBuilder {
+            materials: Cons {
+                head: vec![],
+                tail: self.materials,
+            },
+            meshes: self.meshes,
+            shaders: self.shaders,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_mesh_type<N: Vertex>(self) -> VulkanContextBuilder<R, S, M, Cons<Vec<Mesh<N>>, V>> {
+        VulkanContextBuilder {
+            meshes: Cons {
+                head: vec![],
+                tail: self.meshes,
+            },
+            materials: self.materials,
+            shaders: self.shaders,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_shader_type<N: ShaderType + Into<R::Shader<N>>>(
+        self,
+    ) -> VulkanContextBuilder<R, Cons<Vec<R::Shader<N>>, S>, M, V> {
+        VulkanContextBuilder {
+            shaders: Cons {
+                head: vec![],
+                tail: self.shaders,
+            },
+            materials: self.materials,
+            meshes: self.meshes,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandle<N>
     where
-        ResourceStorageList: Contains<RawCollection<R>, M>,
+        M: Contains<Vec<N>, T>,
     {
-        self.storage.borrow_mut().create_resource(&self, config)
+        MaterialHandle::new(push_and_get_index(self.materials.get_mut(), material))
     }
 
-    #[inline]
-    pub fn destroy_resource<'a, R: Resource, M: Marker>(
-        &self,
-        index: ResourceIndex<R>,
-    ) -> ResourceResult<()>
+    pub fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandle<N>
     where
-        ResourceStorageList: Contains<RawCollection<R>, M>,
+        V: Contains<Vec<Mesh<N>>, T>,
     {
-        ResourceStorage::destroy_resource(&mut *self.storage.borrow_mut(), &self, index)
+        MeshHandle::new(push_and_get_index(self.meshes.get_mut(), mesh))
     }
 
-    #[inline]
-    pub fn create_allocator<'a, S: Strategy>(
-        &self,
-        config: S::CreateConfig<'a>,
-    ) -> ResourceResult<AllocatorIndex<S>> {
-        self.allocators
-            .borrow_mut()
-            .create_allocator::<S>(self, config)
+    pub fn add_shader<N: ShaderType + Into<R::Shader<N>>, T: Marker>(
+        &mut self,
+        shader: N,
+    ) -> ShaderHandle<N>
+    where
+        S: Contains<Vec<R::Shader<N>>, T>,
+    {
+        ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
+    }
+}
+
+impl<
+        R: Frame,
+        M: MaterialPackList<StaticAllocator> + 'static,
+        V: MeshPackList<StaticAllocator> + 'static,
+        S: GraphicsPipelinePackList + 'static,
+    > RendererContext for VulkanRendererContext<R, M, V, S>
+{
+    type Renderer = VulkanRenderer;
+    type Shaders = S;
+    type Materials = M;
+    type Meshes = V;
+
+    fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
+        let context = self.context.borrow();
+        let camera_matrices = camera.get_matrices();
+        self.resources
+            .renderer_context
+            .begin_frame(&context, &camera_matrices)?;
+        Ok(())
     }
 
-    #[inline]
-    pub fn destroy_allocator<'a, S: Strategy>(
-        &self,
-        index: AllocatorIndex<S>,
-    ) -> ResourceResult<()> {
-        self.allocators
-            .borrow_mut()
-            .destroy_allocator::<S>(self, index)
+    fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        let context = self.context.borrow();
+        self.resources.renderer_context.end_frame(&context)?;
+        Ok(())
     }
 
-    #[inline]
-    pub fn allocate<P: MemoryProperties, S: Strategy>(
-        &self,
-        index: AllocatorIndex<S>,
-        req: AllocationRequest<P>,
-    ) -> ResourceResult<AllocationEntry<S, P>> {
-        self.allocators.borrow_mut().allocate(self, index, req)
-    }
-
-    #[inline]
-    pub fn free<P: MemoryProperties, S: Strategy>(
-        &self,
-        index: AllocationEntry<S, P>,
-    ) -> ResourceResult<()> {
-        self.allocators.borrow_mut().free(self, index)
+    fn draw<T: ShaderType, D: Drawable<Material = T::Material, Vertex = T::Vertex>>(
+        &mut self,
+        shader: ShaderHandle<T>,
+        drawable: &D,
+        transform: &Matrix4,
+    ) -> Result<(), Box<dyn Error>> {
+        self.resources.renderer_context.draw(
+            shader,
+            drawable,
+            transform,
+            &self.resources.materials,
+            &self.resources.meshes,
+        );
+        Ok(())
     }
 }
