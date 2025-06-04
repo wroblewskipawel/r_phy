@@ -12,7 +12,7 @@ Currently implemented:
     * integration with TypeList - GenerationalVector type lists with support of multiple items borrow by indexing with lists of item handles
     * integration with type guard and drop guard patterns for safe interoperation with stored objects
 * `graphics` - collection of common types and frontend interface definition for renderer implementation
-* `vulkan` - Vulkan renderer implementation leveraging
+* `vulkan` - Vulkan renderer implementation
   * simple deferred rendering pipeline implementation
   * leveraging type lists for enabling compile time type safety for low level Vulkan objects
 
